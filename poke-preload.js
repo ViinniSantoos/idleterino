@@ -11,6 +11,9 @@ contextBridge.executeInMainWorld({
     if (!/(^|\.)pokeidle\.io$/.test(location.hostname)) return;
     const Native = window.WebSocket;
     const keep = {};
+    // Blocos "twitch" e "kick" do estado do jogador: a lista oficial de canais e os bônus ativos.
+    // O estado chega em pedaços, mas cada chave de cima chega inteira quando muda.
+    const canais = {};
     let sock = null;
     const ABAS = { meus: 1, historico: 1, historicoGlobal: 1 };
     // Respostas dos nossos pedidos de histórico levam este `seq`: o jogo descarta (não repinta a
@@ -23,6 +26,23 @@ contextBridge.executeInMainWorld({
           sock = ws;
           ws.addEventListener('message', (e) => {
             const d = e.data;
+            if (typeof d === 'string' && d.indexOf('"oficiais"') >= 0 && (d.indexOf('"welcome"') >= 0 || d.indexOf('"estado"') >= 0)) {
+              try {
+                const m = JSON.parse(d);
+                const est = m && m.estado;
+                for (const k of ['twitch', 'kick']) {
+                  const b = est && est[k];
+                  if (!b || !Array.isArray(b.oficiais)) continue;
+                  canais[k] = {
+                    at: Date.now(),
+                    oficiais: b.oficiais.map((x) => ({ id: String(x.login || x.slug || '').toLowerCase(), nome: x.nome || '', ativo: !!x.ativo })).filter((x) => x.id),
+                    recompensas: Array.isArray(b.recompensas) ? b.recompensas.map((r) => ({ tipo: r.tipo, custo: r.custo })) : [],
+                    bonus: b.bonus && typeof b.bonus === 'object' ? { ...b.bonus } : {},
+                    pct: b.pct, minutos: b.minutos,
+                  };
+                }
+              } catch {}
+            }
             if (typeof d !== 'string' || d.indexOf('"market"') < 0) return;
             try {
               const m = JSON.parse(d);
@@ -52,6 +72,7 @@ contextBridge.executeInMainWorld({
           return true;
         },
         ler() { return JSON.parse(JSON.stringify(keep)); },
+        canais() { return JSON.parse(JSON.stringify(canais)); },
       }),
     });
   },

@@ -19,8 +19,8 @@ const P = {
   kick: {
     name: 'Kick', letter: 'K', login: 'Entrar com a Kick',
     emote: (id) => `https://files.kick.com/emotes/${id}/fullsize`,
-    bonusKey: (b) => b.cost,
-    targets: () => [['0', 'Bônus automático'], ['300', '+15% XP — 300 pts'], ['500', '+15% Capture Boost — 500 pts'], ['1000', '+15% Secret Lure — 1.000 pts']],
+    bonusKey: (b) => b.kind,
+    targets: (s) => [['', 'Bônus automático'], ...(s.bonusOptions || []).map((o) => [o.value, `${o.kind === 'xp' ? 'XP' : o.kind === 'capture' ? 'Capture Boost' : 'Secret Lure'} · ${o.hours} h — ${fmt(o.cost)} pts`])],
     rate: 2, hasChest: false, firstCount: 7,
   },
 };
@@ -136,9 +136,9 @@ function renderPlatform(ns) {
   farm.append(cb, el('span', 'ui'), el('span', null, 'Juntar pontos'));
   const target = el('select');
   for (const [v, l] of P[ns].targets(s)) { const o = el('option', null, l); o.value = v; target.append(o); }
-  target.value = String(s.bonusTarget || (ns === 'kick' ? 0 : ''));
+  target.value = String(s.bonusTarget || '');
   target.title = 'Bônus que o foco busca: as lives vão para os canais mais perto do preço dele';
-  target.onchange = async () => apply(ns, await call(`${ns}:bonusTarget:set`, ns === 'kick' ? Number(target.value) : target.value));
+  target.onchange = async () => apply(ns, await call(`${ns}:bonusTarget:set`, target.value));
   const live = s.channels.filter((c) => c.live).length;
   const watching = s.channels.filter((c) => c.watching).length;
   const chipW = el('span', 'chip'); chipW.append(el('b', null, `${watching}/${live}`), 'assistindo');
@@ -321,7 +321,7 @@ function sideCol(ns, s) {
   }
 
   // 2) Próximos bônus: quem já dá para comprar e quem está chegando.
-  const costOf = (c) => (ns === 'twitch' ? (s.bonusTarget ? c.targetCost : Math.min(c.costs.xp, c.costs.capture, c.costs.lure)) : (s.bonusTarget || 300));
+  const costOf = (c) => (ns === 'twitch' ? (s.bonusTarget ? c.targetCost : Math.min(c.costs.xp, c.costs.capture, c.costs.lure)) : (s.targetCost || 300));
   const withPts = s.channels.filter((c) => c.points != null && (ns !== 'twitch' || c.hasBonus));
   const ready = withPts.filter((c) => c.points >= costOf(c)).sort((x, y) => y.points - x.points);
   const coming = withPts.filter((c) => c.watching && c.points < costOf(c) && c.earning !== 'idle')

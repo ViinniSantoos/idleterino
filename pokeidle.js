@@ -67,6 +67,7 @@ const READ_SCRIPT = `(() => {
     sess: (() => { try { const n = txt('#tr-nick'); const o = n && JSON.parse(localStorage.getItem('sessao-hunt:' + n.toLowerCase()) || 'null');
       return o && o.ms > 0 ? { ms: o.ms, xpTreinador: +o.xpTreinador || 0, xpPokemon: +o.xpPokemon || 0, gold: +o.gold || 0, abates: +o.abates || 0, capturas: +o.capturas || 0, lucroH: txt('#sessao-lucro-h') } : null; } catch { return null; } })(),
     evento: (() => { const f = q('#evento-faixa'); return f && !f.classList.contains('hidden') ? { texto: txt('#evento-texto'), tempo: txt('#evento-tempo') } : null; })(),
+    canais: (() => { try { return window.__idleterinoMercado ? window.__idleterinoMercado.canais() : null; } catch { return null; } })(),
     mercado: (() => { try { const r = window.__idleterinoMercado && window.__idleterinoMercado.ler(); if (!r) return null;
       const out = {};
       if (r.meus) out.meus = { at: r.meus.at, linhas: (r.meus.m.linhas || []).slice(0, 40).map((a) => ({ id: a.id, tipo: a.tipo, nome: (a.ficha && (a.ficha.nome || (a.ficha.casaId ? 'Casa' : a.ficha.caixaId ? 'Caixa' : ''))) || a.nome || '—', level: a.ficha && a.ficha.level, shiny: !!(a.ficha && a.ficha.shiny), qtd: a.qtd || 1, preco: a.preco, moeda: a.moeda, retidoAte: a.compravelEm || 0, favoritos: a.favoritos })) };
@@ -209,7 +210,12 @@ module.exports = function createPokeIdle(ctx) {
     const acc = account(id);
     if (!v || v.webContents.isDestroyed() || !acc || !isPokeIdle(urlOf(acc))) return;
     const r = await v.webContents.executeJavaScript(READ_SCRIPT).catch(() => null);
-    if (r) { info.set(id, { ...r, at: Date.now() }); send('status', snapshot()); }
+    if (r) {
+      const canais = r.canais; delete r.canais;
+      info.set(id, { ...r, at: Date.now() });
+      if (canais && ctx.onOfficial) { try { ctx.onOfficial(canais, id); } catch {} }
+      send('status', snapshot());
+    }
   }
   async function readAll() { for (const id of views.keys()) await readOne(id); autoFreeze(); }
 

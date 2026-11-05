@@ -95,8 +95,24 @@ window.HELP = [
     'Vai vender ou emprestar o PC? Em Ajustes, use "Apagar todos os logins deste PC".',
   ]],
   ['App', 'Como atualizo o Idleterino?', [
-    'Instalado: a atualização chega sozinha. Para pegar na hora, clique com o botão direito no ícone perto do relógio > Sair, e abra de novo.',
-    'Versão portátil e .deb (Linux): baixe de novo no site.',
+    'Quando sai versão nova, aparece uma faixa no topo do Início. Ela baixa sozinha e, quando termina, mostra o botão "Atualizar agora": um clique e o app fecha, instala e abre de novo.',
+    'Também dá pelo ícone perto do relógio: botão direito > "Atualizar agora".',
+    'Na versão 0.1.6 ou antes (sem a faixa): botão direito no ícone perto do relógio > Sair, e abra de novo.',
+    'Versão portátil e .deb (Linux): a faixa avisa e o botão "Baixar no site" abre a página de download.',
+  ]],
+  ['Início', 'O que aparece no Início?', [
+    'Lembretes: evento do jogo, voto no TopIdle liberado (a cada 25h, por conta) e bônus da Twitch/Kick acabando.',
+    'Farm: a conta principal num cartão e as ALTs somadas, com XP, ouro e abates por hora (o mesmo placar "Estatísticas da sessão" do jogo).',
+    'Mercado: seus anúncios e suas vendas de todas as contas, e as maiores vendas do servidor (Tabela de preços), em coins ou gemas. Atualiza sozinho a cada 10 min.',
+    'O app só consulta o mercado, pela conexão que a conta já tem aberta. Nunca compra, vende ou edita nada.',
+  ]],
+  ['Twitch e Kick', 'Entrou streamer novo no PokeIdle. Preciso adicionar?', [
+    'Não. O app lê a lista oficial de canais que o próprio jogo mostra (Bônus Twitch e Bônus na Kick) e adiciona sozinho os canais novos com "Pontos ativos".',
+    'Canal que você removeu da lista não volta sozinho.',
+  ]],
+  ['Twitch e Kick', 'A loja da Kick agora tem bônus de 3h, 5h e 10h. O app entende?', [
+    'Sim. Em Kick, o seletor de bônus tem os 12 pacotes (XP, Capture Boost e Secret Lure em 1, 3, 5 e 10 h), igual à Twitch.',
+    'O cronômetro da Kick usa o tempo que o próprio jogo mostra quando uma conta do PokeIdle está aberta no app.',
   ]],
   ['App', 'Fechei a janela e o app continuou rodando?', [
     'Sim, de propósito: ele fica na bandeja, perto do relógio, juntando pontos e com as contas conectadas.',

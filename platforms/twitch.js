@@ -1357,13 +1357,26 @@ function stop() {
   if (awakeBlocker != null) { powerSaveBlocker.stop(awakeBlocker); awakeBlocker = null; }
   status.clear();
 }
+// Canais oficiais que o próprio jogo mostra (Bônus Twitch), lidos pelas contas do PokeIdle.
+// Canal novo com "pontos ativos" entra sozinho; canal que a pessoa tirou não volta (fica em seenDefaults).
+function syncOfficial(list) {
+  const ids = [...new Set((list || []).filter((o) => o && o.ativo).map((o) => String(o.id).toLowerCase()).filter((x) => LOGIN_RE.test(x)))].slice(0, 80);
+  if (!ids.length) return [];
+  const seen = new Set(config.seenDefaults || []);
+  const fresh = ids.filter((x) => !seen.has(x) && !config.channels.includes(x));
+  if (!fresh.length && ids.every((x) => seen.has(x))) return [];
+  config.seenDefaults = [...new Set([...seen, ...ids])];
+  if (fresh.length) { config.channels.push(...fresh); if (started) { syncChat(); poll(); } send('status', snapshot()); }
+  saveConfig();
+  return fresh;
+}
 // Resumo para a bandeja e para a tela Início.
 function trayInfo() {
   const now = Date.now();
   return { started, loggedIn, watching: watchers.size, gained: sumGained(), bonuses: activeBonuses(now) };
 }
 return {
-  ns: 'twitch', start, stop, snapshot, trayInfo, recoverAfterResume,
+  ns: 'twitch', start, stop, snapshot, trayInfo, recoverAfterResume, syncOfficial,
   loadConfig, setupSession, setMain: (w) => { mainWin = w; }, get started() { return started; },
 };
 };

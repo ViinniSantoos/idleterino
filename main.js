@@ -159,6 +159,16 @@ const modules = {
   twitch: require('./platforms/twitch')(ctx),
   kick: require('./platforms/kick')(ctx),
 };
+// Lista oficial de canais vinda do jogo: novos canais entram sozinhos na Twitch e na Kick.
+ctx.onOfficial = (canais, accountId) => {
+  if (canais && canais.kick && modules.kick.setGameBonus) modules.kick.setGameBonus(accountId, canais.kick.bonus);
+  for (const ns of ['twitch', 'kick']) {
+    const b = canais && canais[ns];
+    if (!b || !modules[ns]) continue;
+    const fresh = modules[ns].syncOfficial(b.oficiais);
+    if (fresh.length) send('twitch:toast', `${fresh.length === 1 ? 'Novo canal oficial' : 'Novos canais oficiais'} na ${ns === 'twitch' ? 'Twitch' : 'Kick'}: ${fresh.join(', ')}`);
+  }
+};
 const poke = require('./pokeidle')(ctx);
 // Extensões: só nas sessões das contas do PokeIdle.
 ctx.mainWin = () => mainWin;

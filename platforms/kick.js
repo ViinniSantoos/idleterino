@@ -34,13 +34,13 @@ const DEFAULT_CONFIG = {
   maxWatchers: 2,
   lowQuality: true,
   rotation: true,
-  bonusTarget: 0, // 0 = automático (300, 500, 1.000); ou o custo do único bônus que a pessoa quer
+  bonusTarget: '', // '' = automático; ou um pacote da loja: 'xp:1', 'capture:3', 'lure:10'…
   notifyBonus: true,
   notifyChat: true,  // menções ao seu nome e sorteios no chat
   sleepMode: false,  // "antes de dormir": só aparece para quem ligar
   favorites: [],
   gainDisplay: 'watching', // "+X" ao lado do saldo: 'watching' (só nas lives tocando), 'always' ou 'never'
-  purchases: [],     // bônus comprados: { t, cost, slug } (cronômetro e relatório)
+  purchases: [],     // bônus comprados: { t, kind, hours, cost, slug } (cronômetro e relatório)
   daily: {},         // pontos ganhos por dia: { 'AAAA-MM-DD': pts }
 };
 let config = { ...DEFAULT_CONFIG };
@@ -55,6 +55,9 @@ function loadConfig() {
     if (!seen.has(slug) && !config.channels.includes(slug)) config.channels.push(slug);
   }
   config.seenDefaults = [...new Set([...seen, ...DEFAULT_CONFIG.channels])];
+  // Loja antiga (só 1 h): o alvo era o custo (300/500/1000) e as compras não tinham o tipo.
+  if (typeof config.bonusTarget === 'number') config.bonusTarget = config.bonusTarget ? `${(KIND_BY_COST[config.bonusTarget] || 'xp')}:1` : '';
+  for (const p of config.purchases || []) if (!p.kind) { p.kind = KIND_BY_COST[p.cost] || 'xp'; p.hours = p.hours || 1; }
   // v2: instalações antigas vinham com 20 lives; passa para o padrão novo (2 + rodízio) uma vez.
   if ((config.configVersion || 1) < 2) {
     config.maxWatchers = DEFAULT_CONFIG.maxWatchers;
@@ -352,6 +355,37 @@ function stopWatcher(slug) {
 const BONUSES = [
   { cost: 300, name: '+15% XP' }, { cost: 500, name: '+15% Capture Boost' }, { cost: 1000, name: '+15% Secret Lure' },
 ];
+// Loja da Kick (nov/2026): igual à da Twitch, cada bônus em 1 h, 3 h, 5 h e 10 h, pelo preço de 1 h
+// vezes as horas (XP 300/h, Capture Boost 500/h, Secret Lure 1.000/h).
+const KINDS = [
+  { kind: 'xp', name: '+15% XP', per: 300, game: 'xp' },
+  { kind: 'capture', name: '+15% Capture Boost', per: 500, game: 'captura' },
+  { kind: 'lure', name: '+15% Secret Lure', per: 1000, game: 'shiny' },
+];
+const KIND = Object.fromEntries(KINDS.map((k) => [k.kind, k]));
+const KIND_BY_COST = { 300: 'xp', 500: 'capture', 1000: 'lure' };
+const HOURS = [1, 3, 5, 10];
+const PACKS = KINDS.flatMap((k) => HOURS.map((hours) => ({ kind: k.kind, hours, cost: k.per * hours })));
+function parseTarget(t = config.bonusTarget) {
+  const m = /^(xp|capture|lure):(\d+)$/.exec(String(t || ''));
+  return m && HOURS.includes(Number(m[2])) ? { kind: m[1], hours: Number(m[2]) } : null;
+}
+const targetCost = (t = parseTarget()) => (t ? KIND[t.kind].per * t.hours : null);
+const targetName = (t) => `${KIND[t.kind].name}${t.hours > 1 ? ` (${t.hours} h)` : ''}`;
+const bonusOptions = () => PACKS.map((p) => ({ value: `${p.kind}:${p.hours}`, kind: p.kind, hours: p.hours, cost: p.cost }));
+
+// Tempo de bônus que o PRÓPRIO JOGO mostra em cada conta do PokeIdle (é o que vale de verdade).
+// Cada conta manda o seu; vale o maior de cada tipo, entre leituras dos últimos 10 min.
+const gameBonus = new Map(); // id da conta -> { at, bonus: { xp, captura, shiny } }
+function setGameBonus(id, bonus) {
+  if (!bonus || typeof bonus !== 'object') return;
+  gameBonus.set(id, { at: Date.now(), bonus });
+}
+function gameEnd(kind, now = Date.now()) {
+  let end = 0;
+  for (const g of gameBonus.values()) if (now - g.at < 10 * 60 * 1000) end = Math.max(end, Number(g.bonus[KIND[kind].game]) || 0);
+  return end > now ? end : null;
+}
 const liveNotifications = new Set(); // sem referência, o Windows perde o clique na notificação
 
 function notify(title, body, onClick) {
@@ -364,9 +398,19 @@ function notify(title, body, onClick) {
 }
 
 function checkBonus(slug, s) {
+  const target = parseTarget();
+  if (target) {
+    const cost = targetCost(target);
+    const n = Math.floor((s.points || 0) / cost);
+    if (s.targetTier != null && n > s.targetTier && config.notifyBonus) {
+      notify(`${s.displayName || slug}: ${s.points} pontos`, `Já dá para resgatar ${targetName(target)} (${cost} pts). Clique para abrir a loja.`, () => openStore(slug));
+    }
+    s.targetTier = n; s.bonusTier = null;
+    return;
+  }
+  s.targetTier = null;
   const tier = BONUSES.filter((b) => s.points >= b.cost).length;
-  const wanted = !config.bonusTarget || (tier && BONUSES[tier - 1].cost === config.bonusTarget);
-  if (s.bonusTier != null && tier > s.bonusTier && config.notifyBonus && wanted) {
+  if (s.bonusTier != null && tier > s.bonusTier && config.notifyBonus) {
     notify(`${s.displayName || slug}: ${s.points} pontos`, `Já dá para resgatar ${BONUSES[tier - 1].name}. Clique para abrir a loja.`, () => openStore(slug));
   }
   s.bonusTier = tier;
@@ -389,40 +433,50 @@ function addDaily(n) {
   configDirty = true;
 }
 
+// A menor combinação de pacotes que explica a queda. Preço repetido (1.500 = XP 5 h ou Capture 3 h;
+// 3.000 = XP 10 h ou Lure 3 h; 5.000 = Capture 10 h ou Lure 5 h): vale o bônus escolhido em "Bônus";
+// e o tempo que o jogo mostra corrige o resto (gameEnd).
 function matchPurchase(drop) {
+  const want = parseTarget();
+  const score = (list) => list.length * 10 - list.filter((p) => want && p.kind === want.kind).length;
   let best = null;
-  for (let c = 0; c <= 6; c++) for (let b = 0; b <= 6; b++) for (let a = 0; a <= 6; a++) {
-    const n = a + b + c, sum = 300 * a + 500 * b + 1000 * c;
-    if (!n || sum < drop || sum > drop + 25 || (best && n >= best.length)) continue;
-    best = [...Array(c).fill(1000), ...Array(b).fill(500), ...Array(a).fill(300)];
-  }
+  const walk = (start, picked, sum) => {
+    if (picked.length && sum >= drop && sum <= drop + 25) { if (!best || score(picked) < score(best)) best = picked; return; }
+    if (picked.length >= 4 || sum > drop + 25) return;
+    for (let i = start; i < PACKS.length; i++) walk(i, [...picked, PACKS[i]], sum + PACKS[i].cost);
+  };
+  walk(0, [], 0);
   return best || [];
 }
 
 function registerPurchases(slug, drop) {
   const now = Date.now();
-  matchPurchase(drop).forEach((cost, i) => config.purchases.push({ t: now + i, cost, slug }));
+  matchPurchase(drop).forEach((p, i) => config.purchases.push({ t: now + i, kind: p.kind, hours: p.hours, cost: p.cost, slug }));
   config.purchases = config.purchases.filter((p) => now - p.t < KEEP_PURCHASES_MS);
   configDirty = true;
 }
 
 // Fim de cada bônus, somando as horas na ordem das compras.
 function bonusIntervals(purchases = config.purchases) {
-  const byCost = {};
+  const byKind = {};
   for (const p of [...purchases].sort((a, b) => a.t - b.t)) {
-    const list = byCost[p.cost] || (byCost[p.cost] = []);
+    const kind = p.kind || KIND_BY_COST[p.cost] || 'xp';
+    const list = byKind[kind] || (byKind[kind] = []);
     const last = list[list.length - 1];
-    if (last && last.end >= p.t) last.end += BONUS_MS;
-    else list.push({ start: p.t, end: p.t + BONUS_MS });
+    const dur = (p.hours || 1) * BONUS_MS;
+    if (last && last.end >= p.t) last.end += dur;
+    else list.push({ start: p.t, end: p.t + dur });
   }
-  return byCost;
+  return byKind;
 }
 
 function activeBonuses(now = Date.now()) {
-  const byCost = bonusIntervals();
-  return BONUSES.map((b) => {
-    const cur = (byCost[b.cost] || []).find((i) => i.start <= now && i.end > now);
-    return { cost: b.cost, name: b.name, endsAt: cur ? cur.end : null };
+  const byKind = bonusIntervals();
+  return KINDS.map((k) => {
+    const cur = (byKind[k.kind] || []).find((i) => i.start <= now && i.end > now);
+    const game = gameEnd(k.kind, now);
+    // O jogo sabe o tempo certo; sem conta do PokeIdle aberta, vale a conta do app.
+    return { kind: k.kind, cost: k.per, name: k.name, endsAt: game || (cur ? cur.end : null), fromGame: !!game };
   });
 }
 
@@ -452,7 +506,7 @@ function weeklyReport(now = Date.now()) {
     const t = now - i * DAY_MS, k = dayKey(t);
     const bought = config.purchases.filter((p) => dayKey(p.t) === k);
     days.push({ day: k, weekday: new Date(t).toLocaleDateString('pt-BR', { weekday: 'short' }), gained: config.daily[k] || 0,
-      bought: BONUSES.map((b) => bought.filter((p) => p.cost === b.cost).length) });
+      bought: KINDS.map((k) => bought.filter((p) => (p.kind || KIND_BY_COST[p.cost]) === k.kind).reduce((h, p) => h + (p.hours || 1), 0)) });
   }
   // Minuto a minuto: há algum bônus ativo? (qualquer um dos três)
   const all = Object.values(bonusIntervals()).flat();
@@ -473,7 +527,7 @@ function weeklyReport(now = Date.now()) {
   return {
     days, timeline, timelineStart: now - DAY_MS,
     gained: days.reduce((t, d) => t + d.gained, 0),
-    bought: BONUSES.map((b) => ({ name: b.name, cost: b.cost, count: recent.filter((p) => p.cost === b.cost).length })),
+    bought: KINDS.map((k) => ({ name: k.name, kind: k.kind, cost: k.per, count: recent.filter((p) => (p.kind || KIND_BY_COST[p.cost]) === k.kind).reduce((h, p) => h + (p.hours || 1), 0) })),
     bonusHours: Math.round(on / 60),
     coverage: total ? Math.round((on / total) * 100) : 0,
     periods: per.map((p) => ({ name: p.name, pct: p.total ? Math.round((p.on / p.total) * 100) : 0 })),
@@ -625,9 +679,10 @@ const IDLE_COOLDOWN_MS = 30 * 60 * 1000;
 function goalRank(points) {
   const p = points || 0;
   // Bônus escolhido: junta pontos até o custo dele; quem já chegou cede a vaga para o próximo canal.
-  if (config.bonusTarget) {
-    const tier = Math.floor(p / config.bonusTarget);
-    const goal = (tier + 1) * config.bonusTarget;
+  const tc = targetCost();
+  if (tc) {
+    const tier = Math.floor(p / tc);
+    const goal = (tier + 1) * tc;
     return { tier, goal, left: goal - p };
   }
   // Passou de 1.000: cada milhar é uma meta nova, então ninguém dispara na frente dos outros.
@@ -794,7 +849,7 @@ function snapshot() {
     maxWatchers: config.maxWatchers,
     lowQuality: config.lowQuality,
     rotation: config.rotation,
-    bonusTarget: config.bonusTarget,
+    bonusTarget: config.bonusTarget, bonusOptions: bonusOptions(), targetCost: targetCost(),
     limitTest: limitTestSnapshot(),
     limitResult: config.limitResult || null,
     openAtLogin: isOpenAtLogin(),
@@ -951,8 +1006,9 @@ ipcMain.handle('kick:favorite:toggle', (_e, slug) => {
   saveConfig();
   return snapshot();
 });
-ipcMain.handle('kick:purchase:add', (_e, cost) => {
-  if (BONUSES.some((b) => b.cost === cost)) { config.purchases.push({ t: Date.now(), cost, slug: null }); saveConfig(); }
+ipcMain.handle('kick:purchase:add', (_e, key) => {
+  const kind = KIND[key] ? key : KIND_BY_COST[key];
+  if (kind) { config.purchases.push({ t: Date.now(), kind, hours: 1, cost: KIND[kind].per, slug: null }); saveConfig(); }
   updateTray();
   return snapshot();
 });
@@ -985,8 +1041,9 @@ ipcMain.handle('kick:maxWatchers:set', (_e, n) => {
   config.maxWatchers = Math.max(1, Math.min(30, Number(n) || 1)); saveConfig(); reconcileWatchers(); return snapshot();
 });
 ipcMain.handle('kick:rotation:set', (_e, on) => { limitTest = null; config.rotation = !!on; saveConfig(); reconcileWatchers(); return snapshot(); });
-ipcMain.handle('kick:bonusTarget:set', (_e, cost) => {
-  config.bonusTarget = BONUSES.some((b) => b.cost === cost) ? cost : 0;
+ipcMain.handle('kick:bonusTarget:set', (_e, value) => {
+  const t = parseTarget(value);
+  config.bonusTarget = t ? `${t.kind}:${t.hours}` : '';
   saveConfig();
   reconcileWatchers();
   return snapshot();
@@ -1079,13 +1136,26 @@ function stop() {
   if (awakeBlocker != null) { powerSaveBlocker.stop(awakeBlocker); awakeBlocker = null; }
   status.clear();
 }
+// Canais oficiais que o próprio jogo mostra (Bônus na Kick), lidos pelas contas do PokeIdle.
+// Canal novo com "pontos ativos" entra sozinho; canal que a pessoa tirou não volta (fica em seenDefaults).
+function syncOfficial(list) {
+  const ids = [...new Set((list || []).filter((o) => o && o.ativo).map((o) => String(o.id).toLowerCase()).filter((x) => /^[a-z0-9_-]{2,30}$/.test(x)))].slice(0, 80);
+  if (!ids.length) return [];
+  const seen = new Set(config.seenDefaults || []);
+  const fresh = ids.filter((x) => !seen.has(x) && !config.channels.includes(x));
+  if (!fresh.length && ids.every((x) => seen.has(x))) return [];
+  config.seenDefaults = [...new Set([...seen, ...ids])];
+  if (fresh.length) { config.channels.push(...fresh); if (started) { poll(); } send('status', snapshot()); }
+  saveConfig();
+  return fresh;
+}
 // Resumo para a bandeja e para a tela Início.
 function trayInfo() {
   const now = Date.now();
   return { started, loggedIn, watching: watchers.size, gained: sumGained(), bonuses: activeBonuses(now) };
 }
 return {
-  ns: 'kick', start, stop, snapshot, trayInfo, recoverAfterResume,
+  ns: 'kick', start, stop, snapshot, trayInfo, recoverAfterResume, syncOfficial, setGameBonus,
   loadConfig, setupSession, setMain: (w) => { mainWin = w; }, get started() { return started; },
 };
 };
