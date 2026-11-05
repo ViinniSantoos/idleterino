@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' https: data:; style-src 'self' 'unsafe-inline'">
+  <title>Idleterino</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="glow" aria-hidden="true"></div>
+
+  <nav id="rail">
+    <div class="logo" title="Idleterino"><img src="../build/icon.png" alt=""></div>
+    <button class="nav on" data-page="home" title="Início"><svg viewBox="0 0 24 24"><path d="M4 11l8-7 8 7v9a1 1 0 0 1-1 1h-5v-6h-4v6H5a1 1 0 0 1-1-1z"/></svg><span>Início</span></button>
+    <button class="nav" data-page="poke" title="PokeIdle"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h6m6 0h6"/><circle cx="12" cy="12" r="3"/></svg><span>PokeIdle</span></button>
+    <button class="nav" data-page="twitch" title="Twitch"><svg viewBox="0 0 24 24"><path d="M5 3h15v10l-5 5h-4l-3 3H6v-3H3V6z"/><path d="M11 8v4m4-4v4"/></svg><span>Twitch</span><i class="nav-dot" id="dot-twitch"></i></button>
+    <button class="nav" data-page="kick" title="Kick"><svg viewBox="0 0 24 24"><path d="M5 3h5v6l3-3h3v3l-3 3 3 3v3h-3l-3-3v6H5z"/></svg><span>Kick</span><i class="nav-dot" id="dot-kick"></i></button>
+    <button class="nav" data-page="ext" title="Extensões"><svg viewBox="0 0 24 24"><path d="M9 3h4v3a2 2 0 1 0 4 0V3h3v7h-3a2 2 0 1 0 0 4h3v7H3V10h3a2 2 0 1 0 0-4H3V3h6"/></svg><span>Extensões</span></button>
+    <div class="rail-fill"></div>
+    <button class="nav" data-page="settings" title="Configurações"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3m0 14v3M2 12h3m14 0h3M4.9 4.9l2.1 2.1m10 10l2.1 2.1M4.9 19.1l2.1-2.1m10-10l2.1-2.1"/></svg><span>Ajustes</span></button>
+  </nav>
+
+  <main id="pages">
+    <!-- INÍCIO -->
+    <section class="page on" id="page-home">
+      <header class="page-head">
+        <div><h1 id="hello">Tudo em um só lugar</h1><p class="sub">Seus bônus, suas lives e suas contas do PokeIdle.</p></div>
+      </header>
+      <div id="home-platforms" class="grid-2"></div>
+      <h2 class="section">Contas do PokeIdle</h2>
+      <div id="home-poke" class="poke-empty">
+        <div class="empty-art">◓</div>
+        <div><b>As contas do PokeIdle chegam na próxima etapa.</b><span>Até 4 contas por pessoa (regra do jogo), cada uma com o modo que você escolher: Cena, Otimizado, Economia ou ULTRA.</span></div>
+      </div>
+    </section>
+
+    <!-- POKEIDLE (etapa 2) -->
+    <section class="page" id="page-poke">
+      <header class="page-head"><div><h1>PokeIdle</h1><p class="sub">Em construção: contas, modos de economia e congelar tela das ALTs.</p></div></header>
+    </section>
+
+    <!-- TWITCH e KICK usam o mesmo componente (montado pelo app.js) -->
+    <section class="page platform" id="page-twitch" data-ns="twitch"></section>
+    <section class="page platform" id="page-kick" data-ns="kick"></section>
+
+    <!-- EXTENSÕES (etapa 4) -->
+    <section class="page" id="page-ext">
+      <header class="page-head"><div><h1>Extensões</h1><p class="sub">Em breve: instale as extensões que você já usa no PokeIdle. Elas valem só nas contas do jogo.</p></div></header>
+    </section>
+
+    <!-- AJUSTES -->
+    <section class="page" id="page-settings">
+      <header class="page-head"><div><h1>Ajustes</h1><p class="sub">Ligue só o que você usa: o que fica desligado não gasta memória.</p></div></header>
+      <div class="card list" id="settings-app"></div>
+    </section>
+  </main>
+
+  <div id="drawer" hidden><div id="drawer-card"></div></div>
+  <div id="modal" hidden><div id="modal-card"></div></div>
+  <div id="toasts"></div>
+  <script src="app.js"></script>
+</body>
+</html>

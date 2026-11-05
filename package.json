@@ -1,0 +1,90 @@
+{
+  "name": "idleterino",
+  "productName": "Idleterino",
+  "version": "0.1.0",
+  "description": "PokeIdle, Twitch e Kick num só app: bônus, pontos, lives e contas do jogo, leve e organizado.",
+  "author": "VinniiSaantos",
+  "license": "MIT",
+  "homepage": "https://viinnisantoos.github.io/idleterino/",
+  "repository": "github:ViinniSantoos/idleterino",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win",
+    "dist:linux": "electron-builder --linux"
+  },
+  "dependencies": {
+    "electron-updater": "^6.6.2"
+  },
+  "devDependencies": {
+    "electron": "45.2.1",
+    "electron-builder": "26.18.0"
+  },
+  "build": {
+    "appId": "com.vinniisaantos.idleterino",
+    "productName": "Idleterino",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "ViinniSantoos",
+        "repo": "idleterino"
+      }
+    ],
+    "files": [
+      "main.js",
+      "preload.js",
+      "platforms/**/*",
+      "renderer/**/*",
+      "build/icon.png"
+    ],
+    "electronFuses": {
+      "enableCookieEncryption": true,
+      "runAsNode": false,
+      "enableNodeOptionsEnvironmentVariable": false,
+      "enableNodeCliInspectArguments": false,
+      "onlyLoadAppFromAsar": true
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "artifactName": "Idleterino-Setup.exe",
+      "oneClick": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Idleterino",
+      "runAfterFinish": true
+    },
+    "portable": {
+      "artifactName": "Idleterino-portatil.exe"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "icon": "build/icon.png",
+      "category": "Network",
+      "executableName": "idleterino",
+      "synopsis": "PokeIdle, Twitch e Kick num só app",
+      "maintainer": "VinniiSaantos <122901997+ViinniSantoos@users.noreply.github.com>",
+      "syncDesktopName": true
+    },
+    "appImage": {
+      "artifactName": "Idleterino-linux.AppImage"
+    },
+    "deb": {
+      "artifactName": "Idleterino-linux.deb"
+    }
+  },
+  "desktopName": "idleterino.desktop"
+}
