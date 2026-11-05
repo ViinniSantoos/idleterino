@@ -255,36 +255,97 @@ function chatCol(ns, s) {
 
 function sideCol(ns, s) {
   const col = el('div', 'col side');
-  const head = el('div', 'col-head'); head.append('Bônus ativos');
   const list = el('div', 'col-scroll');
   const now = Date.now();
-  for (const b of s.bonuses || []) {
-    const on = b.endsAt && b.endsAt > now;
+  const kv = (k, v) => { const d = el('div', 'kv'); d.append(el('span', null, k), el('b', null, v)); return d; };
+  const section = (title, hint) => { const h = el('div', 'side-title', title); if (hint) h.title = hint; list.append(h); };
+
+  // 1) Tocando agora: miniatura de cada live escondida + anel até o próximo +10.
+  section('Tocando agora', 'As lives que estão rendendo pontos neste momento, escondidas e em 160p.');
+  const playing = s.channels.filter((c) => c.watching);
+  if (!s.loggedIn) list.append(el('div', 'side-empty', `Entre na ${P[ns].name} para começar.`));
+  else if (!playing.length) list.append(el('div', 'side-empty', s.farming ? 'Nenhum canal ao vivo agora. As lives entram sozinhas quando alguém abrir.' : 'Juntar pontos está desligado.'));
+  for (const c of playing) {
+    const card = el('div', 'now');
+    const thumb = el('div', 'now-thumb');
+    const bucket = Math.floor(now / 300000); // a imagem muda a cada 5 min (sem pesar)
+    const url = ns === 'twitch' ? `https://static-cdn.jtvnw.net/previews-ttv/live_user_${c.slug}-320x180.jpg?t=${bucket}` : c.thumb;
+    // Sem miniatura da live (a Kick nem sempre manda): a foto do canal desfocada no fundo e nítida no meio.
+    const fallback = () => {
+      if (!c.avatar || thumb.querySelector('.now-av')) return;
+      thumb.style.backgroundImage = `url("${c.avatar}")`;
+      thumb.classList.add('blurbg');
+      const a = el('img', 'now-av'); a.src = c.avatar; a.alt = ''; thumb.append(a);
+    };
+    if (url) { const i = el('img'); i.src = url; i.alt = ''; i.onerror = () => { i.remove(); fallback(); }; thumb.append(i); } else fallback();
+    thumb.append(el('span', 'now-live', 'AO VIVO'));
+    // Anel: enche até a próxima contagem (5 min depois da última; aquecendo, até a primeira).
+    const first = P[ns].firstCount;
+    let pct, label;
+    if (c.earning === 'earning' && c.lastGainAt) { const m = (now - c.lastGainAt) / 60000; pct = Math.min(1, m / 5); label = m < 1 ? 'agora' : `há ${Math.floor(m)} min`; }
+    else { const m = c.turnMin || 0; pct = Math.min(1, m / first); label = `${Math.min(m, first)}/${first} min`; }
+    const ring = el('div', 'now-ring'); ring.style.setProperty('--p', `${Math.round(pct * 100)}%`); ring.append(el('span', null, '+10'));
+    const info = el('div', 'now-info');
+    info.append(el('b', null, c.displayName));
+    const st = el('span', c.earning === 'earning' ? 'ok' : c.earning === 'idle' ? 'bad' : 'warm',
+      c.earning === 'earning' ? `✓ último ponto ${label}` : c.earning === 'idle' ? '○ sem pontos — vai trocar' : `◌ aquecendo ${label}`);
+    info.append(st);
+    card.append(thumb, el('div', 'now-row'));
+    card.lastChild.append(ring, info);
+    card.onclick = () => { view[ns].active = c.slug; renderPlatform(ns); };
+    list.append(card);
+  }
+
+  // 2) Próximos bônus: quem já dá para comprar e quem está chegando.
+  const costOf = (c) => (ns === 'twitch' ? (s.bonusTarget ? c.targetCost : Math.min(c.costs.xp, c.costs.capture, c.costs.lure)) : (s.bonusTarget || 300));
+  const withPts = s.channels.filter((c) => c.points != null && (ns !== 'twitch' || c.hasBonus));
+  const ready = withPts.filter((c) => c.points >= costOf(c)).sort((x, y) => y.points - x.points);
+  const coming = withPts.filter((c) => c.watching && c.points < costOf(c) && c.earning !== 'idle')
+    .map((c) => ({ c, min: (costOf(c) - c.points) / (P[ns].rate * (c.multiplier || 1)) })).sort((x, y) => x.min - y.min);
+  section('Próximos bônus', 'Canais com pontos para comprar agora e quanto falta nos que estão tocando.');
+  if (!ready.length && !coming.length) list.append(el('div', 'side-empty', 'Ainda nenhum canal perto do bônus.'));
+  for (const c of ready.slice(0, 4)) {
+    const r = el('div', 'nb ready');
+    r.append(el('span', 'nb-name', c.displayName), el('span', 'nb-val', `✓ ${fmt(c.points)} pts`));
+    const shop = button('Loja', null, (e) => { e.stopPropagation(); call(`${ns}:store:open`, c.slug); }); r.append(shop);
+    list.append(r);
+  }
+  for (const { c, min } of coming.slice(0, 3)) {
+    const r = el('div', 'nb');
+    r.append(el('span', 'nb-name', c.displayName), el('span', 'nb-val', `em ${clock(min * 60000)}`));
+    list.append(r);
+  }
+
+  // 3) No jogo: quanto tempo cada conta do PokeIdle ainda tem deste bônus (lido do jogo).
+  section(`No jogo · Bônus ${ns === 'twitch' ? 'Twitch' : 'na Kick'}`, 'Lido direto das suas contas do PokeIdle.');
+  const accs = (S.poke && S.poke.accounts || []).filter((x) => x.isPoke !== false);
+  if (!accs.length) { const e = el('div', 'side-empty'); e.append('Adicione suas contas do PokeIdle para ver aqui o tempo de bônus de cada uma. '); const l = button('Adicionar', 'ghost', () => go('poke')); e.append(l); list.append(e); }
+  for (const x of accs) {
+    const i = x.info || {};
+    const nick = i.logged && i.nick && i.nick !== '—' ? i.nick : x.name;
+    const at = (i.ativos || []).find((y) => y.kind === ns);
+    const left = at && at.end ? at.end - now : 0;
+    const r = el('div', `game${left > 0 ? '' : ' off'}`);
+    r.append(el('span', null, nick), el('b', null, !i.logged ? 'sem login' : left > 0 ? clock(left) : '⚠ sem bônus'));
+    if (left <= 0 && i.logged) r.title = 'Esta conta está sem o bônus: compre na loja de um canal com pontos (veja "Próximos bônus").';
+    list.append(r);
+  }
+
+  // 4) Bônus ativos (cronômetro do app) e resumo.
+  section('Cronômetro do app');
+  for (const bn of s.bonuses || []) {
+    const on = bn.endsAt && bn.endsAt > now;
     const r = el('div', `bonus${on ? ' on' : ''}`);
-    r.append(el('span', 'n', short(b.name)), el('span', 'l', on ? clock(b.endsAt - now) : 'inativo'));
-    const add = button('+1h', null, async () => apply(ns, await call(`${ns}:purchase:add`, P[ns].bonusKey(b))));
+    r.append(el('span', 'n', short(bn.name)), el('span', 'l', on ? clock(bn.endsAt - now) : 'inativo'));
+    const add = button('+1h', null, async () => apply(ns, await call(`${ns}:purchase:add`, P[ns].bonusKey(bn))));
     add.title = 'Registrar uma compra feita fora do app';
     r.append(add);
     list.append(r);
   }
-  const kv = (k, v) => { const d = el('div', 'kv'); d.append(el('span', null, k), el('b', null, v)); return d; };
-  list.append(el('div', 'group', 'Resumo'));
+  section('Resumo');
   list.append(kv('Pontos em todos os canais', fmt(s.channels.reduce((t, c) => t + (c.points || 0), 0))));
   if (ns === 'twitch') { list.append(kv('Ganhos hoje', `+${fmt(s.today || 0)}`)); list.append(kv('Baús pegos hoje', fmt(s.chestsToday || 0))); }
-  const recent = (s.purchases || []).slice(0, 4);
-  if (recent.length) {
-    list.append(el('div', 'group', 'Compras recentes'));
-    for (const p of recent) {
-      const c = s.channels.find((x) => x.slug === p.slug);
-      const d = el('div', 'kv');
-      d.append(el('span', null, `${ns === 'twitch' ? `${p.kind === 'xp' ? 'XP' : p.kind === 'capture' ? 'Capture' : 'Lure'} ${p.hours || 1}h` : `${fmt(p.cost)} pts`} · ${c ? c.displayName : 'à mão'}`));
-      const x = button('✕', 'ghost', async () => apply(ns, await call(`${ns}:purchase:remove`, p.t)));
-      x.title = 'Não foi compra de bônus? Remove do cronômetro';
-      d.append(x);
-      list.append(d);
-    }
-  }
-  col.append(head, list);
+  col.append(list);
   return col;
 }
 

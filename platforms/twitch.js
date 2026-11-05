@@ -1120,6 +1120,7 @@ function snapshot() {
         pointsEnabled: s.pointsEnabled !== false,
         watchedMin: Math.floor(totalWatched(slug, now) / 60000), error: s.error || null,
         turnMin: s.watchingSince ? Math.floor((now - s.watchingSince) / 60000) : null,
+        lastGainAt: s.lastGainAt || null,
       };
     }),
     memoryMB: Math.round(app.getAppMetrics().reduce((t, m) => t + m.memory.workingSetSize, 0) / 1024),

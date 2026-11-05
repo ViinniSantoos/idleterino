@@ -512,6 +512,10 @@ async function refreshChannel(slug) {
     }
     s.viewers = json.livestream ? json.livestream.viewer_count : 0;
     s.title = json.livestream ? json.livestream.session_title : '';
+    // Miniatura da live (atualizada pela Kick) e foto do canal, para a tela.
+    const th = json.livestream && json.livestream.thumbnail;
+    s.thumb = th ? (th.url || th.src || null) : null;
+    s.avatar = (json.user && json.user.profile_pic) || s.avatar || null;
     s.displayName = (json.user && json.user.username) || slug;
     s.error = null;
   } catch (e) {
@@ -819,6 +823,7 @@ function snapshot() {
         goalLeft: s.points != null ? goalRank(s.points).left : null,
         watchedMin: Math.floor(watchedMs / 60000), error: s.error || null,
         turnMin: s.watchingSince ? Math.floor((now - s.watchingSince) / 60000) : null,
+        lastGainAt: s.lastGainAt || null, thumb: s.thumb || null, avatar: s.avatar || null,
       };
     }),
     memoryMB: Math.round(app.getAppMetrics().reduce((t, m) => t + m.memory.workingSetSize, 0) / 1024),
