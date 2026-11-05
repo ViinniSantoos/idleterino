@@ -63,6 +63,9 @@ app.on('web-contents-created', (_e, wc) => {
   });
   // Páginas não podem trocar de janela para endereços estranhos (file://, javascript:, etc.).
   wc.on('will-attach-webview', (event) => event.preventDefault());
+  // Nenhuma página segura o fechamento ("Deseja sair do site?"): uma live escondida da Kick fazia
+  // o Sair parar no meio, com a janela fechada e o app ainda rodando.
+  wc.on('will-prevent-unload', (event) => event.preventDefault());
   wc.setWindowOpenHandler(({ url }) => {
     const t = trustFor(wc);
     // Contas do PokeIdle: link de outro site (ex.: "Votar no TopIdle", Discord) abre no navegador
@@ -95,8 +98,16 @@ function notify(title, body, onClick) {
   n.on('close', () => liveNotifications.delete(n));
   n.show();
 }
+// Sair de vez: fecha tudo à força. Usado se algo segurar o fechamento normal.
+function forceQuit() {
+  app.isQuitting = true;
+  for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed()) w.destroy();
+  app.quit();
+}
 function showMain() {
   if (!mainWin) return;
+  // Janela já fechada = o app estava saindo e travou: termina a saída (abre de novo pelo atalho).
+  if (mainWin.isDestroyed()) return forceQuit();
   if (mainWin.isMinimized()) mainWin.restore();
   mainWin.show();
   mainWin.focus();
@@ -238,6 +249,8 @@ app.whenReady().then(() => {
         : 'Ele fica na bandeja, perto do relógio. Para sair de vez: botão direito no ícone > Sair.', showMain);
     }
   });
+  // A janela só fecha de verdade ao sair. Se em 4 s o app ainda estiver vivo, fecha o resto à força.
+  mainWin.on('closed', () => setTimeout(forceQuit, 4000));
   mainWin.on('query-session-end', () => { app.isQuitting = true; });
   mainWin.on('session-end', () => { app.isQuitting = true; });
 
