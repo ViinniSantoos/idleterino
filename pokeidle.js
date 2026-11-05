@@ -27,6 +27,13 @@ const MODES = {
 };
 const READ_MS = 30 * 1000;
 
+// Identificação por endereço: o login do Google só aceita a identificação original do app (com
+// "Electron"); o Cloudflare do jogo (verificação "Confirme que é humano") desconfia dela e falha.
+// Então: páginas do Google com a original; o jogo e o resto como o Chrome que o app é.
+const GOOGLE_LOGIN = /(^|\.)(google\.com|google\.[a-z.]{2,6}|youtube\.com|gstatic\.com|googleusercontent\.com)$/;
+const wantsOriginalUA = (url) => GOOGLE_LOGIN.test(hostOf(url));
+const sessionsWithUA = new WeakSet();
+
 // Só o jogo e as páginas de login que ele usa abrem nas sessões das contas.
 const TRUSTED = ['pokeidle.io', 'challenges.cloudflare.com', 'google.com', 'accounts.google.com', 'discord.com'];
 function isTrustedUrl(url) {
@@ -96,11 +103,45 @@ module.exports = function createPokeIdle(ctx) {
     if (changed) v.webContents.reload();
   }
 
+  function followUA(wc) {
+    if (!ctx.originalUA || wc.__idleUA) return;
+    wc.__idleUA = true;
+    const plain = app.userAgentFallback;
+    // Troca só antes de a navegação começar (trocar no meio de um redirecionamento cancela a
+    // navegação). O botão "Login com Google" do jogo vai para /auth/google, que redireciona ao Google.
+    const toGoogle = (url) => wantsOriginalUA(url) || /^\/auth\/google/i.test((() => { try { return new URL(url).pathname; } catch { return ''; } })());
+    const set = (want) => { if (!wc.isDestroyed() && wc.getUserAgent() !== want) wc.setUserAgent(want); };
+    wc.on('will-navigate', (e, url) => {
+      if (!toGoogle(url) || wc.getUserAgent() === ctx.originalUA) return;
+      // Segura a navegação, troca a identificação e abre o mesmo endereço já com ela.
+      e.preventDefault();
+      set(ctx.originalUA);
+      wc.loadURL(url);
+    });
+    // Voltou do Google para o jogo: as próximas cargas (e o Cloudflare) já vão como Chrome comum.
+    wc.on('did-navigate', (_e, url) => { if (!toGoogle(url)) set(plain); });
+    set(toGoogle(wc.getURL()) ? ctx.originalUA : plain);
+  }
+  app.on('web-contents-created', (_e, wc) => {
+    const p = config && config.accounts.map((a) => session.fromPartition(partitionOf(a.id)));
+    if (p && p.includes(wc.session)) followUA(wc);
+  });
+
   function createView(a) {
     const ses = session.fromPartition(partitionOf(a.id));
     // Identificação original do app, sem mexer: o login com Google (Gmail) funciona assim, como no
     // teste de 05/11/2026; tirar o "Electron" fazia o Google recusar o login.
-    if (ctx.originalUA) ses.setUserAgent(ctx.originalUA);
+    if (ctx.originalUA && !sessionsWithUA.has(ses)) {
+      sessionsWithUA.add(ses);
+      const plain = app.userAgentFallback; // já sem o "Electron" (main.js)
+      // Cabeçalho de cada pedido conforme o site de destino.
+      ses.webRequest.onBeforeSendHeaders((d, cb) => {
+        const h = d.requestHeaders;
+        const key = Object.keys(h).find((k) => k.toLowerCase() === 'user-agent') || 'User-Agent';
+        h[key] = wantsOriginalUA(d.url) ? ctx.originalUA : plain;
+        cb({ requestHeaders: h });
+      });
+    }
     const ALLOWED = new Set(['clipboard-sanitized-write', 'notifications', 'fullscreen']);
     ses.setPermissionRequestHandler((_wc, perm, cb) => cb(ALLOWED.has(perm)));
     ses.setPermissionCheckHandler((_wc, perm) => ALLOWED.has(perm));
@@ -110,6 +151,7 @@ module.exports = function createPokeIdle(ctx) {
     ctx.registerTrust(partitionOf(a.id), (url) => isTrustedUrl(url) || hostOf(url) === gameHost || hostOf(url).endsWith(`.${gameHost}`));
     const v = new WebContentsView({ webPreferences: { partition: partitionOf(a.id), backgroundThrottling: false, spellcheck: false } });
     v.setBackgroundColor('#090a0f');
+    followUA(v.webContents);
     v.webContents.setAudioMuted(!!a.muted);
     v.webContents.on('did-finish-load', () => { applyMode(a.id); setTimeout(() => readOne(a.id), 4000); });
     // Caiu ou não carregou: tenta de novo sozinho (a conta precisa ficar conectada).
