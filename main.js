@@ -47,6 +47,15 @@ function trustFor(wc) {
   return null;
 }
 app.on('web-contents-created', (_e, wc) => {
+  // Ferramentas de desenvolvedor fechadas no app instalado: ninguém abre o console de uma conta
+  // para copiar cookies ou injetar código.
+  if (app.isPackaged) wc.on('devtools-opened', () => wc.closeDevTools());
+  // Nenhuma página baixa programa (exe, scripts, instaladores) pelo app.
+  wc.session.on('will-download', (event, item) => {
+    if (/\.(exe|msi|bat|cmd|com|scr|ps1|vbs|js|jar|dll|appimage|deb|sh|apk|dmg|pkg)$/i.test(item.getFilename())) event.preventDefault();
+  });
+  // Páginas não podem trocar de janela para endereços estranhos (file://, javascript:, etc.).
+  wc.on('will-attach-webview', (event) => event.preventDefault());
   wc.setWindowOpenHandler(({ url }) => {
     const t = trustFor(wc);
     return t && t.fn(url) ? {
@@ -160,6 +169,25 @@ ipcMain.handle('app:platform', (_e, ns, on) => { if (modules[ns]) setPlatform(ns
 ipcMain.handle('app:autostart', (_e, on) => { try { setOpenAtLogin(!!on); } catch {} return appState(); });
 ipcMain.handle('app:introDone', () => { config.lastSeenVersion = app.getVersion(); firstRun = false; saveConfig(); return appState(); });
 ipcMain.handle('app:quit', quitApp);
+// Apaga TODOS os logins guardados neste PC (Twitch, Kick e todas as contas do PokeIdle). A lista de
+// canais, as contas cadastradas e as preferências ficam; cada uma pede login de novo.
+ipcMain.handle('app:wipeLogins', async () => {
+  const { response } = await require('electron').dialog.showMessageBox(mainWin, {
+    type: 'warning', buttons: ['Apagar todos os logins', 'Cancelar'], defaultId: 1, cancelId: 1,
+    title: 'Apagar logins', message: 'Apagar todos os logins guardados neste PC?',
+    detail: 'Twitch, Kick e todas as contas do PokeIdle vão pedir login de novo. Suas contas continuam existindo normalmente nos sites.',
+  });
+  if (response !== 0) return false;
+  for (const m of Object.values(modules)) if (m.started) m.stop();
+  const partitions = [...trusts.keys()];
+  for (const p of partitions) {
+    const ses = session.fromPartition(p);
+    try { await ses.clearStorageData(); await ses.clearCache(); await ses.clearAuthCache(); } catch {}
+  }
+  for (const [ns, m] of Object.entries(modules)) if (config.platforms[ns]) m.start();
+  poke.reloadAll();
+  return true;
+});
 
 // ---------- Início ----------
 if (!app.requestSingleInstanceLock()) app.quit();

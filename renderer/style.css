@@ -234,3 +234,7 @@ h2.section { margin: 28px 0 12px; font-size: 13px; text-transform: uppercase; le
 .empty-art { font-size: 34px; color: var(--pk); }
 
 .warn-google { padding: 10px 12px; border-radius: 10px; background: rgba(255, 207, 74, .08); border: 1px solid rgba(255, 207, 74, .3); color: #ffe08a !important; }
+
+.security { margin-top: 18px; }
+.security h3 { margin: 0 0 8px; font-size: 15px; }
+.security ul { margin: 0 0 14px; padding-left: 18px; color: var(--muted); display: flex; flex-direction: column; gap: 5px; }

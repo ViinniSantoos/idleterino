@@ -101,7 +101,11 @@ module.exports = function createPokeIdle(ctx) {
     // Identificação original do app, sem mexer: o login com Google (Gmail) funciona assim, como no
     // teste de 05/11/2026; tirar o "Electron" fazia o Google recusar o login.
     if (ctx.originalUA) ses.setUserAgent(ctx.originalUA);
-    ses.setPermissionRequestHandler((_wc, perm, cb) => cb(perm === 'clipboard-sanitized-write' || perm === 'notifications' || perm === 'fullscreen'));
+    const ALLOWED = new Set(['clipboard-sanitized-write', 'notifications', 'fullscreen']);
+    ses.setPermissionRequestHandler((_wc, perm, cb) => cb(ALLOWED.has(perm)));
+    ses.setPermissionCheckHandler((_wc, perm) => ALLOWED.has(perm));
+    // Câmera, microfone, USB, Bluetooth, serial e HID: nunca.
+    ses.setDevicePermissionHandler(() => false);
     const gameHost = hostOf(urlOf(a));
     ctx.registerTrust(partitionOf(a.id), (url) => isTrustedUrl(url) || hostOf(url) === gameHost || hostOf(url).endsWith(`.${gameHost}`));
     const v = new WebContentsView({ webPreferences: { partition: partitionOf(a.id), backgroundThrottling: false, spellcheck: false } });
@@ -239,6 +243,7 @@ module.exports = function createPokeIdle(ctx) {
     timers.push(setInterval(readAll, READ_MS));
   }
   return {
+    reloadAll: () => { for (const v of views.values()) if (!v.webContents.isDestroyed()) v.webContents.reload(); },
     start, snapshot, setMain: (w) => { mainWin = w; mainWin.on('resize', () => send('relayout', true)); },
     trayInfo: () => ({ accounts: config.accounts.length }),
   };

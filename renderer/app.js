@@ -379,6 +379,20 @@ function renderSettings() {
   box.append(rowOpt('Kick', 'Lives, pontos e chat da Kick.', sw(a.platforms.kick, (v) => setPlatform('kick', v))));
   box.append(rowOpt(a.platform === 'linux' ? 'Iniciar com o sistema' : 'Iniciar com o Windows', 'Abre direto na bandeja, perto do relógio.', sw(a.openAtLogin, async (v) => { S.app = await call('app:autostart', v); renderSettings(); })));
   box.append(rowOpt('Versão', `Idleterino ${a.version}`, button('Sair do app', null, () => call('app:quit'))));
+  // Segurança: o que o app faz para proteger os logins, e como apagar tudo.
+  const sec = el('div', 'card security');
+  sec.append(el('h3', null, '🔒 Segurança das suas contas'));
+  const ul = el('ul');
+  for (const t of [
+    'Você faz login nas páginas oficiais (Google, Discord, Twitch, Kick, PokeIdle). O app nunca lê nem guarda a sua senha.',
+    'Os logins ficam só neste PC, criptografados pelo Windows. Não existe servidor do Idleterino.',
+    'Cada conta tem a sua sessão separada: uma não enxerga a outra.',
+    'Só os sites do jogo e das páginas de login abrem dentro das contas. Downloads de programas são bloqueados.',
+    'O app confere a própria integridade ao abrir: uma cópia alterada por terceiros não roda.',
+    'Baixe o Idleterino só pelo site oficial ou pelo GitHub.',
+  ]) ul.append(el('li', null, t));
+  sec.append(ul, button('Apagar todos os logins deste PC', null, async () => { if (await call('app:wipeLogins')) toast('Logins apagados. Entre de novo quando quiser.'); }));
+  box.append(sec);
 }
 async function setPlatform(ns, on) { S.app = await call('app:platform', ns, on); refreshAll(); }
 
