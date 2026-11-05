@@ -18,6 +18,8 @@ app.commandLine.appendSwitch('js-flags', '--max-semi-space-size=1');
 // Pasta de dados alternativa (testes sem mexer na instalação de verdade).
 if (process.env.IDLETERINO_DATA) app.setPath('userData', process.env.IDLETERINO_DATA);
 // Twitch e Kick recusam login de navegador desconhecido: o app se apresenta como o Chrome que ele é.
+// As contas do PokeIdle usam a identificação original (o Google aceita o login com ela; ver pokeidle.js).
+const ORIGINAL_UA = app.userAgentFallback;
 app.userAgentFallback = app.userAgentFallback.replace(/ (Electron|idleterino|Idleterino)\/\S+/g, '');
 
 const isLinux = process.platform === 'linux';
@@ -119,6 +121,7 @@ function updateTray() {
 const ctx = {
   send, notify, showMain, quit: quitApp, updateTray, isOpenAtLogin,
   registerTrust: (partition, fn) => trusts.set(partition, fn),
+  originalUA: ORIGINAL_UA,
 };
 const modules = {
   twitch: require('./platforms/twitch')(ctx),

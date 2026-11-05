@@ -98,6 +98,9 @@ module.exports = function createPokeIdle(ctx) {
 
   function createView(a) {
     const ses = session.fromPartition(partitionOf(a.id));
+    // Identificação original do app, sem mexer: o login com Google (Gmail) funciona assim, como no
+    // teste de 05/11/2026; tirar o "Electron" fazia o Google recusar o login.
+    if (ctx.originalUA) ses.setUserAgent(ctx.originalUA);
     ses.setPermissionRequestHandler((_wc, perm, cb) => cb(perm === 'clipboard-sanitized-write' || perm === 'notifications' || perm === 'fullscreen'));
     const gameHost = hostOf(urlOf(a));
     ctx.registerTrust(partitionOf(a.id), (url) => isTrustedUrl(url) || hostOf(url) === gameHost || hostOf(url).endsWith(`.${gameHost}`));
