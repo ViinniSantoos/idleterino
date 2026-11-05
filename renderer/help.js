@@ -55,7 +55,7 @@ window.HELP = [
   ['PokeIdle', 'O mercado/RMT abre apertado e a barra de busca some. Como resolver?', [
     'O jogo muda de layout conforme o espaço. Com mais espaço ele mostra a barra de busca e mais coisas.',
     'Na barra de cima da conta, use o zoom (− 100% +): em 80% ou 90% o jogo cabe muito mais. Também dá para usar Ctrl + rodinha do mouse dentro do jogo.',
-    'O botão ⤢ esconde a lista de contas e dá a largura toda para o jogo. Clique em ⤡ para mostrar a lista de novo.',
+    'O botão « (em cima da lista de contas) recolhe a lista: as contas viram chips com o nome no topo e o jogo fica com a largura toda. » abre a lista de novo.',
     'O zoom fica salvo em cada conta.',
   ]],
   ['Extensões', 'Onde fica o painel da extensão (ex.: Cockpit do Rotom Sniper)?', [

@@ -328,3 +328,39 @@ h2.section { margin: 28px 0 12px; font-size: 13px; text-transform: uppercase; le
 .acc-list .acc-tags .mtag { font-size: 9px; padding: 0 5px; }
 .acc-list .acc-rule { display: none; }
 .acc-list .acc-add { padding: 5px; font-size: 12px; }
+
+/* Lista recolhida em siglas (como o IdleDeck). */
+.poke-body.expanded { grid-template-columns: 50px minmax(0, 1fr); }
+.poke-body.expanded .acc-rail { display: flex; }
+.acc-rail { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 6px 0; background: var(--s1); border: 1px solid var(--line); border-radius: 12px; overflow-y: auto; }
+.rail-toggle { border: 0; background: transparent; color: var(--muted); font-size: 16px; padding: 2px 6px; border-radius: 6px; line-height: 1; }
+.rail-toggle:hover { color: var(--text); background: var(--s2); }
+.rail-acc { position: relative; width: 36px; height: 36px; padding: 0; border-radius: 10px; font-size: 12px; font-weight: 800; background: var(--s2); border: 1px solid var(--line-2); color: #c8b8ff; }
+.rail-acc.main { color: #ffcf66; }
+.rail-acc.on { border-color: color-mix(in srgb, var(--pk) 70%, transparent); background: color-mix(in srgb, var(--pk) 14%, var(--s2)); }
+.rail-acc.frozen { opacity: .65; }
+.rail-acc .dot { position: absolute; width: 9px; height: 9px; border-radius: 50%; border: 2px solid var(--s1); }
+.rail-acc .dot.ok, .rail-acc .dot.off, .rail-acc .dot.frz { right: -3px; bottom: -3px; }
+.rail-acc .dot.ok { background: var(--ok); }
+.rail-acc .dot.off { background: #6b7085; }
+.rail-acc .dot.frz { background: #8fc8ff; }
+.rail-acc .dot.bonus { right: -3px; top: -3px; background: #ff9f43; }
+.rail-add { width: 36px; height: 30px; padding: 0; border: 1px dashed var(--line-2); background: transparent; color: var(--muted); border-radius: 10px; }
+.acc-hd { display: flex; align-items: center; justify-content: space-between; padding: 0 2px 0 4px; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--dim); }
+/* Cabeçalho da página do PokeIdle mais baixo: mais altura para o jogo. */
+.page.poke.on .ptop { margin-bottom: 10px; }
+.page.poke.on .ptop h1 { font-size: 22px; }
+
+/* Lista recolhida = chips com o nome das contas na linha do título. */
+.poke-body.expanded { grid-template-columns: minmax(0, 1fr); }
+.acc-strip { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
+.acc-chip { position: relative; display: inline-flex; align-items: center; gap: 6px; padding: 4px 11px; border-radius: 999px; font-size: 12.5px; font-weight: 700; background: var(--s2); border: 1px solid var(--line-2); color: var(--text); }
+.acc-chip.main { color: #ffcf66; }
+.acc-chip.on { border-color: #fff; box-shadow: 0 0 0 1px rgba(255,255,255,.35); }
+.acc-chip.frozen { opacity: .6; }
+.acc-chip.add { padding: 4px 9px; color: var(--muted); border-style: dashed; }
+.acc-chip .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+.acc-chip .dot.ok { background: var(--ok); }
+.acc-chip .dot.off { background: #6b7085; }
+.acc-chip .dot.frz { background: #8fc8ff; }
+.acc-chip .dot.bonus { background: #ff9f43; margin-left: -2px; }

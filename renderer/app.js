@@ -472,6 +472,13 @@ const MODE_INFO = {
   ultra: ['ULTRA', 'Só uma caixa com os números. Gasta ~30% menos memória e quase nada de CPU.'],
 };
 const kindOfAtivo = (a, k) => (a.info && a.info.ativos || []).find((x) => x.kind === k);
+// Sigla da conta (ex.: "Principal" → PR, "Alt 1" → A1, "Conta 2" → C2).
+function accInitials(a) {
+  const n = String(a.name || '').trim();
+  const d = (n.match(/\d+/) || [''])[0];
+  const letters = n.replace(/[^\p{L}]/gu, '');
+  return ((d ? letters.slice(0, 1) + d : letters.slice(0, 2)) || '?').toUpperCase().slice(0, 3);
+}
 function accTags(a) {
   const tags = el('div', 'acc-tags');
   const m = el('span', `mtag${a.effectiveMode === 'ultra' ? ' ultra' : ''}`, MODE_INFO[a.effectiveMode][0]);
@@ -522,13 +529,36 @@ function renderPoke() {
   }
   const body = el('div', 'poke-body');
   const list = el('div', 'acc-list');
-  for (const a of s.accounts) {
-    const c = accCard(a, async () => { S.poke = await call('poke:select', a.id); renderPoke(); }, a.id === s.selected);
-    if (a.id === s.mainId) { const tg = c.querySelector('.acc-tags'); if (tg) tg.prepend(el('span', 'mtag main', '★ Principal')); }
-    list.append(c);
+  const toggleList = () => { pokeExpanded = !pokeExpanded; try { localStorage.setItem('pokeExpanded', pokeExpanded ? '1' : '0'); } catch {} renderPoke(); };
+  if (pokeExpanded) {
+    // Recolhida: a lista some e as contas viram chips com o nome na linha do título
+    // (como os streamers no Kickterino). O jogo fica com a largura toda.
+    const strip = el('div', 'acc-strip');
+    const open = button('»', 'rail-toggle', toggleList); open.title = 'Abrir a lista de contas';
+    strip.append(open);
+    const now = Date.now();
+    for (const x of s.accounts) {
+      const i = x.info || {};
+      const nick = i.logged && i.nick && i.nick !== '—' ? i.nick : x.name;
+      const b = button('', `acc-chip${x.id === s.selected ? ' on' : ''}${x.id === s.mainId ? ' main' : ''}${x.frozen ? ' frozen' : ''}`, async () => { S.poke = await call('poke:select', x.id); renderPoke(); });
+      b.append(el('i', `dot ${!i.logged ? 'off' : x.frozen ? 'frz' : 'ok'}`), `${x.id === s.mainId ? '★ ' : ''}${nick}`);
+      if (['twitch', 'kick'].some((k) => { const v = kindOfAtivo(x, k); return v && v.end && v.end > now; })) b.append(el('i', 'dot bonus'));
+      b.title = [nick, x.id === s.mainId ? 'Principal' : 'ALT', (MODE_INFO[x.effectiveMode] || [x.effectiveMode])[0], i.logged && i.level ? `Nv ${i.level.replace(/\D+/g, '')}` : 'entre na conta do jogo', x.frozen ? 'congelada' : ''].filter(Boolean).join(' · ');
+      strip.append(b);
+    }
+    if (s.accounts.length < s.maxWindows) { const add = button('＋', 'acc-chip add', addAccount); add.title = 'Adicionar conta'; strip.append(add); }
+    chip.after(strip);
+  } else {
+    const hd = el('div', 'acc-hd'); hd.append(el('span', null, 'Contas'));
+    const close = button('«', 'rail-toggle', toggleList); close.title = 'Recolher a lista: as contas viram chips no topo e o jogo fica com a largura toda';
+    hd.append(close); list.append(hd);
+    for (const a of s.accounts) {
+      const c = accCard(a, async () => { S.poke = await call('poke:select', a.id); renderPoke(); }, a.id === s.selected);
+      if (a.id === s.mainId) { const tg = c.querySelector('.acc-tags'); if (tg) tg.prepend(el('span', 'mtag main', '★ Principal')); }
+      list.append(c);
+    }
+    if (s.accounts.length < s.maxWindows) list.append(button('＋ Adicionar conta', 'acc-add', addAccount));
   }
-  if (s.accounts.length < s.maxWindows) list.append(button('＋ Adicionar conta', 'acc-add', addAccount));
-  list.append(el('div', 'acc-rule', `Regra do PokeIdle: até ${s.max} contas por pessoa. Contas acima disso são removidas pelo jogo.`));
   const a = s.accounts.find((x) => x.id === s.selected) || s.accounts[0];
   const wrap = el('div', 'stage-wrap');
   const bar = el('div', 'stage-bar');
@@ -561,9 +591,6 @@ function renderPoke() {
   zoom.append(zb('−', z - 0.1, 'Diminuir: cabe mais coisa na tela (bom para o mercado)'), zv, zb('+', z + 0.1, 'Aumentar'));
   if (!a.isPoke) zoom.hidden = true;
   bar.append(zoom);
-  const exp = button(pokeExpanded ? '⤡' : '⤢', 'ghost', () => { pokeExpanded = !pokeExpanded; try { localStorage.setItem('pokeExpanded', pokeExpanded ? '1' : '0'); } catch {} renderPoke(); });
-  exp.title = pokeExpanded ? 'Mostrar a lista de contas' : 'Expandir: esconde a lista de contas e dá mais espaço ao jogo';
-  bar.append(exp);
   bar.append(button(a.frozen ? '☀ Descongelar' : '❄ Congelar', null, async () => { S.poke = await call(a.frozen ? 'poke:unfreeze' : 'poke:freeze', a.id); renderPoke(); }));
   bar.append(button(a.muted ? '🔇' : '🔊', 'ghost', async () => { S.poke = await call('poke:mute', a.id, !a.muted); renderPoke(); }));
   bar.append(button('↻', 'ghost', () => call('poke:reload', a.id)));
@@ -602,7 +629,7 @@ function renderPoke() {
   }
   wrap.append(bar, stage);
   body.classList.toggle('expanded', pokeExpanded);
-  body.append(list, wrap);
+  if (pokeExpanded) body.append(wrap); else body.append(list, wrap);
   root.append(top, body);
   requestAnimationFrame(() => pokeView(page === 'poke' && $('#drawer').hidden && $('#modal').hidden));
 }
