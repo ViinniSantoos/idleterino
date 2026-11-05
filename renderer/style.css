@@ -249,7 +249,7 @@ h2.section { margin: 28px 0 12px; font-size: 13px; text-transform: uppercase; le
 .help-item summary { cursor: pointer; padding: 13px 16px; font-weight: 600; list-style: none; }
 .help-item summary::-webkit-details-marker { display: none; }
 .help-item summary::before { content: "+"; display: inline-block; width: 18px; color: var(--muted); }
-.help-item[open] summary::before { content: "Å3"; }
+.help-item[open] summary::before { content: "-"; }
 .help-body { padding: 0 16px 14px 34px; color: var(--muted); }
 .help-body p { margin: 0 0 8px; }
 .help-body ol { margin: 0 0 8px; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; color: var(--text); }
