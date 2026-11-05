@@ -769,7 +769,7 @@ function renderHomePoke() {
   // ---- Farm ----
   const rate = (x, ms) => (ms > 0 ? Math.round((x * 3600000) / ms) : 0);
   const big = (n) => { n = Number(n) || 0; const a = Math.abs(n); return a >= 1e9 ? `${(n / 1e9).toFixed(a >= 1e10 ? 0 : 1)}B` : a >= 1e6 ? `${(n / 1e6).toFixed(a >= 1e7 ? 0 : 1)}M` : a >= 1e4 ? `${Math.round(n / 1e3)}k` : fmt(n); };
-  const farmOf = (a) => { const x = a.info && a.info.sess; if (!x) return null; return { ms: x.ms, xp: rate(x.xpTreinador, x.ms), pxp: rate(x.xpPokemon, x.ms), gold: rate(x.gold, x.ms), ab: rate(x.abates, x.ms), cap: x.capturas, capH: rate(x.capturas, x.ms), lucroH: x.lucroH }; };
+  const farmOf = (a) => { const x = a.info && a.info.sess; if (!x) return null; return { ms: x.ms, xp: rate(x.xpTreinador, x.ms), pxp: rate(x.xpPokemon, x.ms), gold: rate(x.gold, x.ms), ab: rate(x.abates, x.ms), cap: x.capturas, capH: rate(x.capturas, x.ms), lucroH: x.lucroH, shV: x.shVistos || 0, shC: x.shCapt || 0 }; };
   const lvl = (a) => { const i = a.info || {}; return i.logged && i.level ? `Nv ${i.level.replace(/\D+/g, '')}` : ''; };
   const statBox = (v, l, cls) => { const d = el('div', `fstat${cls ? ' ' + cls : ''}`); d.append(el('b', null, v), el('span', null, l)); return d; };
 
@@ -784,7 +784,13 @@ function renderHomePoke() {
   if (mf) {
     mg.append(statBox(big(mf.xp), 'XP treinador/h'), statBox(big(mf.gold), 'ouro/h', 'gold'), (mf.lucroH ? statBox(mf.lucroH, 'lucro líquido/h', 'ok') : statBox(big(mf.pxp), 'XP pokémon/h')), statBox(big(mf.ab), 'abates/h'), statBox(fmt(mf.cap), `capturas · ${mf.capH}/h`), statBox(clock(mf.ms), 'tempo de sessão'));
   } else mg.append(el('span', 'sub', 'O placar aparece quando a conta estiver caçando (o mesmo do painel "Estatísticas da sessão" do jogo).'));
-  mc.append(mg, el('span', 'farm-open', 'Abrir a conta →'));
+  if (mf) {
+    const sh = el('div', `shiny-strip${mf.shV || mf.shC ? ' tem' : ''}`);
+    sh.append(el('span', 'ico', '✨'), el('span', null, 'Shinys nesta sessão'), el('b', null, fmt(mf.shV)), el('span', 'l', 'vistos'), el('b', null, fmt(mf.shC)), el('span', 'l', 'capturados'));
+    mc.append(mg, sh);
+  }
+  if (!mg.parentNode) mc.append(mg);
+  mc.append(el('span', 'farm-open', 'Abrir a conta →'));
   mc.onclick = () => openAcc(main);
   farm.append(mc);
   // ALTs
@@ -793,16 +799,16 @@ function renderHomePoke() {
     const fs = alts.map(farmOf);
     const sum = (k) => fs.reduce((t, f) => t + (f ? f[k] : 0), 0);
     const ah = el('div', 'farm-hd'); ah.append(el('b', null, `ALTs (${alts.length})`), el('span', 'sub', 'somadas'));
-    const tot = el('div', 'fstats four');
-    tot.append(statBox(big(sum('xp')), 'XP treinador/h'), statBox(big(sum('gold')), 'ouro/h', 'gold'), statBox(big(sum('ab')), 'abates/h'), statBox(fmt(sum('cap')), 'capturas'));
+    const tot = el('div', 'fstats five');
+    tot.append(statBox(big(sum('xp')), 'XP treinador/h'), statBox(big(sum('gold')), 'ouro/h', 'gold'), statBox(big(sum('ab')), 'abates/h'), statBox(fmt(sum('cap')), 'capturas'), statBox(`${fmt(sum('shV'))} / ${fmt(sum('shC'))}`, '✨ shinys vistos / capt.', sum('shV') || sum('shC') ? 'shiny' : ''));
     const tbl = el('div', 'alt-rows');
-    const hdr = el('div', 'alt-row hd'); for (const h of ['Conta', 'XP/h', 'Ouro/h', 'Abates/h', 'Capturas']) hdr.append(el('span', null, h));
+    const hdr = el('div', 'alt-row hd'); for (const h of ['Conta', 'XP/h', 'Ouro/h', 'Abates/h', 'Capturas', '✨ Shinys']) hdr.append(el('span', null, h));
     tbl.append(hdr);
     alts.forEach((a, i) => {
       const f = fs[i];
       const r = el('div', 'alt-row');
       const n = el('span', 'n'); n.append(el('b', null, nickOf(a)), el('i', null, `${lvl(a)} · ${(MODE_INFO[a.effectiveMode] || [a.effectiveMode])[0]}`));
-      r.append(n, el('span', null, f ? big(f.xp) : '—'), el('span', 'gold', f ? big(f.gold) : '—'), el('span', null, f ? big(f.ab) : '—'), el('span', null, f ? fmt(f.cap) : '—'));
+      r.append(n, el('span', null, f ? big(f.xp) : '—'), el('span', 'gold', f ? big(f.gold) : '—'), el('span', null, f ? big(f.ab) : '—'), el('span', null, f ? fmt(f.cap) : '—'), el('span', f && (f.shV || f.shC) ? 'shiny' : null, f ? `${fmt(f.shV)} / ${fmt(f.shC)}` : '—'));
       r.onclick = () => openAcc(a);
       tbl.append(r);
     });
