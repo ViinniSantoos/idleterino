@@ -70,7 +70,7 @@ app.on('web-contents-created', (_e, wc) => {
     const t = trustFor(wc);
     // Contas do PokeIdle: link de outro site (ex.: "Votar no TopIdle", Discord) abre no navegador
     // padrão da pessoa, fora da sessão da conta. Só https e no máximo um a cada 2 s.
-    if (t && !t.fn(url) && t.partition.startsWith('persist:poke-')) { openOutside(url); return { action: 'deny' }; }
+    if (t && !t.fn(url) && t.partition.startsWith('persist:poke-')) { openOutside(url); poke.noteOutside(t.partition, url); return { action: 'deny' }; }
     return t && t.fn(url) ? {
       action: 'allow',
       overrideBrowserWindowOptions: { width: 520, height: 720, autoHideMenuBar: true, icon: ICON, webPreferences: { partition: t.partition } },
@@ -142,6 +142,7 @@ function updateTray() {
   tray.setToolTip(lines.join('\n').slice(0, 127));
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: 'Abrir Idleterino', click: showMain },
+    ...(update && update.state === 'ready' ? [{ label: `Atualizar agora (${update.version})`, click: installUpdate }] : []),
     { type: 'separator' },
     { label: 'Sair', click: quitApp },
   ]));
@@ -151,6 +152,7 @@ function updateTray() {
 const ctx = {
   send, notify, showMain, quit: quitApp, updateTray, isOpenAtLogin,
   registerTrust: (partition, fn) => trusts.set(partition, fn),
+  openOutside,
   originalUA: ORIGINAL_UA,
 };
 const modules = {
@@ -178,16 +180,65 @@ function appState() {
     version: app.getVersion(), platform: process.platform, openAtLogin: isOpenAtLogin(),
     platforms: config.platforms, firstRun,
     news: config.lastSeenVersion && config.lastSeenVersion !== app.getVersion(),
+    update,
   };
 }
 
 // ---------- Atualização automática (GitHub Releases) ----------
+// O Início mostra uma faixa quando sai versão nova, com o botão "Atualizar agora" (sem precisar
+// sair pela bandeja). Instalador do Windows e AppImage: baixa sozinho e o botão instala e reabre.
+// Portátil e .deb não se atualizam sozinhos: a faixa leva ao site para baixar.
+const SITE = 'https://viinnisantoos.github.io/idleterino/';
+let update = null; // { state: 'downloading' | 'ready' | 'manual', version, percent }
+function setUpdate(u) { update = u; send('app:state', appState()); updateTray(); }
+const newer = (a, b) => { const x = String(a).split('.').map(Number); const y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); } return false; };
+function installUpdate() {
+  if (!update) return false;
+  if (update.state === 'manual') { shell.openExternal(SITE).catch(() => {}); return true; }
+  if (update.state !== 'ready') return false;
+  app.isQuitting = true;
+  // Silencioso. Quem reabre é o ajudante abaixo: o "reabrir" do instalador usa o atalho do Menu
+  // Iniciar e, sem ele, mostra o erro "O Windows não pode encontrar ... .lnk".
+  // O instalador nem sempre reabre o app no fim (testado em 05/11/2026): um ajudante escondido espera
+  // a instalação terminar e abre o Idleterino. Se o instalador já tiver aberto, ele não faz nada.
+  if (process.platform === 'win32') {
+    try {
+      const exe = process.execPath.replace(/'/g, "''");
+      const ps = `$exe='${exe}'; Start-Sleep 4; $t=0; while ((Get-Process | Where-Object { $_.Path -like '*-updater\\*' -or $_.Path -eq $exe }) -and $t -lt 300) { Start-Sleep 1; $t++ }; Start-Sleep 2; if (-not (Get-Process | Where-Object { $_.Path -eq $exe })) { Start-Process -FilePath $exe }`;
+      // Criado pelo próprio Windows (WMI), fora do grupo de processos do app: um filho comum é
+      // encerrado junto quando o app fecha.
+      const inner = `powershell.exe -NoProfile -WindowStyle Hidden -EncodedCommand ${Buffer.from(ps, 'utf16le').toString('base64')}`;
+      require('child_process').spawnSync('powershell.exe', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command',
+        `Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = '${inner}' } | Out-Null`], { stdio: 'ignore', windowsHide: true, timeout: 15000 });
+    } catch {}
+  }
+  setImmediate(() => autoUpdater.quitAndInstall(true, false));
+  return true;
+}
 function setupAutoUpdate() {
-  if (!app.isPackaged || process.env.PORTABLE_EXECUTABLE_FILE || (isLinux && !process.env.APPIMAGE)) return;
-  const check = () => autoUpdater.checkForUpdatesAndNotify().catch(() => {});
-  autoUpdater.on('error', () => {});
+  if (!app.isPackaged) return;
+  const auto = !process.env.PORTABLE_EXECUTABLE_FILE && !(isLinux && !process.env.APPIMAGE);
+  if (!auto) {
+    // Só confere a versão publicada (o mesmo arquivo que o atualizador lê).
+    const feed = `https://github.com/ViinniSantoos/idleterino/releases/latest/download/${isLinux ? 'latest-linux.yml' : 'latest.yml'}`;
+    const check = () => fetch(feed).then((r) => (r.ok ? r.text() : '')).then((t) => {
+      const m = /^version:\s*([\d.]+)/m.exec(t);
+      if (m && newer(m[1], app.getVersion())) setUpdate({ state: 'manual', version: m[1] });
+    }).catch(() => {});
+    check();
+    setInterval(check, 2 * 60 * 60 * 1000);
+    return;
+  }
+  autoUpdater.on('error', () => { if (update && update.state === 'downloading') setUpdate(null); });
+  autoUpdater.on('update-available', (i) => setUpdate({ state: 'downloading', version: i.version, percent: 0 }));
+  autoUpdater.on('download-progress', (p) => { if (update) { update.percent = Math.round(p.percent || 0); send('app:state', appState()); } });
+  autoUpdater.on('update-downloaded', (i) => {
+    setUpdate({ state: 'ready', version: i.version });
+    notify('Atualização pronta', `O Idleterino ${i.version} está pronto. Clique em "Atualizar agora" no Início.`, showMain);
+  });
+  const check = () => autoUpdater.checkForUpdates().catch(() => {});
   check();
-  setInterval(check, 6 * 60 * 60 * 1000);
+  setInterval(check, 2 * 60 * 60 * 1000);
 }
 
 // ---------- IPC da casca ----------
@@ -196,6 +247,7 @@ ipcMain.handle('app:platform', (_e, ns, on) => { if (modules[ns]) setPlatform(ns
 ipcMain.handle('app:autostart', (_e, on) => { try { setOpenAtLogin(!!on); } catch {} return appState(); });
 ipcMain.handle('app:introDone', () => { config.lastSeenVersion = app.getVersion(); firstRun = false; saveConfig(); return appState(); });
 ipcMain.handle('app:quit', quitApp);
+ipcMain.handle('app:update:install', () => installUpdate());
 // Apaga TODOS os logins guardados neste PC (Twitch, Kick e todas as contas do PokeIdle). A lista de
 // canais, as contas cadastradas e as preferências ficam; cada uma pede login de novo.
 ipcMain.handle('app:wipeLogins', async () => {

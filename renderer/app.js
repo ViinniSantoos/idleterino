@@ -53,6 +53,7 @@ function renderHome() {
   box.replaceChildren();
   const h = new Date().getHours();
   $('#hello').textContent = h < 5 ? 'Boa madrugada 🌙' : h < 12 ? 'Bom dia ☀️' : h < 18 ? 'Boa tarde 👋' : 'Boa noite 🌙';
+  renderUpdateBar();
   for (const ns of ['twitch', 'kick']) {
     const s = S[ns];
     const on = S.app && S.app.platforms[ns];
@@ -78,6 +79,29 @@ function renderHome() {
     box.append(card);
   }
   renderHomePoke();
+}
+// Faixa de versão nova, no topo do Início.
+function renderUpdateBar() {
+  let bar = $('#update-bar');
+  if (!bar) { bar = el('div', 'update-bar'); bar.id = 'update-bar'; $('#home-platforms').before(bar); }
+  const u = S.app && S.app.update;
+  bar.hidden = !u;
+  if (!u) return;
+  bar.className = `update-bar ${u.state}`;
+  bar.replaceChildren();
+  const txt = el('div', 'ub-txt');
+  if (u.state === 'downloading') {
+    txt.append(el('b', null, `Nova versão ${u.version} chegando`), el('span', null, `Baixando… ${u.percent || 0}%. O botão de atualizar aparece aqui quando terminar.`));
+    const pr = el('div', 'ub-prog'); const f = el('i'); f.style.width = `${u.percent || 0}%`; pr.append(f); txt.append(pr);
+    bar.append(el('span', 'ub-ico', '⬇'), txt);
+  } else if (u.state === 'ready') {
+    txt.append(el('b', null, `Nova versão ${u.version} pronta`), el('span', null, 'O app fecha, instala e abre de novo sozinho, em poucos segundos. As contas voltam conectadas.'));
+    const b = button('Atualizar agora', 'primary', async () => { b.disabled = true; b.textContent = 'Atualizando…'; await call('app:update:install'); });
+    bar.append(el('span', 'ub-ico', '✦'), txt, b);
+  } else {
+    txt.append(el('b', null, `Nova versão ${u.version} disponível`), el('span', null, 'Esta versão (portátil ou .deb) não se atualiza sozinha: baixe a nova no site.'));
+    bar.append(el('span', 'ub-ico', '✦'), txt, button('Baixar no site', 'primary', () => call('app:update:install')));
+  }
 }
 function timers(ns, s) {
   const wrap = el('div', 'timers');
@@ -702,16 +726,141 @@ function openPokeDrawer() {
 function renderHomePoke() {
   const box = $('#home-poke');
   box.replaceChildren();
+  box.className = 'home-poke';
   const s = S.poke;
   if (!s || !s.accounts.length) {
+    box.append(el('h2', 'section', 'PokeIdle'));
     const e = el('div', 'poke-empty');
     const t = el('div'); t.append(el('b', null, 'Nenhuma conta do PokeIdle ainda'), el('span', null, 'Adicione até 4 contas e escolha o modo de cada uma: Cena, Otimizado, Economia ou ULTRA.'));
     e.append(el('div', 'empty-art', '◓'), t, button('＋ Adicionar conta', 'primary', () => { go('poke'); addAccount(); }));
-    box.className = ''; box.append(e); return;
+    box.append(e); return;
   }
-  box.className = 'home-accs';
-  for (const a of s.accounts) box.append(accCard(a, async () => { S.poke = await call('poke:select', a.id); go('poke'); }, false));
+  const now = Date.now();
+  const accs = s.accounts.filter((a) => a.isPoke);
+  const nickOf = (a) => { const i = a.info || {}; return i.logged && i.nick && i.nick !== '—' ? i.nick : a.name; };
+  const openAcc = async (a) => { S.poke = await call('poke:select', a.id); go('poke'); };
+  const main = accs.find((a) => a.id === s.mainId) || accs[0];
+  const alts = accs.filter((a) => a !== main);
+
+  // ---- Lembretes ----
+  const alerts = el('div', 'home-alerts');
+  const ev = accs.map((a) => a.info && a.info.evento).find(Boolean);
+  if (ev) { const c = el('div', 'alert ev'); c.append(el('b', null, ev.texto || 'Evento'), el('span', 'at', ev.tempo || '')); alerts.append(c); }
+  for (const a of accs) {
+    const v = a.vote;
+    if (!v) continue;
+    const left = v.at + s.voteMs - now;
+    const c = el('div', `alert vote${left <= 0 ? ' ready' : ''}`);
+    c.append(el('span', 'ai', left <= 0 ? '✓' : '⏱'), el('b', null, nickOf(a)), el('span', 'at', left <= 0 ? 'pode votar no TopIdle' : `vota de novo em ${clock(left)}`));
+    if (left <= 0) c.append(button('Votar', 'mini', async () => { S.poke = await call('poke:vote', a.id); renderHome(); }));
+    c.title = 'Contado desde a última vez que o voto foi aberto pelo app. O voto libera a cada 25h.';
+    alerts.append(c);
+  }
+  for (const a of accs) for (const [k, label] of [['twitch', 'Twitch'], ['kick', 'Kick']]) {
+    const b = kindOfAtivo(a, k);
+    if (b && b.end && b.end > now && b.end - now < 30 * 60 * 1000) {
+      const c = el('div', `alert bonus ${k}`); c.append(el('span', 'ai', '⏳'), el('b', null, nickOf(a)), el('span', 'at', `Bônus ${label} acaba em ${clock(b.end - now)}`)); alerts.append(c);
+    }
+  }
+  if (!accs.some((a) => a.vote)) {
+    const c = el('div', 'alert hint'); c.append(el('span', 'ai', '⏱'), el('span', 'at', 'Vote no TopIdle pelo botão do jogo: o lembrete de 25h de cada conta aparece aqui.')); alerts.append(c);
+  }
+
+  // ---- Farm ----
+  const rate = (x, ms) => (ms > 0 ? Math.round((x * 3600000) / ms) : 0);
+  const big = (n) => { n = Number(n) || 0; const a = Math.abs(n); return a >= 1e9 ? `${(n / 1e9).toFixed(a >= 1e10 ? 0 : 1)}B` : a >= 1e6 ? `${(n / 1e6).toFixed(a >= 1e7 ? 0 : 1)}M` : a >= 1e4 ? `${Math.round(n / 1e3)}k` : fmt(n); };
+  const farmOf = (a) => { const x = a.info && a.info.sess; if (!x) return null; return { ms: x.ms, xp: rate(x.xpTreinador, x.ms), pxp: rate(x.xpPokemon, x.ms), gold: rate(x.gold, x.ms), ab: rate(x.abates, x.ms), cap: x.capturas, capH: rate(x.capturas, x.ms), lucroH: x.lucroH }; };
+  const lvl = (a) => { const i = a.info || {}; return i.logged && i.level ? `Nv ${i.level.replace(/\D+/g, '')}` : ''; };
+  const statBox = (v, l, cls) => { const d = el('div', `fstat${cls ? ' ' + cls : ''}`); d.append(el('b', null, v), el('span', null, l)); return d; };
+
+  const farm = el('div', 'home-farm');
+  // Principal
+  const mc = el('div', 'card farm-main');
+  const mh = el('div', 'farm-hd');
+  mh.append(el('span', 'star', '★'), el('b', null, nickOf(main)), el('span', 'lvl', lvl(main)), el('span', 'tagp', 'Principal'));
+  mc.append(mh, accTags(main));
+  const mf = farmOf(main);
+  const mg = el('div', 'fstats');
+  if (mf) {
+    mg.append(statBox(big(mf.xp), 'XP treinador/h'), statBox(big(mf.gold), 'ouro/h', 'gold'), (mf.lucroH ? statBox(mf.lucroH, 'lucro líquido/h', 'ok') : statBox(big(mf.pxp), 'XP pokémon/h')), statBox(big(mf.ab), 'abates/h'), statBox(fmt(mf.cap), `capturas · ${mf.capH}/h`), statBox(clock(mf.ms), 'tempo de sessão'));
+  } else mg.append(el('span', 'sub', 'O placar aparece quando a conta estiver caçando (o mesmo do painel "Estatísticas da sessão" do jogo).'));
+  mc.append(mg, el('span', 'farm-open', 'Abrir a conta →'));
+  mc.onclick = () => openAcc(main);
+  farm.append(mc);
+  // ALTs
+  if (alts.length) {
+    const ac = el('div', 'card farm-alts');
+    const fs = alts.map(farmOf);
+    const sum = (k) => fs.reduce((t, f) => t + (f ? f[k] : 0), 0);
+    const ah = el('div', 'farm-hd'); ah.append(el('b', null, `ALTs (${alts.length})`), el('span', 'sub', 'somadas'));
+    const tot = el('div', 'fstats four');
+    tot.append(statBox(big(sum('xp')), 'XP treinador/h'), statBox(big(sum('gold')), 'ouro/h', 'gold'), statBox(big(sum('ab')), 'abates/h'), statBox(fmt(sum('cap')), 'capturas'));
+    const tbl = el('div', 'alt-rows');
+    const hdr = el('div', 'alt-row hd'); for (const h of ['Conta', 'XP/h', 'Ouro/h', 'Abates/h', 'Capturas']) hdr.append(el('span', null, h));
+    tbl.append(hdr);
+    alts.forEach((a, i) => {
+      const f = fs[i];
+      const r = el('div', 'alt-row');
+      const n = el('span', 'n'); n.append(el('b', null, nickOf(a)), el('i', null, `${lvl(a)} · ${(MODE_INFO[a.effectiveMode] || [a.effectiveMode])[0]}`));
+      r.append(n, el('span', null, f ? big(f.xp) : '—'), el('span', 'gold', f ? big(f.gold) : '—'), el('span', null, f ? big(f.ab) : '—'), el('span', null, f ? fmt(f.cap) : '—'));
+      r.onclick = () => openAcc(a);
+      tbl.append(r);
+    });
+    ac.append(ah, tot, tbl);
+    farm.append(ac);
+  }
+
+  // ---- Mercado ----
+  const money = (v, moeda) => { const b = el('b', `mv${moeda === 'orb' ? ' orb' : ''}`); b.append(el('i', `cur ${moeda === 'orb' ? 'orb' : 'gold'}`), fmt(v)); return b; };
+  const ago = (t) => { const m = Math.round((now - t) / 60000); return m < 1 ? 'agora' : m < 60 ? `há ${m} min` : `há ${Math.floor(m / 60)}h${String(m % 60).padStart(2, '0')}`; };
+  const hhmm = (t) => (t ? new Date(t).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '');
+  const mk = accs.map((a) => ({ a, m: a.info && a.info.mercado })).filter((x) => x.m);
+  const lastAt = Math.max(0, ...mk.flatMap((x) => [x.m.meus, x.m.vendas, x.m.global].filter(Boolean).map((y) => y.at)));
+
+  const mhd = el('div', 'market-hd');
+  mhd.append(el('h2', 'section', 'Mercado'), el('span', 'sub', lastAt ? `atualizado ${ago(lastAt)} · atualiza sozinho a cada 10 min` : 'primeira leitura 1 min depois de abrir o app'));
+  const rf = button('↻ Atualizar', 'mini', async () => { S.poke = await call('poke:market:refresh'); toast('Atualizando o mercado das contas…'); });
+  mhd.append(rf);
+  const grid = el('div', 'home-market');
+  const panel = (title, sub) => { const p = el('div', 'card mpanel'); const h = el('div', 'mp-hd'); h.append(el('b', null, title)); if (sub) h.append(el('span', 'sub', sub)); p.append(h); return p; };
+  const line = (left, right, meta, cls) => { const r = el('div', `mrow${cls ? ' ' + cls : ''}`); const l = el('div', 'ml'); l.append(left); if (meta) l.append(el('span', 'meta', meta)); r.append(l, right); return r; };
+  const nameNode = (txt, shiny) => { const b = el('span', 'mn'); if (shiny) b.append(el('span', 'shiny', '✨ ')); b.append(txt); return b; };
+  const empty = (t) => el('div', 'mempty', t);
+
+  // Meus anúncios
+  const p1 = panel('Meus anúncios', 'todas as contas');
+  const mine = mk.flatMap(({ a, m }) => (m.meus ? m.meus.linhas.map((l) => ({ ...l, acc: nickOf(a) })) : []));
+  if (!mine.length) p1.append(empty(mk.some((x) => x.m.meus) ? 'Nenhum anúncio aberto agora.' : 'Os anúncios das suas contas aparecem aqui depois da primeira leitura.'));
+  for (const l of mine.slice(0, 12)) {
+    const retido = l.retidoAte && l.retidoAte > now;
+    const meta = [l.acc, l.qtd > 1 ? `${fmt(l.qtd)} em estoque · por unidade` : null, retido ? `retido · ${clock(l.retidoAte - now)}` : null].filter(Boolean).join(' · ');
+    p1.append(line(nameNode(`${l.qtd > 1 ? `${fmt(l.qtd)}× ` : ''}${l.nome}${l.level ? ` Nv ${l.level}` : ''}`, l.shiny), money(l.preco, l.moeda), meta, retido ? 'held' : ''));
+  }
+  // Minhas vendas
+  const p2 = panel('Suas vendas', 'mais recentes');
+  const sold = mk.flatMap(({ a, m }) => (m.vendas ? m.vendas.linhas.map((l) => ({ ...l, acc: nickOf(a) })) : [])).sort((x, y) => (y.em || 0) - (x.em || 0));
+  if (!sold.length) p2.append(empty(mk.some((x) => x.m.vendas) ? 'Nenhuma venda ainda.' : 'O histórico de vendas das contas aparece aqui depois da primeira leitura.'));
+  for (const l of sold.slice(0, 10)) p2.append(line(nameNode(l.descricao || '—', l.shiny), money(l.bruto, l.moeda), [l.acc, l.comprador ? `para ${l.comprador}` : null, hhmm(l.em)].filter(Boolean).join(' · ')));
+  // Maiores vendas
+  const p3 = panel('Maiores vendas agora');
+  p3.title = 'Da Tabela de preços do jogo (o ícone de prancheta no mercado).';
+  const seg = el('div', 'curseg');
+  for (const [k, label] of [['gold', 'Coins'], ['orb', 'Gemas']]) seg.append(button(label, homeCur === k ? 'on' : '', () => { homeCur = k; renderHome(); }));
+  p3.querySelector('.mp-hd').append(seg);
+  const g = mk.find((x) => x.a.id === main.id && x.m.global) || mk.find((x) => x.m.global);
+  const all = g ? g.m.global.linhas.filter((l) => l.tipo !== 'deposito' && l.tipo !== 'saque') : [];
+  const top = all.filter((l) => (l.moeda || 'gold') === homeCur).sort((x, y) => (y.bruto || 0) - (x.bruto || 0)).slice(0, 10);
+  if (!g) p3.append(empty('As vendas do servidor aparecem aqui depois da primeira leitura (pela conta principal).'));
+  else if (!top.length) p3.append(empty(`Nenhuma venda em ${homeCur === 'orb' ? 'gemas' : 'coins'} nas últimas ${all.length} do servidor.`));
+  top.forEach((l, i) => p3.append(line(nameNode(`${i + 1}. ${l.descricao || '—'}`, l.shiny), money(l.bruto, l.moeda), [l.vendedor && l.comprador ? `${l.vendedor} → ${l.comprador}` : null, hhmm(l.em)].filter(Boolean).join(' · '))));
+  if (g && all.length) p3.append(el('div', 'mfoot', `entre as últimas ${all.length} vendas do servidor`));
+  grid.append(p1, p2, p3);
+
+  box.append(el('h2', 'section', 'PokeIdle'));
+  if (alerts.children.length) box.append(alerts);
+  box.append(farm, mhd, grid);
 }
+let homeCur = 'gold';
 
 // ---------- Extensões ----------
 async function renderExt() {

@@ -37,6 +37,7 @@
     "files": [
       "main.js",
       "preload.js",
+      "poke-preload.js",
       "pokeidle.js",
       "platforms/**/*",
       "renderer/**/*",

@@ -63,6 +63,18 @@ const READ_SCRIPT = `(() => {
     logged, nick: txt('#tr-nick'), level: txt('#tr-level'), gold: txt('#tr-gold'), gems: txt('#tr-gemas'), diamonds: txt('#tr-diamantes'),
     xp: txt('#tr-xp-txt'), guild: txt('#tr-guild'), xpH: txt('#sessao-xp-treinador-h'), where: txt('#eco-onde'), ativos, autos,
     autoCount: txt('#auto-cnt'),
+    // O placar da sessão que o próprio jogo grava (o mesmo do painel do modo Economia).
+    sess: (() => { try { const n = txt('#tr-nick'); const o = n && JSON.parse(localStorage.getItem('sessao-hunt:' + n.toLowerCase()) || 'null');
+      return o && o.ms > 0 ? { ms: o.ms, xpTreinador: +o.xpTreinador || 0, xpPokemon: +o.xpPokemon || 0, gold: +o.gold || 0, abates: +o.abates || 0, capturas: +o.capturas || 0, lucroH: txt('#sessao-lucro-h') } : null; } catch { return null; } })(),
+    evento: (() => { const f = q('#evento-faixa'); return f && !f.classList.contains('hidden') ? { texto: txt('#evento-texto'), tempo: txt('#evento-tempo') } : null; })(),
+    mercado: (() => { try { const r = window.__idleterinoMercado && window.__idleterinoMercado.ler(); if (!r) return null;
+      const out = {};
+      if (r.meus) out.meus = { at: r.meus.at, linhas: (r.meus.m.linhas || []).slice(0, 40).map((a) => ({ id: a.id, tipo: a.tipo, nome: (a.ficha && (a.ficha.nome || (a.ficha.casaId ? 'Casa' : a.ficha.caixaId ? 'Caixa' : ''))) || a.nome || '—', level: a.ficha && a.ficha.level, shiny: !!(a.ficha && a.ficha.shiny), qtd: a.qtd || 1, preco: a.preco, moeda: a.moeda, retidoAte: a.compravelEm || 0, favoritos: a.favoritos })) };
+      const hist = (m) => (m.linhas || []).slice(0, 30).map((l) => ({ em: l.em, tipo: l.tipo, descricao: l.descricao, shiny: !!(l.ficha && l.ficha.shiny), bruto: l.bruto, moeda: l.moeda, vendedor: l.vendedor, comprador: l.comprador }));
+      if (r.historico) out.vendas = { at: r.historico.at, linhas: hist(r.historico.m) };
+      const g = Object.keys(r).filter((k) => k.indexOf('historicoGlobal:') === 0).map((k) => r[k]);
+      if (g.length) out.global = { at: Math.max(...g.map((x) => x.at)), linhas: g.flatMap((x) => hist(x.m)) };
+      return out; } catch { return null; } })(),
     mode: document.documentElement.classList.contains('modo-ultra') ? 'ultra'
       : localStorage.getItem('cfg-economia') === '1' ? 'economia' : localStorage.getItem('cfg-otimizado') === '1' ? 'otimizado' : 'cena',
   };
@@ -162,7 +174,7 @@ module.exports = function createPokeIdle(ctx) {
     ses.setDevicePermissionHandler(() => false);
     const gameHost = hostOf(urlOf(a));
     ctx.registerTrust(partitionOf(a.id), (url) => isTrustedUrl(url) || hostOf(url) === gameHost || hostOf(url).endsWith(`.${gameHost}`));
-    const v = new WebContentsView({ webPreferences: { partition: partitionOf(a.id), backgroundThrottling: false, spellcheck: false } });
+    const v = new WebContentsView({ webPreferences: { partition: partitionOf(a.id), preload: path.join(__dirname, 'poke-preload.js'), backgroundThrottling: false, spellcheck: false } });
     v.setBackgroundColor('#090a0f');
     followUA(v.webContents);
     v.webContents.setAudioMuted(!!a.muted);
@@ -201,6 +213,38 @@ module.exports = function createPokeIdle(ctx) {
   }
   async function readAll() { for (const id of views.keys()) await readOne(id); autoFreeze(); }
 
+  // Mercado no Início: as mesmas consultas dos botões do mercado do jogo, pela conexão da própria
+  // conta, a cada 10 min (bem menos do que abrir o mercado na mão). "Meus anúncios" e "Histórico de
+  // vendas" de cada conta; a Tabela de preços (3 páginas) só pela principal.
+  const MARKET_MS = 10 * 60 * 1000;
+  let lastMarket = 0;
+  const ask = (v, t, pagina) => v.webContents.executeJavaScript(`!!(window.__idleterinoMercado && window.__idleterinoMercado.pedir(${JSON.stringify(t)}, ${Number(pagina) || 0}))`).catch(() => false);
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  async function askMarket() {
+    lastMarket = Date.now();
+    const mainId = account(config.mainId) ? config.mainId : (config.accounts[0] || {}).id;
+    for (const a of config.accounts) {
+      const v = views.get(a.id);
+      if (!v || v.webContents.isDestroyed() || !isPokeIdle(urlOf(a))) continue;
+      await ask(v, 'market.meus'); await wait(1500);
+      await ask(v, 'market.historico', 0); await wait(1500);
+      if (a.id === mainId) for (const p of [0, 1, 2]) { await ask(v, 'market.historicoGlobal', p); await wait(1500); }
+    }
+    setTimeout(readAll, 3000);
+  }
+
+  // Voto no TopIdle: o jogo abre o link de votar no navegador (main.js). Guardamos quando cada conta
+  // abriu o voto, para o Início avisar quando liberar de novo (25h).
+  const VOTE_MS = 25 * 60 * 60 * 1000;
+  function noteOutside(partition, url) {
+    let u; try { u = new URL(url); } catch { return; }
+    if (!/(^|\.)topidle\.com$/.test(u.hostname)) return;
+    const a = config.accounts.find((x) => partitionOf(x.id) === partition);
+    if (!a) return;
+    config.votes = { ...(config.votes || {}), [a.id]: { at: Date.now(), url: u.href } };
+    saveConfig(); send('status', snapshot());
+  }
+
   // Congelar: foto da tela no lugar da página, que para de ser desenhada. Um clique volta.
   async function freeze(id) {
     const v = views.get(id);
@@ -226,7 +270,8 @@ module.exports = function createPokeIdle(ctx) {
       max: MAX_ACCOUNTS, selected: config.selected,
       mainId: account(config.mainId) ? config.mainId : (config.accounts[0] ? config.accounts[0].id : null), autoBackgroundUltra: config.autoBackgroundUltra, autoFreezeMin: config.autoFreezeMin,
       pokeCount: config.accounts.filter((a) => isPokeIdle(urlOf(a))).length, maxWindows: MAX_WINDOWS, defaultUrl: GAME,
-      accounts: config.accounts.map((a) => ({ ...a, url: urlOf(a), isPoke: isPokeIdle(urlOf(a)), host: hostOf(urlOf(a)), effectiveMode: effectiveMode(a), zoom: a.zoom || 1, info: info.get(a.id) || null, frozen: frozen.has(a.id), frozenImg: frozen.get(a.id) || null })),
+      voteMs: VOTE_MS, marketAt: lastMarket,
+      accounts: config.accounts.map((a) => ({ ...a, vote: (config.votes || {})[a.id] || null, url: urlOf(a), isPoke: isPokeIdle(urlOf(a)), host: hostOf(urlOf(a)), effectiveMode: effectiveMode(a), zoom: a.zoom || 1, info: info.get(a.id) || null, frozen: frozen.has(a.id), frozenImg: frozen.get(a.id) || null })),
     };
   }
 
@@ -291,6 +336,12 @@ module.exports = function createPokeIdle(ctx) {
   ipcMain.handle('poke:reload', (_e, id) => { const v = views.get(id); if (v) v.webContents.reload(); return snapshot(); });
   // A tela diz onde a conta aparece e se a página PokeIdle está aberta.
   const toRect = (r) => ({ x: Math.round(r.x), y: Math.round(r.y), width: Math.max(1, Math.round(r.width)), height: Math.max(1, Math.round(r.height)) });
+  ipcMain.handle('poke:market:refresh', () => { if (Date.now() - lastMarket > 60 * 1000) askMarket(); return snapshot(); });
+  ipcMain.handle('poke:vote', (_e, id) => {
+    const v = (config.votes || {})[id];
+    if (v && ctx.openOutside) { ctx.openOutside(v.url); config.votes[id] = { ...v, at: Date.now() }; saveConfig(); }
+    return snapshot();
+  });
   ipcMain.handle('poke:view', (_e, isVisible, rect, tileRects) => {
     const before = config.accounts.map((a) => isShown(a.id)).join();
     visible = !!isVisible;
@@ -311,11 +362,14 @@ module.exports = function createPokeIdle(ctx) {
     loadConfig();
     for (const a of config.accounts) createView(a);
     timers.push(setInterval(readAll, READ_MS));
+    setTimeout(askMarket, 60 * 1000);
+    timers.push(setInterval(askMarket, MARKET_MS));
   }
   return {
     partitions: () => config.accounts.map((a) => partitionOf(a.id)),
     reloadAll: () => { for (const v of views.values()) if (!v.webContents.isDestroyed()) v.webContents.reload(); },
     start, snapshot, setMain: (w) => { mainWin = w; mainWin.on('resize', () => send('relayout', true)); },
     trayInfo: () => ({ accounts: config.accounts.length }),
+    noteOutside,
   };
 };

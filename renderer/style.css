@@ -364,3 +364,83 @@ h2.section { margin: 28px 0 12px; font-size: 13px; text-transform: uppercase; le
 .acc-chip .dot.off { background: #6b7085; }
 .acc-chip .dot.frz { background: #8fc8ff; }
 .acc-chip .dot.bonus { background: #ff9f43; margin-left: -2px; }
+
+/* Início 0.1.7: lembretes, farm (principal + ALTs) e mercado. */
+.home-poke { padding-bottom: 24px; }
+.home-alerts { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+.alert { display: inline-flex; align-items: center; gap: 8px; padding: 7px 12px; border-radius: 999px; background: var(--s1); border: 1px solid var(--line-2); font-size: 12.5px; }
+.alert .at { color: var(--muted); }
+.alert.ev { border-color: rgba(255, 177, 66, .5); background: rgba(255, 177, 66, .08); }
+.alert.ev b { color: #ffcf66; }
+.alert.vote.ready { border-color: color-mix(in srgb, var(--ok) 60%, transparent); background: color-mix(in srgb, var(--ok) 9%, var(--s1)); }
+.alert.vote.ready .at { color: var(--ok); }
+.alert.bonus .at { color: #ff9f43; }
+.alert.hint { color: var(--muted); }
+button.mini { padding: 3px 10px; font-size: 12px; border-radius: 8px; }
+.home-farm { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr); gap: 14px; }
+@media (max-width: 1100px) { .home-farm { grid-template-columns: minmax(0, 1fr); } }
+.farm-main, .farm-alts { display: flex; flex-direction: column; gap: 12px; padding: 16px; }
+.farm-main { cursor: pointer; border-color: rgba(255, 207, 102, .28); }
+.farm-main:hover { border-color: rgba(255, 207, 102, .5); }
+.farm-hd { display: flex; align-items: baseline; gap: 8px; }
+.farm-hd b { font-size: 16px; }
+.farm-hd .star { color: #ffcf66; }
+.farm-hd .lvl { color: var(--muted); font-size: 12px; }
+.farm-hd .tagp { margin-left: auto; font-size: 11px; font-weight: 700; color: #ffcf66; background: rgba(255, 207, 102, .12); padding: 2px 8px; border-radius: 999px; }
+.fstats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.fstats.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.fstat { background: var(--s2); border-radius: 10px; padding: 9px 11px; display: flex; flex-direction: column; min-width: 0; }
+.fstat b { font-size: 17px; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fstat span { font-size: 11.5px; color: var(--muted); }
+.fstat.gold b { color: #ffd76a; }
+.fstat.ok b { color: var(--ok); }
+.alt-rows { display: flex; flex-direction: column; }
+.alt-row { display: grid; grid-template-columns: minmax(0, 1.6fr) repeat(4, minmax(0, 1fr)); gap: 8px; align-items: center; padding: 7px 8px; border-radius: 8px; font-variant-numeric: tabular-nums; cursor: pointer; }
+.alt-row:hover { background: var(--s2); }
+.alt-row.hd { cursor: default; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--dim); }
+.alt-row.hd:hover { background: none; }
+.alt-row .n { display: flex; flex-direction: column; min-width: 0; }
+.alt-row .n b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.alt-row .n i { font-style: normal; font-size: 11px; color: var(--muted); }
+.alt-row .gold { color: #ffd76a; }
+.market-hd { display: flex; align-items: center; gap: 12px; }
+.market-hd h2.section { margin-right: 0; }
+.market-hd .sub { margin: 28px 0 12px; font-size: 12px; }
+.market-hd button { margin: 28px 0 12px auto; }
+.home-market { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+@media (max-width: 1200px) { .home-market { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
+.mpanel { display: flex; flex-direction: column; gap: 2px; padding: 14px; min-width: 0; }
+.mp-hd { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.mp-hd .sub { margin: 0; font-size: 11.5px; }
+.mp-hd .curseg { margin-left: auto; display: inline-flex; gap: 2px; background: var(--s2); border-radius: 8px; padding: 2px; }
+.mp-hd .curseg button { padding: 2px 8px; font-size: 11.5px; border: 0; background: transparent; color: var(--muted); border-radius: 6px; }
+.mp-hd .curseg button.on { background: var(--s3); color: var(--text); }
+.mrow { display: flex; align-items: center; gap: 10px; padding: 7px 4px; border-top: 1px solid var(--line); }
+.mrow .ml { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.mrow .mn { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mrow .meta { font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mrow .mv { font-variant-numeric: tabular-nums; white-space: nowrap; color: #ffd76a; }
+.mrow.held .meta { color: #ff9f43; }
+.mrow .shiny { color: #ffe27a; }
+.mempty { color: var(--muted); font-size: 12.5px; padding: 10px 4px; }
+.mfoot { font-size: 11px; color: var(--dim); padding-top: 6px; }
+.cur { display: inline-block; width: 11px; height: 11px; margin-right: 6px; vertical-align: -1px; }
+.cur.gold { border-radius: 50%; background: radial-gradient(circle at 35% 35%, #fff2b0, #f2b72a 55%, #b9821a); }
+.cur.orb { transform: rotate(45deg) scale(.85); border-radius: 2px; background: linear-gradient(135deg, #ffc2ea, #e055b5); }
+.mrow .mv.orb { color: #ff9bd8; }
+.alert .ai { color: var(--muted); }
+.alert.vote.ready .ai { color: var(--ok); font-weight: 900; }
+.farm-open { margin-top: auto; font-size: 12px; color: var(--muted); }
+.farm-main:hover .farm-open { color: var(--text); }
+
+/* Faixa "Nova versão" no topo do Início. */
+.update-bar { display: flex; align-items: center; gap: 14px; margin: 0 0 16px; padding: 12px 16px; border-radius: var(--r); background: linear-gradient(90deg, rgba(140, 92, 255, .16), rgba(69, 227, 155, .1)); border: 1px solid rgba(160, 120, 255, .45); }
+.update-bar[hidden] { display: none; }
+.update-bar.ready { border-color: color-mix(in srgb, var(--ok) 60%, transparent); }
+.update-bar .ub-ico { font-size: 20px; width: 34px; height: 34px; display: grid; place-items: center; border-radius: 10px; background: rgba(255, 255, 255, .08); }
+.update-bar .ub-txt { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.update-bar .ub-txt b { font-size: 14.5px; }
+.update-bar .ub-txt span { color: var(--muted); font-size: 12.5px; }
+.update-bar .ub-prog { height: 4px; border-radius: 4px; background: rgba(255, 255, 255, .08); margin-top: 6px; overflow: hidden; max-width: 360px; }
+.update-bar .ub-prog i { display: block; height: 100%; background: var(--ok); transition: width .4s; }
+.update-bar button.primary { padding: 9px 18px; font-size: 13.5px; }
