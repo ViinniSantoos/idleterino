@@ -498,6 +498,7 @@ function accCard(a, onclick, active) {
 }
 
 let pokeStageRect = null;
+let pokeExpanded = (() => { try { return localStorage.getItem('pokeExpanded') === '1'; } catch { return false; } })();
 function renderPoke() {
   const root = $('#page-poke');
   const s = S.poke;
@@ -537,6 +538,18 @@ function renderPoke() {
     bar.append(b);
   }
   if (!S.ext) call('poke:ext:list').then((l) => { S.ext = l; if (l.some((x) => x.enabled && x.hasPanel)) renderPoke(); });
+  // Zoom do jogo: diminuir abre o layout largo (mercado/RMT com a barra de busca, mais colunas).
+  const zoom = el('div', 'seg zoom');
+  const z = a.zoom || 1;
+  const zb = (label, nz, tip) => { const b = button(label, '', async () => { S.poke = await call('poke:zoom', a.id, nz); renderPoke(); }); b.title = tip; return b; };
+  const zv = button(`${Math.round(z * 100)}%`, '', async () => { S.poke = await call('poke:zoom', a.id, 1); renderPoke(); });
+  zv.title = 'Zoom do jogo nesta conta. Clique para voltar a 100%. Também dá para usar Ctrl + rodinha do mouse dentro do jogo.';
+  zoom.append(zb('−', z - 0.1, 'Diminuir: cabe mais coisa na tela (bom para o mercado)'), zv, zb('+', z + 0.1, 'Aumentar'));
+  if (!a.isPoke) zoom.hidden = true;
+  bar.append(zoom);
+  const exp = button(pokeExpanded ? '⤡' : '⤢', 'ghost', () => { pokeExpanded = !pokeExpanded; try { localStorage.setItem('pokeExpanded', pokeExpanded ? '1' : '0'); } catch {} renderPoke(); });
+  exp.title = pokeExpanded ? 'Mostrar a lista de contas' : 'Expandir: esconde a lista de contas e dá mais espaço ao jogo';
+  bar.append(exp);
   bar.append(button(a.frozen ? '☀ Descongelar' : '❄ Congelar', null, async () => { S.poke = await call(a.frozen ? 'poke:unfreeze' : 'poke:freeze', a.id); renderPoke(); }));
   bar.append(button(a.muted ? '🔇' : '🔊', 'ghost', async () => { S.poke = await call('poke:mute', a.id, !a.muted); renderPoke(); }));
   bar.append(button('↻', 'ghost', () => call('poke:reload', a.id)));
@@ -550,6 +563,7 @@ function renderPoke() {
     stage.append(f);
   }
   wrap.append(bar, stage);
+  body.classList.toggle('expanded', pokeExpanded);
   body.append(list, wrap);
   root.append(top, body);
   requestAnimationFrame(() => pokeView(page === 'poke' && $('#drawer').hidden && $('#modal').hidden));

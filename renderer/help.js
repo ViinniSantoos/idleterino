@@ -41,6 +41,12 @@ window.HELP = [
     '5. Pronto: a extensão aparece na lista, ligada. As contas do PokeIdle recarregam sozinhas para aplicar.',
     'Para desligar, use o botão ao lado da extensão. Para tirar de vez, clique em Remover.',
   ]],
+  ['PokeIdle', 'O mercado/RMT abre apertado e a barra de busca some. Como resolver?', [
+    'O jogo muda de layout conforme o espaço. Com mais espaço ele mostra a barra de busca e mais coisas.',
+    'Na barra de cima da conta, use o zoom (− 100% +): em 80% ou 90% o jogo cabe muito mais. Também dá para usar Ctrl + rodinha do mouse dentro do jogo.',
+    'O botão ⤢ esconde a lista de contas e dá a largura toda para o jogo. Clique em ⤡ para mostrar a lista de novo.',
+    'O zoom fica salvo em cada conta.',
+  ]],
   ['Extensões', 'Onde fica o painel da extensão (ex.: Cockpit do Rotom Sniper)?', [
     'No Chrome, o painel abre pelo ícone da extensão na barra do navegador. No Idleterino, ele fica na tela de cada conta do PokeIdle.',
     'Vá em PokeIdle, escolha a conta e clique no botão 🧩 com o nome da extensão, ao lado de Congelar.',

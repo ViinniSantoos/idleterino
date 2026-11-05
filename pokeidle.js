@@ -127,6 +127,15 @@ module.exports = function createPokeIdle(ctx) {
     if (p && p.includes(wc.session)) followUA(wc);
   });
 
+  // Zoom de cada conta: menos zoom = o jogo cabe mais coisa (layout largo, com a busca do mercado).
+  const ZMIN = 0.5, ZMAX = 1.5;
+  function applyZoom(id) { const a = account(id); const v = views.get(id); if (a && v && !v.webContents.isDestroyed()) v.webContents.setZoomFactor(a.zoom || 1); }
+  function setZoom(id, z) {
+    const a = account(id); if (!a) return;
+    a.zoom = Math.round(Math.min(ZMAX, Math.max(ZMIN, Number(z) || 1)) * 100) / 100;
+    saveConfig(); applyZoom(id);
+  }
+
   function createView(a) {
     const ses = session.fromPartition(partitionOf(a.id));
     // Identificação original do app, sem mexer: o login com Google (Gmail) funciona assim, como no
@@ -153,7 +162,9 @@ module.exports = function createPokeIdle(ctx) {
     v.setBackgroundColor('#090a0f');
     followUA(v.webContents);
     v.webContents.setAudioMuted(!!a.muted);
-    v.webContents.on('did-finish-load', () => { applyMode(a.id); setTimeout(() => readOne(a.id), 4000); });
+    v.webContents.on('did-finish-load', () => { applyZoom(a.id); applyMode(a.id); setTimeout(() => readOne(a.id), 4000); });
+    // Ctrl + rodinha do mouse dentro do jogo também muda o zoom (e fica salvo na conta).
+    v.webContents.on('zoom-changed', (_e, dir) => { setZoom(a.id, (account(a.id) || {}).zoom + (dir === 'in' ? 0.1 : -0.1)); send('status', snapshot()); });
     // Caiu ou não carregou: tenta de novo sozinho (a conta precisa ficar conectada).
     const retry = () => setTimeout(() => { if (views.get(a.id) === v && !v.webContents.isDestroyed()) v.webContents.loadURL(urlOf(a)); }, 20 * 1000);
     v.webContents.on('render-process-gone', retry);
@@ -209,7 +220,7 @@ module.exports = function createPokeIdle(ctx) {
     return {
       max: MAX_ACCOUNTS, selected: config.selected, autoBackgroundUltra: config.autoBackgroundUltra, autoFreezeMin: config.autoFreezeMin,
       pokeCount: config.accounts.filter((a) => isPokeIdle(urlOf(a))).length, maxWindows: MAX_WINDOWS, defaultUrl: GAME,
-      accounts: config.accounts.map((a) => ({ ...a, url: urlOf(a), isPoke: isPokeIdle(urlOf(a)), host: hostOf(urlOf(a)), effectiveMode: effectiveMode(a), info: info.get(a.id) || null, frozen: frozen.has(a.id), frozenImg: frozen.get(a.id) || null })),
+      accounts: config.accounts.map((a) => ({ ...a, url: urlOf(a), isPoke: isPokeIdle(urlOf(a)), host: hostOf(urlOf(a)), effectiveMode: effectiveMode(a), zoom: a.zoom || 1, info: info.get(a.id) || null, frozen: frozen.has(a.id), frozenImg: frozen.get(a.id) || null })),
     };
   }
 
@@ -263,6 +274,7 @@ module.exports = function createPokeIdle(ctx) {
     if (a && MODES[mode]) { a.mode = mode; saveConfig(); applyMode(id); }
     return snapshot();
   });
+  ipcMain.handle('poke:zoom', (_e, id, z) => { setZoom(id, z); return snapshot(); });
   ipcMain.handle('poke:mute', (_e, id, muted) => { const a = account(id); const v = views.get(id); if (a) { a.muted = !!muted; saveConfig(); if (v) v.webContents.setAudioMuted(a.muted); } return snapshot(); });
   ipcMain.handle('poke:autoBackgroundUltra', (_e, on) => { config.autoBackgroundUltra = !!on; saveConfig(); for (const a of config.accounts) applyMode(a.id); return snapshot(); });
   ipcMain.handle('poke:autoFreezeMin', (_e, n) => { config.autoFreezeMin = Math.max(0, Math.min(120, Number(n) || 0)); saveConfig(); return snapshot(); });
