@@ -27,7 +27,7 @@ const P = {
 const short = (name) => String(name).replace('+15% ', '');
 
 // ---------- Estado ----------
-const S = { app: null, twitch: null, kick: null };
+const S = { app: null, twitch: null, kick: null, poke: null };
 const view = { twitch: { active: null, filter: '', offline: false }, kick: { active: null, filter: '', offline: false } };
 const chat = { twitch: new Map(), kick: new Map() }; // slug -> [nós]
 const MAX_MSG = 300, MAX_BG = 120;
@@ -39,6 +39,9 @@ function go(p) {
   for (const b of document.querySelectorAll('.nav')) b.classList.toggle('on', b.dataset.page === p);
   for (const s of document.querySelectorAll('.page')) s.classList.toggle('on', s.id === `page-${p}`);
   if (P[p]) renderPlatform(p);
+  if (p === 'poke') renderPoke(); else pokeView(false);
+  if (p === 'home') renderHome();
+  if (p === 'settings') renderSettings();
 }
 for (const b of document.querySelectorAll('.nav')) b.onclick = () => go(b.dataset.page);
 
@@ -72,6 +75,7 @@ function renderHome() {
     }
     box.append(card);
   }
+  renderHomePoke();
 }
 function timers(ns, s) {
   const wrap = el('div', 'timers');
@@ -360,9 +364,11 @@ function openDrawer(ns) {
   card.append(acc);
   $('#drawer').hidden = false;
 }
-function closeDrawer() { $('#drawer').hidden = true; }
+function closeDrawer() { $('#drawer').hidden = true; if (page === 'poke') renderPoke(); }
 $('#drawer').onclick = (e) => { if (e.target.id === 'drawer') closeDrawer(); };
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeDrawer(); $('#modal').hidden = true; } });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeDrawer(); closeModal(); } });
+$('#modal').onclick = (e) => { if (e.target.id === 'modal') closeModal(); };
+window.addEventListener('resize', () => { if (page === 'poke') pokeView($('#drawer').hidden && $('#modal').hidden); });
 
 // ---------- Ajustes do app ----------
 function renderSettings() {
@@ -375,6 +381,155 @@ function renderSettings() {
   box.append(rowOpt('Versão', `Idleterino ${a.version}`, button('Sair do app', null, () => call('app:quit'))));
 }
 async function setPlatform(ns, on) { S.app = await call('app:platform', ns, on); refreshAll(); }
+
+// ---------- PokeIdle ----------
+const MODE_INFO = {
+  cena: ['Cena', 'O jogo completo, com a batalha na tela.'],
+  otimizado: ['Otimizado', 'Sem animações de golpe e números de dano.'],
+  economia: ['Economia', 'Sem a cena: só estatísticas e capturas.'],
+  ultra: ['ULTRA', 'Só uma caixa com os números. Gasta ~30% menos memória e quase nada de CPU.'],
+};
+const kindOfAtivo = (a, k) => (a.info && a.info.ativos || []).find((x) => x.kind === k);
+function accTags(a) {
+  const tags = el('div', 'acc-tags');
+  const m = el('span', `mtag${a.effectiveMode === 'ultra' ? ' ultra' : ''}`, MODE_INFO[a.effectiveMode][0]);
+  if (a.effectiveMode !== a.mode) m.title = 'ULTRA automático porque a conta está no fundo';
+  tags.append(m);
+  if (a.frozen) tags.append(el('span', 'mtag frozen', '❄ congelada'));
+  const now = Date.now();
+  for (const [k, cls, label] of [['twitch', 'tw', 'Twitch'], ['kick', 'kk', 'Kick']]) {
+    const b = kindOfAtivo(a, k);
+    if (b && b.end && b.end > now) { const t = el('span', `mtag ${cls}`, `${label} ${clock(b.end - now)}`); t.title = b.title; tags.append(t); }
+  }
+  return tags;
+}
+function accCard(a, onclick, active) {
+  const c = el('div', `acc${active ? ' active' : ''}`);
+  const i = a.info || {};
+  const top = el('div', 'acc-top');
+  const nick = i.logged && i.nick && i.nick !== '—' ? i.nick : a.name;
+  top.append(el('b', null, nick), el('span', 'lvl', i.logged && i.level ? `Nv ${i.level.replace(/\D+/g, '')}` : ''));
+  const sub = el('div', 'acc-sub', !a.info ? 'carregando…' : !i.logged ? 'entre na conta do jogo' : [i.xpH && `${i.xpH}`, i.where].filter(Boolean).join(' · ') || a.name);
+  c.append(top, sub, accTags(a));
+  c.onclick = onclick;
+  return c;
+}
+
+let pokeStageRect = null;
+function renderPoke() {
+  const root = $('#page-poke');
+  const s = S.poke;
+  root.replaceChildren();
+  const top = el('div', 'ptop');
+  const h = el('h1'); h.append(el('i'), 'PokeIdle'); top.append(h);
+  if (!s) { root.append(top, emptyBox('Carregando…', '')); return pokeView(false); }
+  const chip = el('span', 'chip'); chip.append(el('b', null, `${s.accounts.length}/${s.max}`), 'contas'); top.append(chip, el('span', 'spacer'));
+  top.append(button('⚙ Ajustes', null, openPokeDrawer));
+  if (!s.accounts.length) {
+    root.append(top, emptyBox('Adicione sua primeira conta', 'Cada conta tem a sua sessão e o modo de tela que você escolher. O PokeIdle permite até 4 contas por pessoa.', button('＋ Adicionar conta', 'primary', addAccount)));
+    return pokeView(false);
+  }
+  const body = el('div', 'poke-body');
+  const list = el('div', 'acc-list');
+  for (const a of s.accounts) list.append(accCard(a, async () => { S.poke = await call('poke:select', a.id); renderPoke(); }, a.id === s.selected));
+  if (s.accounts.length < s.max) list.append(button('＋ Adicionar conta', 'acc-add', addAccount));
+  list.append(el('div', 'acc-rule', `Regra do PokeIdle: até ${s.max} contas por pessoa. Contas acima disso são removidas pelo jogo.`));
+  const a = s.accounts.find((x) => x.id === s.selected) || s.accounts[0];
+  const wrap = el('div', 'stage-wrap');
+  const bar = el('div', 'stage-bar');
+  const name = el('span', 'name', a.info && a.info.logged && a.info.nick && a.info.nick !== '—' ? `${a.info.nick} · ${a.name}` : a.name); name.title = 'Clique duas vezes para renomear';
+  name.ondblclick = () => renameAccount(a);
+  const seg = el('div', 'seg');
+  for (const [m, [label, help]] of Object.entries(MODE_INFO)) {
+    const b = button(label, a.mode === m ? 'on' : '', async () => { S.poke = await call('poke:mode', a.id, m); renderPoke(); });
+    b.title = help + (m === 'ultra' ? ' Recomendado para as contas que você não está olhando.' : '');
+    if (m === 'ultra') b.append(el('span', 'star', '★'));
+    seg.append(b);
+  }
+  bar.append(name, seg, el('span', 'spacer'));
+  bar.append(button(a.frozen ? '☀ Descongelar' : '❄ Congelar', null, async () => { S.poke = await call(a.frozen ? 'poke:unfreeze' : 'poke:freeze', a.id); renderPoke(); }));
+  bar.append(button(a.muted ? '🔇' : '🔊', 'ghost', async () => { S.poke = await call('poke:mute', a.id, !a.muted); renderPoke(); }));
+  bar.append(button('↻', 'ghost', () => call('poke:reload', a.id)));
+  const remove = button('✕', 'ghost', () => confirmRemove(a)); remove.title = 'Remover a conta deste app'; bar.append(remove);
+  const stage = el('div'); stage.id = 'poke-stage';
+  if (a.frozen) {
+    const f = el('div', 'frozen-shot');
+    if (a.frozenImg) { const img = el('img'); img.src = a.frozenImg; f.append(img); }
+    f.append(el('div', 'pill', '❄ Conta congelada — continua caçando. Clique para voltar.'));
+    f.onclick = async () => { S.poke = await call('poke:unfreeze', a.id); renderPoke(); };
+    stage.append(f);
+  }
+  wrap.append(bar, stage);
+  body.append(list, wrap);
+  root.append(top, body);
+  requestAnimationFrame(() => pokeView(page === 'poke' && $('#drawer').hidden && $('#modal').hidden));
+}
+// Diz ao app onde a conta aparece (o jogo fica por cima da tela, nesse retângulo).
+function pokeView(visible) {
+  const st = $('#poke-stage');
+  const r = st && visible ? st.getBoundingClientRect() : null;
+  call('poke:view', !!(visible && r), r ? { x: r.left, y: r.top, width: r.width, height: r.height } : null);
+}
+function addAccount() {
+  pokeView(false);
+  const card = $('#modal-card');
+  const input = el('input'); input.type = 'text'; input.placeholder = 'Ex.: Principal, ALT 1…'; input.style.width = '100%';
+  card.replaceChildren(el('h3', null, 'Nova conta do PokeIdle'),
+    el('p', null, 'Dê um nome para reconhecer a conta. Depois é só entrar no jogo nela, como no navegador. Cada conta fica com o login separado.'), input,
+    el('p', null, 'Lembrete: o PokeIdle permite até 4 contas por pessoa. Se a conta estiver aberta em outro lugar (navegador, IdleDeck), ela cai lá quando entrar aqui.'));
+  const actions = el('div', 'actions');
+  actions.append(button('Cancelar', null, closeModal), button('Adicionar', 'primary', async () => { closeModal(); S.poke = await call('poke:add', input.value.trim()); go('poke'); }));
+  card.append(actions);
+  $('#modal').hidden = false; input.focus();
+}
+function renameAccount(a) {
+  pokeView(false);
+  const card = $('#modal-card');
+  const input = el('input'); input.type = 'text'; input.value = a.name; input.style.width = '100%';
+  card.replaceChildren(el('h3', null, 'Renomear conta'), input);
+  const actions = el('div', 'actions');
+  actions.append(button('Cancelar', null, closeModal), button('Salvar', 'primary', async () => { closeModal(); S.poke = await call('poke:rename', a.id, input.value.trim()); renderPoke(); }));
+  card.append(actions);
+  $('#modal').hidden = false; input.focus(); input.select();
+}
+function confirmRemove(a) {
+  pokeView(false);
+  const card = $('#modal-card');
+  card.replaceChildren(el('h3', null, `Remover ${a.name}?`), el('p', null, 'A conta sai deste app e o login dela é apagado deste PC. A conta no jogo continua existindo normalmente.'));
+  const actions = el('div', 'actions');
+  actions.append(button('Cancelar', null, closeModal), button('Remover', 'primary', async () => { closeModal(); S.poke = await call('poke:remove', a.id); renderPoke(); }));
+  card.append(actions);
+  $('#modal').hidden = false;
+}
+function closeModal() { $('#modal').hidden = true; if (page === 'poke') renderPoke(); }
+function openPokeDrawer() {
+  pokeView(false);
+  const s = S.poke;
+  const card = $('#drawer-card');
+  card.replaceChildren(el('h3', null, 'Ajustes do PokeIdle'), el('p', 'sub', 'O app sugere, você decide. O modo de cada conta fica na barra em cima do jogo.'));
+  card.append(rowOpt('ULTRA automático no fundo', 'As contas que você não está olhando passam para o ULTRA sozinhas e voltam ao seu modo quando você abre. Medido: ~30% menos memória e quase nada de CPU.',
+    sw(s.autoBackgroundUltra, async (v) => { S.poke = await call('poke:autoBackgroundUltra', v); }), true));
+  const f = el('select');
+  for (const [v, l] of [[0, 'Desligado'], [5, 'Depois de 5 min'], [15, 'Depois de 15 min'], [30, 'Depois de 30 min']]) { const o = el('option', null, l); o.value = v; f.append(o); }
+  f.value = String(s.autoFreezeMin || 0);
+  f.onchange = async () => { S.poke = await call('poke:autoFreezeMin', Number(f.value)); };
+  card.append(rowOpt('Congelar ALTs sozinho', 'Contas que você não abre há algum tempo ficam congeladas: seguem caçando, e a tela só volta quando você clicar.', f));
+  $('#drawer').hidden = false;
+}
+
+function renderHomePoke() {
+  const box = $('#home-poke');
+  box.replaceChildren();
+  const s = S.poke;
+  if (!s || !s.accounts.length) {
+    const e = el('div', 'poke-empty');
+    const t = el('div'); t.append(el('b', null, 'Nenhuma conta do PokeIdle ainda'), el('span', null, 'Adicione até 4 contas e escolha o modo de cada uma: Cena, Otimizado, Economia ou ULTRA.'));
+    e.append(el('div', 'empty-art', '◓'), t, button('＋ Adicionar conta', 'primary', () => { go('poke'); addAccount(); }));
+    box.className = ''; box.append(e); return;
+  }
+  box.className = 'home-accs';
+  for (const a of s.accounts) box.append(accCard(a, async () => { S.poke = await call('poke:select', a.id); go('poke'); }, false));
+}
 
 // ---------- Atualizações ----------
 function apply(ns, snap) { if (!snap) return; S[ns] = snap; refreshAll(); }
@@ -389,6 +544,7 @@ function refreshAll() {
   refreshDots();
   if (page === 'home') renderHome();
   if (page === 'settings') renderSettings();
+  if (page === 'poke' && $('#drawer').hidden && $('#modal').hidden) renderPoke();
   if (P[page]) {
     // Não redesenhar enquanto a pessoa digita no chat ou na busca.
     const focus = document.activeElement;
@@ -405,12 +561,15 @@ for (const ns of ['twitch', 'kick']) {
   window.idle.on(`${ns}:select`, (slug) => { view[ns].active = slug; go(ns); });
 }
 window.idle.on('twitch:toast', toast);
+window.idle.on('poke:status', (p) => { S.poke = p; refreshAll(); });
+window.idle.on('poke:relayout', () => { if (page === 'poke') pokeView($('#drawer').hidden && $('#modal').hidden); });
 window.idle.on('app:state', (a) => { S.app = a; refreshAll(); });
 setInterval(() => { if (page === 'home') renderHome(); }, 20000);
 
 (async () => {
   S.app = await call('app:state');
   for (const ns of ['twitch', 'kick']) { try { S[ns] = await call(`${ns}:state:get`); } catch {} }
+  try { S.poke = await call('poke:state'); } catch {}
   go('home');
   refreshAll();
 })();

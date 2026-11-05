@@ -124,6 +124,7 @@ const modules = {
   twitch: require('./platforms/twitch')(ctx),
   kick: require('./platforms/kick')(ctx),
 };
+const poke = require('./pokeidle')(ctx);
 
 function setPlatform(ns, on) {
   config.platforms[ns] = !!on;
@@ -173,6 +174,7 @@ app.whenReady().then(() => {
   mainWin.setMenuBarVisibility(false);
   mainWin.loadFile(path.join(__dirname, 'renderer', 'index.html'));
   for (const m of Object.values(modules)) m.setMain(mainWin);
+  poke.setMain(mainWin);
   // Fechar a janela não para nada: o app continua na bandeja.
   mainWin.on('close', (e) => {
     if (app.isQuitting) return;
@@ -195,6 +197,7 @@ app.whenReady().then(() => {
   powerMonitor.on('resume', () => { for (const m of Object.values(modules)) if (m.started) m.recoverAfterResume(); });
   setupAutoUpdate();
   for (const [ns, m] of Object.entries(modules)) if (config.platforms[ns]) m.start();
+  poke.start();
 });
 
 app.on('before-quit', () => { app.isQuitting = true; });

@@ -37,6 +37,7 @@
     "files": [
       "main.js",
       "preload.js",
+      "pokeidle.js",
       "platforms/**/*",
       "renderer/**/*",
       "build/icon.png"
