@@ -476,7 +476,8 @@ function addAccount() {
   const input = el('input'); input.type = 'text'; input.placeholder = 'Ex.: Principal, ALT 1…'; input.style.width = '100%';
   card.replaceChildren(el('h3', null, 'Nova conta do PokeIdle'),
     el('p', null, 'Dê um nome para reconhecer a conta. Depois é só entrar no jogo nela, como no navegador. Cada conta fica com o login separado.'), input,
-    el('p', null, 'Lembrete: o PokeIdle permite até 4 contas por pessoa. Se a conta estiver aberta em outro lugar (navegador, IdleDeck), ela cai lá quando entrar aqui.'));
+    el('p', null, 'Lembrete: o PokeIdle permite até 4 contas por pessoa. Se a conta estiver aberta em outro lugar (navegador, IdleDeck), ela cai lá quando entrar aqui.'),
+    el('p', 'warn-google', '⚠ Entre com Discord ou com e-mail e senha. O Google bloqueia login dentro de apps ("Não foi possível fazer o login"), então contas criadas só com Gmail não entram aqui.'));
   const actions = el('div', 'actions');
   actions.append(button('Cancelar', null, closeModal), button('Adicionar', 'primary', async () => { closeModal(); S.poke = await call('poke:add', input.value.trim()); go('poke'); }));
   card.append(actions);
