@@ -43,6 +43,7 @@ function go(p) {
   if (p === 'home') renderHome();
   if (p === 'settings') renderSettings();
   if (p === 'ext') renderExt();
+  if (p === 'pvp' && typeof renderPvp === 'function') renderPvp();
   if (p === 'help') renderHelp();
 }
 for (const b of document.querySelectorAll('.nav')) b.onclick = () => go(b.dataset.page);
@@ -769,6 +770,25 @@ function metaOf(a, xpH, hunts) {
   return { L, nextMs: eta(L + 1), hunt: next ? { nome: next.nome, nivel: next.nivel, ms: eta(next.nivel) } : null,
     boost: bx ? Math.round((nowMult - 1) * 1000) / 10 : null, ending };
 }
+// Sugestão de hunt (vem da página do jogo: as contas do jogo + AoE, bicicleta e efetividade).
+// O "quanto a mais" é relativo à hunt em que a conta está, então não depende do valor absoluto.
+function huntSugg(hr, f) {
+  if (!hr || !hr.top || !hr.top.length) return null;
+  const best = hr.top[0];
+  const cur = hr.atualEst;
+  const mesma = cur && cur.slug === best.slug;
+  const ganho = cur && cur.xpH > 0 ? Math.round((best.xpH / cur.xpH - 1) * 100) : null;
+  const k = f && cur && cur.xpH > 0 ? f.xp / cur.xpH : null; // calibra com o XP/h medido na sessão
+  const est = (h) => (k ? `≈ ${(h.xpH * k / 1e6).toFixed(1).replace('.', ',')}M XP/h` : '');
+  const tip = [
+    `Pokémon em campo: ${hr.pokemon} (${(hr.tipos || []).join('/')})${hr.aoe ? ' · AoE' : ' · sem AoE'} · ${hr.bike ? `bike ${hr.bike} (+${Math.round(hr.vel * 100)}%)` : 'a pé'}`,
+    'Melhores hunts liberadas:',
+    ...hr.top.slice(0, 5).map((h, i) => `${i + 1}. ${h.nome} (Nv ${h.nivel}) · dano ${h.eff}× ${est(h)}${cur && cur.xpH > 0 ? ` · ${h.xpH >= cur.xpH ? '+' : ''}${Math.round((h.xpH / cur.xpH - 1) * 100)}%` : ''}`),
+    cur ? `Hunt atual: ${cur.nome} (dano ${cur.eff}×)` : '',
+    'Estimativa: contas do jogo + efetividade de tipo (com Z-Move), AoE e bicicleta. Muda quando você troca o pokémon em campo.',
+  ].filter(Boolean).join('\n');
+  return { best, mesma, ganho: ganho != null && ganho > 0 ? ganho : null, tip };
+}
 function renderHomePoke() {
   const box = $('#home-poke');
   box.replaceChildren();
@@ -836,6 +856,16 @@ function renderHomePoke() {
     mc.append(mg, sh);
   }
   if (!mg.parentNode) mc.append(mg);
+  const hr = main.info && main.info.huntRank;
+  const hs = huntSugg(hr, mf);
+  if (hs) {
+    const g = el('div', 'hunt-strip');
+    g.append(el('span', 'ico', '🧭'), el('span', null, hs.mesma ? 'Você já está na melhor hunt liberada para' : 'Melhor hunt agora:'));
+    if (hs.mesma) g.append(el('b', null, hr.pokemon));
+    else g.append(el('b', 'hn', hs.best.nome), el('span', null, `(Nv ${fmt(hs.best.nivel)}) · dano ${hs.best.eff}×`), el('b', 'up', hs.ganho != null ? `+${hs.ganho}% de XP` : ''));
+    g.title = hs.tip;
+    mc.append(g);
+  }
   const mm = mf && metaOf(main, mf.xp, s.hunts);
   if (mm) {
     const g = el('div', 'meta-strip');
@@ -864,6 +894,8 @@ function renderHomePoke() {
       const r = el('div', 'alt-row');
       const n = el('span', 'n'); n.append(el('b', null, nickOf(a)), el('i', null, `${lvl(a)} · ${(MODE_INFO[a.effectiveMode] || [a.effectiveMode])[0]}`));
       const am = f && metaOf(a, f.xp, s.hunts);
+      const ah = huntSugg(a.info && a.info.huntRank, f);
+      if (ah && !ah.mesma) { const t2 = el('i', 'hsug', `🧭 ${ah.best.nome}${ah.ganho ? ` +${ah.ganho}% XP` : ''}`); t2.title = ah.tip; n.append(t2); }
       if (am) { const t = el('i', 'meta', am.hunt ? `🎯 ${am.hunt.nome} (Nv ${fmt(am.hunt.nivel)}) em ${longDur(am.hunt.ms)}` : `🎯 Nv ${am.L + 1} em ${longDur(am.nextMs)}`); t.title = [`Próximo nível (Nv ${am.L + 1}) em ${longDur(am.nextMs)}`, am.boost != null ? (am.boost > 0 ? `Bônus de XP agora: +${am.boost}%` : 'Sem bônus de XP agora') : '', ...am.ending, 'Já conta quando cada bônus acaba.'].filter(Boolean).join('\n'); n.append(t); }
       r.append(n, el('span', null, f ? big(f.xp) : '—'), el('span', 'gold', f ? big(f.gold) : '—'), el('span', null, f ? big(f.ab) : '—'), el('span', null, f ? fmt(f.cap) : '—'), el('span', f && (f.shV || f.shC) ? 'shiny' : null, f ? `${fmt(f.shV)} / ${fmt(f.shC)}` : '—'));
       r.onclick = () => openAcc(a);

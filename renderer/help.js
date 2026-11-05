@@ -111,6 +111,22 @@ window.HELP = [
     'A conta usa o seu XP/h da sessão e os bônus de XP de treinador (VIP, Twitch, Kick, guild, evento…): quando um bônus acaba, o ritmo cai e o tempo já leva isso em conta.',
     'Passe o mouse em cima da meta para ver quais bônus estão valendo e quando cada um acaba.',
   ]],
+  ['Início', 'O que é a "Melhor hunt agora" (🧭)?', [
+    'É a hunt liberada que mais rende XP para o pokémon que está em campo agora, comparada com a hunt em que você está ("+X% de XP").',
+    'A conta usa as fórmulas do próprio jogo (abates por onda, golpe, deslocamento, XP e ouro por abate) e soma: a efetividade de tipo do seu pokémon contra cada espécie da hunt (com o tipo do Z-Move), o AoE (até 3 alvos por golpe) e a velocidade da bicicleta equipada.',
+    'É uma estimativa: passe o mouse para ver as 5 melhores e o que entrou na conta. Trocou o pokémon em campo, a sugestão muda.',
+  ]],
+  ['PvP', 'O que tem na aba PvP?', [
+    'O meta do top 50 do Ranqueado: os pokémon mais usados, os tipos, o Z-Move de cada um, o nível médio e quem usa AoE.',
+    'Time sugerido com os SEUS pokémon, pesando tipo (forte e fraco contra quem), Z-Move, status base, nível e AoE, com o porquê de cada escolha.',
+    'Planejador: escolha até 5 dos seus, veja a posição sugerida no tabuleiro (corpo a corpo na frente, quem atira mais longe atrás) e como o time vai contra os 10 mais usados. Depois é só montar igual no "Editar tabuleiro" do jogo.',
+    'E os times do topo que você está mais perto de montar.',
+  ]],
+  ['PvP', 'De onde vem o meta e de quanto em quanto tempo atualiza?', [
+    'Do próprio jogo: a tabela do Ranqueado e a equipe pública de cada jogador do top 50 (a mesma que aparece ao clicar no nome dele).',
+    'A conta principal lê sozinha uma vez por dia, uma consulta a cada poucos segundos (uns 5 minutos no total). O jogo segue normal e nada abre na sua tela.',
+    'O resultado fica salvo neste PC. Dá para pedir de novo em "Atualizar meta" (30 min depois da última leitura).',
+  ]],
   ['Extensões', 'O Rotom Sniper e o /hunt já vêm no app?', [
     'Sim. O Idleterino baixa as duas da Chrome Web Store (a fonte oficial) na primeira vez que abre, e confere versão nova uma vez por dia.',
     'Rotom Sniper: a extensão oficial do PokeIdle (painel no botão 🧩 de cada conta). /hunt: mostra as melhores hunts para o seu pokémon; só mostra, não joga sozinha.',

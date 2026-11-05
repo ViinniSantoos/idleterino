@@ -209,6 +209,7 @@ module.exports = function createPokeIdle(ctx) {
 
   let huntLevels = []; // [{ nome, nivel }] do jogo, em ordem de nível
   async function readOne(id) {
+    setTimeout(() => readHunt(id).catch(() => {}), 1500);
     const v = views.get(id);
     const acc = account(id);
     if (!v || v.webContents.isDestroyed() || !acc || !isPokeIdle(urlOf(acc))) return;
@@ -217,12 +218,67 @@ module.exports = function createPokeIdle(ctx) {
       const canais = r.canais; delete r.canais;
       if (Array.isArray(r.hunts) && r.hunts.length) huntLevels = r.hunts;
       delete r.hunts;
-      info.set(id, { ...r, at: Date.now() });
+      const prev = info.get(id);
+      info.set(id, { ...r, at: Date.now(), huntRank: prev ? prev.huntRank : null });
       if (canais && ctx.onOfficial) { try { ctx.onOfficial(canais, id); } catch {} }
       send('status', snapshot());
     }
   }
   async function readAll() { for (const id of views.keys()) await readOne(id); autoFreeze(); }
+
+  // Sugestão de hunt de cada conta (AoE, bicicleta, efetividade e as contas do jogo), a cada 2 min.
+  const lastHunt = new Map();
+  async function readHunt(id) {
+    const v = views.get(id);
+    const acc = account(id);
+    if (!v || v.webContents.isDestroyed() || !acc || !isPokeIdle(urlOf(acc))) return;
+    if (Date.now() - (lastHunt.get(id) || 0) < 2 * 60 * 1000) return;
+    const r = await v.webContents.executeJavaScript('window.__idleterinoMercado ? window.__idleterinoMercado.huntRank() : null').catch(() => null);
+    if (r && r.pronto) lastHunt.set(id, Date.now());
+    if (r && r.pronto) { const cur = info.get(id); if (cur) { cur.huntRank = r; send('status', snapshot()); } }
+  }
+
+  // ---------- PvP: meta do top 50, lida pela conta principal uma vez por dia ----------
+  // Só as consultas que o jogo faz na tela de PvP (a tabela) e no perfil público de um jogador, uma a
+  // cada 5 s. O resultado fica salvo neste PC (pvp-meta.json) e a aba PvP mostra sem esperar.
+  const PVP_N = 50;
+  const PVP_EVERY = 24 * 60 * 60 * 1000;
+  const pvpPath = () => path.join(app.getPath('userData'), 'pvp-meta.json');
+  let pvpMeta = null;
+  try { pvpMeta = JSON.parse(fs.readFileSync(pvpPath(), 'utf8')); } catch {}
+  let pvpRunning = false;
+  const mainAccId = () => (account(config.mainId) ? config.mainId : (config.accounts.find((a) => isPokeIdle(urlOf(a))) || {}).id);
+  async function pvpCollect(force = false) {
+    if (pvpRunning) return false;
+    if (!force && pvpMeta && Date.now() - pvpMeta.at < PVP_EVERY) return false;
+    const id = mainAccId();
+    const v = id && views.get(id);
+    if (!v || v.webContents.isDestroyed()) return false;
+    pvpRunning = true;
+    send('status', snapshot());
+    try {
+      const r = await v.webContents.executeJavaScript(`window.__idleterinoMercado ? window.__idleterinoMercado.pvpColetar(${PVP_N}, 5000) : { ok: false }`).catch(() => null);
+      if (!r || !r.ok) return false;
+      const d = await v.webContents.executeJavaScript('window.__idleterinoMercado.pvpLer()').catch(() => null);
+      if (!d || !d.linhas || !d.linhas.length) return false;
+      pvpMeta = { at: Date.now(), linhas: d.linhas.slice(0, PVP_N), perfis: d.perfis, info: d.info, tabelaTipos: d.tabelaTipos };
+      fs.writeFileSync(pvpPath(), JSON.stringify(pvpMeta));
+      return true;
+    } finally { pvpRunning = false; send('status', snapshot()); }
+  }
+  // Dados ao vivo da conta (os pokémon dela, o PvP dela) + o meta salvo.
+  async function pvpGet(accId) {
+    const id = account(accId) ? accId : mainAccId();
+    const v = id && views.get(id);
+    let live = null, prog = null;
+    if (v && !v.webContents.isDestroyed()) {
+      const ids = pvpMeta ? [...new Set(Object.values(pvpMeta.perfis || {}).flatMap((p) => (p.time || []).map((k) => k.speciesId)))] : [];
+      live = await v.webContents.executeJavaScript(`window.__idleterinoMercado ? window.__idleterinoMercado.pvpLer(${JSON.stringify(ids)}) : null`).catch(() => null);
+      const mv = views.get(mainAccId());
+      if (pvpRunning && mv && !mv.webContents.isDestroyed()) prog = await mv.webContents.executeJavaScript('window.__idleterinoMercado.pvpEstado()').catch(() => null);
+    }
+    return { meta: pvpMeta, running: pvpRunning, prog, accountId: id, live: live && !live.erro ? { meus: live.meus, info: live.info, euPvp: live.euPvp, nick: live.nick, nivel: live.nivel, tabelaTipos: live.tabelaTipos } : null };
+  }
 
   // Mercado no Início: as mesmas consultas dos botões do mercado do jogo, pela conexão da própria
   // conta, a cada 10 min (bem menos do que abrir o mercado na mão). "Meus anúncios" e "Histórico de
@@ -281,7 +337,7 @@ module.exports = function createPokeIdle(ctx) {
       max: MAX_ACCOUNTS, selected: config.selected,
       mainId: account(config.mainId) ? config.mainId : (config.accounts[0] ? config.accounts[0].id : null), autoBackgroundUltra: config.autoBackgroundUltra, autoFreezeMin: config.autoFreezeMin,
       pokeCount: config.accounts.filter((a) => isPokeIdle(urlOf(a))).length, maxWindows: MAX_WINDOWS, defaultUrl: GAME,
-      voteMs: VOTE_MS, marketAt: lastMarket, hunts: huntLevels,
+      voteMs: VOTE_MS, marketAt: lastMarket, hunts: huntLevels, pvpAt: pvpMeta ? pvpMeta.at : 0, pvpRunning,
       accounts: config.accounts.map((a) => ({ ...a, vote: (config.votes || {})[a.id] || null, url: urlOf(a), isPoke: isPokeIdle(urlOf(a)), host: hostOf(urlOf(a)), effectiveMode: effectiveMode(a), zoom: a.zoom || 1, info: info.get(a.id) || null, frozen: frozen.has(a.id), frozenImg: frozen.get(a.id) || null })),
     };
   }
@@ -353,6 +409,13 @@ module.exports = function createPokeIdle(ctx) {
     if (v && ctx.openOutside) { ctx.openOutside(v.url); config.votes[id] = { ...v, at: Date.now() }; saveConfig(); }
     return snapshot();
   });
+  ipcMain.handle('poke:pvp:get', (_e, accId) => pvpGet(accId));
+  ipcMain.handle('poke:pvp:refresh', () => {
+    if (pvpRunning) return { ok: true, running: true };
+    if (pvpMeta && Date.now() - pvpMeta.at < 30 * 60 * 1000) return { ok: false, error: 'O meta foi atualizado há pouco. Dá para pedir de novo 30 min depois da última leitura.' };
+    pvpCollect(true).catch(() => {});
+    return { ok: true, running: true };
+  });
   ipcMain.handle('poke:view', (_e, isVisible, rect, tileRects) => {
     const before = config.accounts.map((a) => isShown(a.id)).join();
     visible = !!isVisible;
@@ -374,6 +437,9 @@ module.exports = function createPokeIdle(ctx) {
     for (const a of config.accounts) createView(a);
     timers.push(setInterval(readAll, READ_MS));
     setTimeout(askMarket, 60 * 1000);
+    // PvP: confere de hora em hora se o meta tem mais de um dia; a primeira, 3 min depois de abrir.
+    setTimeout(() => pvpCollect().catch(() => {}), 3 * 60 * 1000);
+    timers.push(setInterval(() => pvpCollect().catch(() => {}), 60 * 60 * 1000));
     timers.push(setInterval(askMarket, MARKET_MS));
   }
   return {

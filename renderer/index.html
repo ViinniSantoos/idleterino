@@ -13,6 +13,7 @@
     <div class="logo" title="Idleterino"><img src="../build/icon.png" alt=""></div>
     <button class="nav on" data-page="home" title="Início"><svg viewBox="0 0 24 24"><path d="M4 11l8-7 8 7v9a1 1 0 0 1-1 1h-5v-6h-4v6H5a1 1 0 0 1-1-1z"/></svg><span>Início</span></button>
     <button class="nav" data-page="poke" title="PokeIdle"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h6m6 0h6"/><circle cx="12" cy="12" r="3"/></svg><span>PokeIdle</span></button>
+    <button class="nav" data-page="pvp" title="PvP: meta do top 50 e planejador de equipe"><svg viewBox="0 0 24 24"><path d="M4 4l9 9m-2 2l-2 2m-5-5l2-2M20 4l-9 9m2 2l2 2m5-5l-2-2M3 21l3-3m15 3l-3-3"/></svg><span>PvP</span></button>
     <button class="nav" data-page="twitch" title="Twitch"><svg viewBox="0 0 24 24"><path d="M5 3h15v10l-5 5h-4l-3 3H6v-3H3V6z"/><path d="M11 8v4m4-4v4"/></svg><span>Twitch</span><i class="nav-dot" id="dot-twitch"></i></button>
     <button class="nav" data-page="kick" title="Kick"><svg viewBox="0 0 24 24"><path d="M5 3h5v6l3-3h3v3l-3 3 3 3v3h-3l-3-3v6H5z"/></svg><span>Kick</span><i class="nav-dot" id="dot-kick"></i></button>
     <button class="nav" data-page="ext" title="Extensões"><svg viewBox="0 0 24 24"><path d="M9 3h4v3a2 2 0 1 0 4 0V3h3v7h-3a2 2 0 1 0 0 4h3v7H3V10h3a2 2 0 1 0 0-4H3V3h6"/></svg><span>Extensões</span></button>
@@ -39,6 +40,7 @@
     <section class="page platform" id="page-kick" data-ns="kick"></section>
 
     <!-- EXTENSÕES (etapa 4) -->
+    <section class="page" id="page-pvp"></section>
     <section class="page" id="page-ext"></section>
 
     <!-- AJUDA -->
@@ -56,5 +58,6 @@
   <div id="toasts"></div>
   <script src="help.js"></script>
   <script src="app.js"></script>
+  <script src="pvp.js"></script>
 </body>
 </html>

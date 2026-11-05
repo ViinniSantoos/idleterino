@@ -1,9 +1,16 @@
 // Idleterino — preparo das páginas das contas do PokeIdle (roda antes do jogo).
 //
-// O Início mostra o mercado de cada conta (Meus anúncios, Histórico de vendas e a Tabela de preços).
-// O jogo só aceita UMA conexão por conta, então nada de abrir outra: guardamos as respostas de
-// mercado que chegam pela conexão que o próprio jogo abriu, e pedimos só as mesmas três consultas que
-// os botões do mercado pedem. Comprar, vender, editar ou remover: nunca (nem é possível por aqui).
+// O jogo só aceita UMA conexão por conta, então nada de abrir outra: o app escuta a conexão que o
+// próprio jogo abriu e, quando precisa, faz pelas mesmas vias as CONSULTAS que as telas do jogo
+// fazem (mercado, tabela do PvP, perfil público de um jogador). Comprar, vender, editar, remover,
+// jogar ou mexer em qualquer coisa: nunca (nem é possível por aqui — só consultas da lista PEDIDOS).
+//
+// O que vem daqui para o Início e para a aba PvP:
+//  · mercado: Meus anúncios, Histórico de vendas e Tabela de preços;
+//  · Twitch/Kick: a lista oficial de canais e o tempo de bônus;
+//  · bônus de XP (com o fim de cada parte) e as hunts com o nível de cada uma;
+//  · sugestão de hunt: as contas do próprio jogo (módulo /hunt-analyser.mjs) + AoE, bicicleta e efetividade;
+//  · PvP: a tabela ranqueada e a equipe pública dos primeiros (uma consulta a cada poucos segundos).
 const { contextBridge } = require('electron');
 
 contextBridge.executeInMainWorld({
@@ -11,39 +18,90 @@ contextBridge.executeInMainWorld({
     if (!/(^|\.)pokeidle\.io$/.test(location.hostname)) return;
     const Native = window.WebSocket;
     const keep = {};
-    // Blocos "twitch" e "kick" do estado do jogador: a lista oficial de canais e os bônus ativos.
-    // O estado chega em pedaços, mas cada chave de cima chega inteira quando muda.
     const canais = {};
-    // Hunts do jogo com o nível que libera cada uma (vêm no welcome): é a "próxima meta" do Início.
-    let hunts = [];
-    // Bônus de XP do jogo: { tr, pk, partes: [{ id, tr, pk, ate?, alvo? }] } (multiplicadores e quando acabam).
-    let bonusXp = null;
+    let hunts = [];      // [{ nome, nivel }] uma por nível (meta de XP)
+    let bonusXp = null;  // { tr, pk, partes: [{ id, tr, ate, alvo }] }
     let sock = null;
     const ABAS = { meus: 1, historico: 1, historicoGlobal: 1 };
-    // Respostas dos nossos pedidos de histórico levam este `seq`: o jogo descarta (não repinta a
-    // tabela que a pessoa tiver aberta) e nós guardamos.
     const SEQ = 987654321;
+
+    // ---- estado leve do jogador: o que a sugestão de hunt e o PvP precisam ----
+    const jogo = { hunts: null, tabelaTipos: null, amp: 1.5, eu: {}, pks: new Map(), keys: [] };
+    const CAMPOS_EU = ['nick', 'level', 'activeId', 'bicicleta', 'pvp', 'pvpRank', 'pvpPosicao', 'pvpHistorico', 'pvpTime', 'huntSlug', 'hunt', 'huntAtual', 'area'];
+    const slimPk = (k) => ({
+      id: k.id, speciesId: k.speciesId, level: Number(k.level) || 0, shiny: !!k.shiny,
+      aoe: k.tmAoe === true || k.tmAoe === 1 || k.tmAoe === 'true' || k.tm_aoe === true,
+      el: k.tmElemental || k.tm_elemental || null, apelido: k.apelido || null, poder: Number(k.poder || k.power) || 0,
+    });
+    function aplicarEstado(p, cheioForcado) {
+      if (!p || typeof p !== 'object') return;
+      const { cheio, pokemons, pkMud, pkFora } = p;
+      if (cheio || cheioForcado) jogo.keys = Object.keys(p);
+      for (const k of CAMPOS_EU) if (k in p) jogo.eu[k] = p[k];
+      if (Array.isArray(pokemons)) jogo.pks = new Map(pokemons.map((k) => [k.id, slimPk(k)]));
+      for (const k of pkMud || []) jogo.pks.set(k.id, slimPk(k));
+      for (const id of pkFora || []) jogo.pks.delete(id);
+    }
+
+    // ---- consultas do app que o jogo NÃO deve desenhar (o perfil de outro jogador abriria na tela) ----
+    const nossos = { tabela: 0, perfis: new Map() };
+    const recente = (t) => t && Date.now() - t < 30000;
+    function ehNosso(d) {
+      if (typeof d !== 'string') return false;
+      if (d.indexOf('"pvpTabela"') >= 0 && recente(nossos.tabela)) return true;
+      if (d.indexOf('"perfil"') >= 0 && nossos.perfis.size) {
+        try { const m = JSON.parse(d); if (m.t === 'perfil' && m.perfil && recente(nossos.perfis.get(String(m.perfil.nick || '').toLowerCase()))) return true; } catch {}
+      }
+      return false;
+    }
+
+    // ---- PvP: tabela e equipes do topo ----
+    const pvp = { tabela: null, tabelaEm: 0, perfis: {}, coletando: false, feitos: 0, total: 0, at: 0, erro: null };
+    const slimTime = (lista) => (Array.isArray(lista) ? lista : []).slice(0, 5).map((k) => ({
+      speciesId: k.speciesId ?? k.especieId ?? k.pokeId ?? null, nome: k.nome || k.name || null, level: Number(k.level) || 0,
+      shiny: !!k.shiny, aoe: k.tmAoe === true || k.tmAoe === 1, el: k.tmElemental || null, casa: k.casa ?? k.posicao ?? null,
+      poder: Number(k.poder || k.power) || 0, potencia: k.potencia ?? null,
+    }));
+
     function Patched(url, protocols) {
       const ws = protocols === undefined ? new Native(url) : new Native(url, protocols);
       try {
         if (new URL(url, location.href).host === location.host) {
           sock = ws;
+          // O jogo lê pelo `onmessage`: embrulhado para não desenhar as respostas das consultas do app.
+          const desc = Object.getOwnPropertyDescriptor(Native.prototype, 'onmessage');
+          if (desc && desc.set) {
+            Object.defineProperty(ws, 'onmessage', {
+              configurable: true,
+              get() { return desc.get.call(ws); },
+              set(fn) { desc.set.call(ws, typeof fn === 'function' ? function (ev) { if (ehNosso(ev.data)) return undefined; return fn.call(this, ev); } : fn); },
+            });
+          }
           ws.addEventListener('message', (e) => {
             const d = e.data;
-            if (typeof d === 'string' && (d.indexOf('"oficiais"') >= 0 || d.indexOf('"bonusXp"') >= 0) && (d.indexOf('"welcome"') >= 0 || d.indexOf('"estado"') >= 0)) {
+            if (typeof d !== 'string') return;
+            const welcome = d.indexOf('"welcome"') >= 0 && d.indexOf('"welcome"') < 40;
+            const estado = !welcome && d.indexOf('"estado"') >= 0 && d.indexOf('"t":"estado"') >= 0;
+            if (welcome || estado) {
               try {
                 const m = JSON.parse(d);
-                const bx = m && m.estado && m.estado.bonusXp;
+                const est = m && m.estado;
+                if (m.t === 'welcome') {
+                  if (Array.isArray(m.hunts)) {
+                    jogo.hunts = m.hunts;
+                    hunts = m.hunts.map((h) => ({ nome: String(h.nome || h.name || h.slug || ''), nivel: Number(h.nivel ?? h.level) || 0 }))
+                      .filter((h) => h.nome && h.nivel > 0).sort((a, b) => a.nivel - b.nivel)
+                      .filter((h, i, l) => i === 0 || l[i - 1].nivel !== h.nivel);
+                  }
+                  if (m.tabelaTipos) jogo.tabelaTipos = m.tabelaTipos;
+                  if (m.ampliacaoHunt) jogo.amp = Number(m.ampliacaoHunt) || 1.5;
+                }
+                aplicarEstado(est, m.t === 'welcome');
+                const bx = est && est.bonusXp;
                 if (bx && Array.isArray(bx.partes)) {
                   bonusXp = { at: Date.now(), tr: Number(bx.tr) || 1, pk: Number(bx.pk) || 1,
                     partes: bx.partes.map((x) => ({ id: String(x.id || ''), tr: Number(x.tr) || 1, ate: Number(x.ate) || 0, alvo: Number(x.alvo) || 0 })) };
                 }
-                if (m && m.t === 'welcome' && Array.isArray(m.hunts)) {
-                  hunts = m.hunts.map((h) => ({ nome: String(h.nome || h.name || h.slug || ''), nivel: Number(h.nivel ?? h.level) || 0 }))
-                    .filter((h) => h.nome && h.nivel > 0).sort((a, b) => a.nivel - b.nivel)
-                    .filter((h, i, l) => i === 0 || l[i - 1].nivel !== h.nivel); // uma por nível basta
-                }
-                const est = m && m.estado;
                 for (const k of ['twitch', 'kick']) {
                   const b = est && est[k];
                   if (!b || !Array.isArray(b.oficiais)) continue;
@@ -56,12 +114,28 @@ contextBridge.executeInMainWorld({
                   };
                 }
               } catch {}
+              return;
             }
-            if (typeof d !== 'string' || d.indexOf('"market"') < 0) return;
+            if (d.indexOf('"pvpTabela"') >= 0) {
+              try { const m = JSON.parse(d); if (m.t === 'pvpTabela' && !m.erro && Number(m.pagina) === 1) { pvp.tabela = Array.isArray(m.linhas) ? m.linhas : []; pvp.tabelaEm = Date.now(); } } catch {}
+              return;
+            }
+            if (d.indexOf('"perfil"') >= 0 && d.indexOf('"t":"perfil"') >= 0) {
+              try {
+                const m = JSON.parse(d);
+                const p = m.perfil;
+                if (p && p.nick && nossos.perfis.has(String(p.nick).toLowerCase())) pvp.perfis[String(p.nick)] = { em: Date.now(), time: slimTime(p.pvpTime), chaves: Object.keys(p).slice(0, 40) };
+              } catch {}
+              return;
+            }
+            if (d.indexOf('"t":"pvp"') >= 0) {
+              try { const m = JSON.parse(d); if (m.t === 'pvp') pvp.eu = { em: Date.now(), dados: JSON.parse(JSON.stringify(m)) }; } catch {}
+              return;
+            }
+            if (d.indexOf('"market"') < 0) return;
             try {
               const m = JSON.parse(d);
               if (!m || m.t !== 'market' || !ABAS[m.aba]) return;
-              // Histórico com filtro ou outra página que a PESSOA pediu no jogo: não é o nosso.
               if (m.aba !== 'meus' && m.seq != null && m.seq !== SEQ) return;
               const key = m.aba === 'historicoGlobal' ? `historicoGlobal:${m.pagina || 0}` : m.aba;
               keep[key] = { at: Date.now(), m };
@@ -74,6 +148,137 @@ contextBridge.executeInMainWorld({
     Patched.prototype = Native.prototype;
     Object.setPrototypeOf(Patched, Native);
     window.WebSocket = Patched;
+
+    // ---- catálogo de espécies (os mesmos arquivos que o jogo baixa) ----
+    let especiesP = null;
+    function especies() {
+      if (!especiesP) {
+        especiesP = (async () => {
+          const lista = [];
+          for (const f of ['/assets/creatures.json', '/assets/creatures-novos.json', '/assets/creatures-outland-novos.json', '/assets/creatures-formas.json']) {
+            try { const r = await fetch(f); if (r.ok) { const j = await r.json(); if (Array.isArray(j.creatures)) lista.push(...j.creatures); } } catch {}
+          }
+          const map = new Map();
+          for (const c of lista) if (c && c.pokeId != null) map.set(c.pokeId, c);
+          // As Megas o jogo monta a partir da base (tipos e status próprios): a mesma função dele.
+          try { const mg = await import('/shared/megas.mjs'); for (const e of mg.criarEspeciesMega(lista)) map.set(e.pokeId, e); } catch {}
+          return map;
+        })();
+      }
+      return especiesP;
+    }
+    const VEL_BIKE = { comum: 0.15, incomum: 0.25, rara: 0.5, mitica: 0.75, lendaria: 1 };
+    const tiposDe = (c) => [c && c.type1, c && c.type2].filter((x) => x && x !== 'NONE').map((x) => String(x).toUpperCase());
+    let modTab = null;
+    const tabuleiro = () => (modTab || (modTab = import('/shared/pvp-tabuleiro.mjs').catch(() => null)));
+
+    // ---- sugestão de hunt ----
+    // Base: as contas do jogo (kills por onda, golpe, deslocamento e XP/ouro por kill, do /hunt-analyser.mjs).
+    // Em cima delas: efetividade do pokemon em campo contra cada espécie (com a ampliação de hunt do jogo),
+    // AoE (até 3 alvos por golpe) e bicicleta (o passo divide pelo fator da raridade). É estimativa.
+    const GOLPES_NEUTRO = 2; // golpes para derrubar um selvagem com dano neutro (premissa da estimativa)
+    async function huntRank() {
+      if (!jogo.hunts || !jogo.tabelaTipos) return { pronto: false };
+      let ha;
+      try { ha = await import('/hunt-analyser.mjs'); } catch { return { pronto: false, erro: 'modulo' }; }
+      const esp = await especies();
+      const L = Number(jogo.eu.level) || 0;
+      const act = jogo.pks.get(jogo.eu.activeId);
+      if (!act) return { pronto: true, semPokemon: true };
+      const cat = esp.get(act.speciesId) || {};
+      const atk = [...new Set([...tiposDe(cat), act.el ? String(act.el).toUpperCase() : null].filter(Boolean))];
+      const rar = jogo.eu.bicicleta && (jogo.eu.bicicleta.equipadaRar || null);
+      const vel = VEL_BIKE[rar] || 0;
+      const bx = bonusXp ? bonusXp.tr : 1;
+      const amp = jogo.amp || 1.5;
+      const out = [];
+      for (const h of jogo.hunts) {
+        const nivel = Number(h.nivel) || 0;
+        if (nivel > L || !Array.isArray(h.especies) || !h.especies.length) continue;
+        let pontos = 0, golpes = 0, effMed = 0, effMax = 0;
+        for (const e of h.especies) {
+          const c = esp.get(e.pokeId) || {};
+          const t = tiposDe(c);
+          let eff = 1;
+          try { eff = ha.melhorEfetividadeContra(atk, t[0] || null, t[1] || null, jogo.tabelaTipos) || 1; } catch {}
+          const effH = eff > 1 ? 1 + (eff - 1) * amp : eff;
+          const w = Number(e.pontos) || 1;
+          pontos += w; effMed += eff * w; effMax = Math.max(effMax, eff);
+          golpes += Math.max(1, Math.ceil(GOLPES_NEUTRO / Math.max(0.05, effH))) * w;
+        }
+        if (!pontos) continue;
+        golpes /= pontos; effMed /= pontos;
+        const porOnda = Math.min(ha.MAX_MOBS || 16, pontos);
+        const alvos = act.aoe ? Math.min(3, porOnda) : 1;
+        const msKill = (golpes * ((ha.CD_GOLPE_MS || 900) + (ha.CD_MOVIMENTO_MEDIO_MS || 2000)) + (ha.MS_DESLOC_MS || 600) / (1 + vel)) / alvos;
+        const kph = (porOnda / ((porOnda * msKill + (ha.MS_ONDA || 2600)) / 1000)) * 3600;
+        let xp = 0, gold = 0;
+        try { const r = ha.mediaPorKill(h, esp, 0); xp = r.xp; gold = r.gold; } catch {}
+        out.push({ slug: h.slug || null, nome: String(h.nome || h.name || h.slug || '?'), nivel, kph: Math.round(kph), xpH: Math.round(kph * xp * bx), goldH: Math.round(kph * gold), eff: Math.round(effMed * 100) / 100, effMax });
+      }
+      out.sort((a, b) => b.xpH - a.xpH);
+      const atualSlug = jogo.eu.huntSlug || (jogo.eu.hunt && jogo.eu.hunt.slug) || null;
+      const atualEst = out.find((h) => h.slug && h.slug === atualSlug) || null;
+      return {
+        pronto: true, L, pokemon: cat.name || '?', tipos: atk, aoe: act.aoe, bike: rar, vel, bonus: bx,
+        top: out.slice(0, 8), atual: atualSlug, atualEst,
+      };
+    }
+
+    // ---- PvP: consulta a tabela e as equipes públicas dos primeiros, devagar ----
+    const espera = (ms) => new Promise((r) => setTimeout(r, ms));
+    async function pvpColetar(n = 50, passoMs = 5000) {
+      if (pvp.coletando) return { ok: false, motivo: 'ja' };
+      if (!sock || sock.readyState !== 1) return { ok: false, motivo: 'sem conexão' };
+      pvp.coletando = true; pvp.erro = null; pvp.feitos = 0;
+      try {
+        const antes = pvp.tabelaEm;
+        nossos.tabela = Date.now();
+        sock.send(JSON.stringify({ t: 'pvp.tabela', pagina: 1 }));
+        for (let i = 0; i < 40 && pvp.tabelaEm === antes; i++) await espera(500);
+        if (pvp.tabelaEm === antes) { pvp.erro = 'a tabela não respondeu'; return { ok: false, motivo: pvp.erro }; }
+        const nicks = (pvp.tabela || []).slice(0, Math.max(1, Math.min(100, n))).map((l) => l[1]).filter(Boolean);
+        pvp.total = nicks.length;
+        const novos = {};
+        for (const nick of nicks) {
+          if (!sock || sock.readyState !== 1) break;
+          const k = String(nick).toLowerCase();
+          nossos.perfis.set(k, Date.now());
+          const t0 = Date.now();
+          sock.send(JSON.stringify({ t: 'ranking.perfil', nick }));
+          for (let i = 0; i < 16 && !(pvp.perfis[nick] && pvp.perfis[nick].em >= t0); i++) await espera(500);
+          if (pvp.perfis[nick] && pvp.perfis[nick].em >= t0) novos[nick] = pvp.perfis[nick];
+          pvp.feitos++;
+          await espera(passoMs);
+        }
+        pvp.at = Date.now();
+        setTimeout(() => nossos.perfis.clear(), 30000);
+        return { ok: true, n: Object.keys(novos).length };
+      } finally { pvp.coletando = false; }
+    }
+    // Junta tudo com nome, tipos e alcance de cada espécie, e as espécies que a conta tem.
+    async function pvpLer(extraIds) {
+      const esp = await especies();
+      const tab = await tabuleiro();
+      const info = {};
+      const anota = (id) => {
+        if (id == null || info[id]) return;
+        const c = esp.get(id);
+        if (!c) return;
+        let alc = 1;
+        try { alc = tab ? tab.alcanceDaEspecie(c) : 1; } catch {}
+        const n = (k) => Number(c[k]) || 0;
+        info[id] = { nome: c.name, tipos: tiposDe(c), alcance: alc,
+          stats: { hp: n('baseHp'), atk: n('baseAtk'), def: n('baseDef'), spa: n('baseSpAtk'), spd: n('baseSpDef'), spe: n('baseSpeed') } };
+      };
+      const linhas = (pvp.tabela || []).slice(0, 100).map((l) => ({ pos: l[0], nick: l[1], tier: l[2], div: l[3], pr: l[4], v: l[5], d: l[6] }));
+      for (const p of Object.values(pvp.perfis)) for (const k of p.time) anota(k.speciesId);
+      for (const id of Array.isArray(extraIds) ? extraIds.slice(0, 400) : []) anota(id);
+      const meus = {};
+      for (const k of jogo.pks.values()) { anota(k.speciesId); const cur = meus[k.speciesId]; if (!cur || k.level > cur.level) meus[k.speciesId] = { id: k.id, level: k.level, aoe: k.aoe, el: k.el }; }
+      const eu = pvp.eu ? pvp.eu.dados : null;
+      return { euPvp: jogo.eu.pvp ? JSON.parse(JSON.stringify(jogo.eu.pvp)) : null, nivel: Number(jogo.eu.level) || 0, at: pvp.at, coletando: pvp.coletando, feitos: pvp.feitos, total: pvp.total, erro: pvp.erro, linhas, perfis: pvp.perfis, info, meus, tabelaTipos: jogo.tabelaTipos, eu, nick: jogo.eu.nick || null, euKeys: jogo.keys.slice(0, 80) };
+    }
 
     const PEDIDOS = { 'market.meus': 1, 'market.historico': 1, 'market.historicoGlobal': 1 };
     Object.defineProperty(window, '__idleterinoMercado', {
@@ -89,6 +294,10 @@ contextBridge.executeInMainWorld({
         canais() { return JSON.parse(JSON.stringify(canais)); },
         hunts() { return hunts.slice(); },
         bonusXp() { return bonusXp ? JSON.parse(JSON.stringify(bonusXp)) : null; },
+        huntRank() { return huntRank().then((r) => JSON.parse(JSON.stringify(r))).catch((e) => ({ pronto: false, erro: String(e) })); },
+        pvpColetar(n, passo) { return pvpColetar(n, passo).catch((e) => ({ ok: false, motivo: String(e) })); },
+        pvpEstado() { return { coletando: pvp.coletando, feitos: pvp.feitos, total: pvp.total, at: pvp.at }; },
+        pvpLer(ids) { return pvpLer(ids).then((r) => JSON.parse(JSON.stringify(r))).catch((e) => ({ erro: String(e) })); },
       }),
     });
   },
