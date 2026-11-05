@@ -203,6 +203,9 @@ app.setAppUserModelId('com.vinniisaantos.idleterino');
 app.whenReady().then(() => {
   loadConfig();
   for (const m of Object.values(modules)) { m.loadConfig(); m.setupSession(); }
+  // Kick com a identificação original do app, como no Kickterino: é assim que o login com Google
+  // funciona (sem o "Electron" o Google recusa). A Twitch continua sem ele, como no Twitchterino.
+  session.fromPartition('persist:kick').setUserAgent(ORIGINAL_UA);
   mainWin = new BrowserWindow({
     width: 1440, height: 900, minWidth: 980, minHeight: 620, backgroundColor: '#0a0b10', title: 'Idleterino',
     show: !process.argv.includes('--hidden'), icon: ICON, autoHideMenuBar: true,
