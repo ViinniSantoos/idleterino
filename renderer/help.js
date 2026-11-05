@@ -41,6 +41,12 @@ window.HELP = [
     '5. Pronto: a extensão aparece na lista, ligada. As contas do PokeIdle recarregam sozinhas para aplicar.',
     'Para desligar, use o botão ao lado da extensão. Para tirar de vez, clique em Remover.',
   ]],
+  ['Extensões', 'Onde fica o painel da extensão (ex.: Cockpit do Rotom Sniper)?', [
+    'No Chrome, o painel abre pelo ícone da extensão na barra do navegador. No Idleterino, ele fica na tela de cada conta do PokeIdle.',
+    'Vá em PokeIdle, escolha a conta e clique no botão 🧩 com o nome da extensão, ao lado de Congelar.',
+    'Cada conta tem o seu painel, com os dados e as regras daquela conta. Abra o painel da conta que você quer usar.',
+    'Pegar a pasta de uma extensão que você já usa no Chrome ou no Edge: ela fica em AppData\\Local\\Google\\Chrome (ou Microsoft\\Edge)\\User Data\\Default\\Extensions\\<ID da extensão>\\<versão>. Copie essa pasta para outro lugar e instale com "📁 Instalar pasta".',
+  ]],
   ['Extensões', 'Instalei e a extensão não funciona. E agora?', [
     'Confira se ela está ligada na lista e se aparece algum aviso embaixo do nome ("Não carregou: …").',
     'Clique em ↻ na conta do PokeIdle para recarregar o jogo.',

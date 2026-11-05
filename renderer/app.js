@@ -530,6 +530,13 @@ function renderPoke() {
     seg.append(b);
   }
   bar.append(name, seg, el('span', 'spacer'));
+  // Painel das extensões (ex.: o Cockpit do Rotom Sniper), aberto na sessão desta conta.
+  for (const x of (S.ext || []).filter((x) => x.enabled && x.hasPanel)) {
+    const b = button(`🧩 ${x.name.split(/\s[-–—|]\s/)[0].slice(0, 18)}`, null, async () => { const r = await call('poke:ext:open', x.id, a.id, a.info && a.info.nick && a.info.nick !== '—' ? a.info.nick : a.name); if (r && r.error) toast(`⚠ ${r.error}`); });
+    b.title = `Abrir o painel de ${x.name} para esta conta`;
+    bar.append(b);
+  }
+  if (!S.ext) call('poke:ext:list').then((l) => { S.ext = l; if (l.some((x) => x.enabled && x.hasPanel)) renderPoke(); });
   bar.append(button(a.frozen ? '☀ Descongelar' : '❄ Congelar', null, async () => { S.poke = await call(a.frozen ? 'poke:unfreeze' : 'poke:freeze', a.id); renderPoke(); }));
   bar.append(button(a.muted ? '🔇' : '🔊', 'ghost', async () => { S.poke = await call('poke:mute', a.id, !a.muted); renderPoke(); }));
   bar.append(button('↻', 'ghost', () => call('poke:reload', a.id)));
@@ -646,7 +653,7 @@ async function renderExt() {
   const list = el('div', 'card list');
   if (!S.ext.length) list.append(el('div', 'empty', 'Nenhuma extensão instalada. Use os botões acima para adicionar a pasta ou o arquivo da extensão.'));
   for (const e of S.ext) {
-    const r = rowOpt(`${e.name}${e.version ? ` · v${e.version}` : ''}`, e.error ? `Não carregou: ${e.error}` : (e.description || (e.mv === 3 ? 'Manifest V3' : 'Manifest V2')), el('span'));
+    const r = rowOpt(`${e.name}${e.version ? ` · v${e.version}` : ''}`, e.error ? `Não carregou: ${e.error}` : `${e.description || (e.mv === 3 ? 'Manifest V3' : 'Manifest V2')}${e.hasPanel && e.enabled ? ' · Painel: botão 🧩 na tela de cada conta do PokeIdle.' : ''}`, el('span'));
     const ctrl = el('div'); ctrl.style.display = 'flex'; ctrl.style.gap = '10px'; ctrl.style.alignItems = 'center';
     ctrl.append(sw(e.enabled, async (v) => { S.ext = await call('poke:ext:toggle', e.id, v); renderExt(); }),
       button('Remover', 'ghost', async () => { S.ext = await call('poke:ext:remove', e.id); renderExt(); }));

@@ -3,7 +3,7 @@
 // nas sessões das contas do PokeIdle (nunca nas da Twitch/Kick, onde estão esses logins).
 // Instalar = copiar para <dados do app>/extensions/<id>. Aceita pasta, .zip ou .crx (o .crx é um
 // zip com um cabeçalho na frente, que é retirado antes de extrair).
-const { app, dialog, ipcMain, session } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, session } = require('electron');
 const { execFileSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
@@ -93,9 +93,48 @@ module.exports = function createExtensions(ctx) {
     // Extensão removida da lista: tira da sessão também.
     for (const [dir, xid] of [...loaded]) if (!list.some((e) => e.dir === dir)) { try { api.removeExtension(xid); } catch {} loaded.delete(dir); }
   }
+  function closePanels(extId) { for (const [k, w] of [...panelWins]) if (k.startsWith(`${extId}|`)) { if (!w.isDestroyed()) w.close(); panelWins.delete(k); } }
   async function applyAll() { for (const p of ctx.pokePartitions()) await applyTo(p); ctx.reloadPoke(); }
 
-  const snapshot = () => list.map(({ id, name, version, description, enabled, mv, error }) => ({ id, name, version, description, enabled, mv, error: error || null }));
+  // Telas da própria extensão (o painel que no Chrome abre pelo ícone da barra): popup, opções ou,
+  // quando o ícone não tem popup (ex.: abre um "cockpit" numa janela), as páginas .html da raiz.
+  function panelsOf(e) {
+    try {
+      const m = JSON.parse(fs.readFileSync(path.join(e.dir, 'manifest.json'), 'utf8'));
+      const act = m.action || m.browser_action || null;
+      const bg = new Set([m.background && m.background.page].filter(Boolean));
+      const out = [act && act.default_popup, m.options_page, m.options_ui && m.options_ui.page];
+      if (act && !act.default_popup) for (const n of fs.readdirSync(e.dir)) if (/\.html?$/i.test(n) && !bg.has(n)) out.push(n);
+      return [...new Set(out.filter((p) => typeof p === 'string' && p && !p.includes('..') && fs.existsSync(path.join(e.dir, p))))];
+    } catch { return []; }
+  }
+  const panelWins = new Map(); // "ext|conta|página" -> janela
+  async function openPanel(extId, accountId, title) {
+    const e = list.find((x) => x.id === extId && x.enabled);
+    const partition = `persist:poke-${String(accountId)}`;
+    if (!e || !ctx.pokePartitions().includes(partition)) return { ok: false, error: 'Conta ou extensão não encontrada.' };
+    const page = panelsOf(e)[0];
+    if (!page) return { ok: false, error: 'Essa extensão não tem painel para abrir.' };
+    const key = `${extId}|${accountId}|${page}`;
+    const open = panelWins.get(key);
+    if (open && !open.isDestroyed()) { open.show(); open.focus(); return { ok: true }; }
+    if (!(loadedIn.get(partition) || new Map()).has(e.dir)) await applyTo(partition);
+    const xid = (loadedIn.get(partition) || new Map()).get(e.dir);
+    if (!xid) return { ok: false, error: e.error || 'A extensão não carregou nesta conta.' };
+    const win = new BrowserWindow({
+      width: 1160, height: 760, autoHideMenuBar: true, backgroundColor: '#0b0d14',
+      title: `${e.name} — ${String(title || '').slice(0, 30)}`,
+      icon: path.join(__dirname, 'build', 'icon.png'),
+      webPreferences: { partition, spellcheck: false },
+    });
+    win.on('page-title-updated', (ev) => ev.preventDefault());
+    win.on('closed', () => panelWins.delete(key));
+    panelWins.set(key, win);
+    win.loadURL(`chrome-extension://${xid}/${page}`);
+    return { ok: true };
+  }
+
+  const snapshot = () => list.map((e) => ({ id: e.id, name: e.name, version: e.version, description: e.description, enabled: e.enabled, mv: e.mv, error: e.error || null, hasPanel: panelsOf(e).length > 0 }));
 
   ipcMain.handle('poke:ext:list', () => snapshot());
   ipcMain.handle('poke:ext:addFolder', async () => {
@@ -108,10 +147,11 @@ module.exports = function createExtensions(ctx) {
     if (r.canceled || !r.filePaths[0]) return { ok: false, canceled: true, list: snapshot() };
     return { ...(await install(r.filePaths[0], true)), list: snapshot() };
   });
-  ipcMain.handle('poke:ext:toggle', async (_e, id, on) => { const e = list.find((x) => x.id === id); if (e) { e.enabled = !!on; e.error = null; save(); await applyAll(); } return snapshot(); });
+  ipcMain.handle('poke:ext:open', (_e, extId, accountId, title) => openPanel(extId, accountId, title));
+  ipcMain.handle('poke:ext:toggle', async (_e, id, on) => { const e = list.find((x) => x.id === id); if (e) { e.enabled = !!on; e.error = null; save(); if (!e.enabled) closePanels(id); await applyAll(); } return snapshot(); });
   ipcMain.handle('poke:ext:remove', async (_e, id) => {
     const e = list.find((x) => x.id === id);
-    if (e) { list = list.filter((x) => x.id !== id); save(); await applyAll(); fs.rmSync(path.join(root(), id), { recursive: true, force: true }); }
+    if (e) { closePanels(id); list = list.filter((x) => x.id !== id); save(); await applyAll(); fs.rmSync(path.join(root(), id), { recursive: true, force: true }); }
     return snapshot();
   });
 
