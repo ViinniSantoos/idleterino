@@ -253,3 +253,7 @@ h2.section { margin: 28px 0 12px; font-size: 13px; text-transform: uppercase; le
 .help-body { padding: 0 16px 14px 34px; color: var(--muted); }
 .help-body p { margin: 0 0 8px; }
 .help-body ol { margin: 0 0 8px; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; color: var(--text); }
+
+.ch-sub .warm { color: #7cc7ff; }
+.ch-sub .idle { color: #ff9f9f; }
+.ch-eta { font-size: 11px; color: var(--dim); }

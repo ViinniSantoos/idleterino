@@ -1119,6 +1119,7 @@ function snapshot() {
         priceChange: s.priceChange && now - s.priceChange.at < DAY_MS ? s.priceChange.text : null,
         pointsEnabled: s.pointsEnabled !== false,
         watchedMin: Math.floor(totalWatched(slug, now) / 60000), error: s.error || null,
+        turnMin: s.watchingSince ? Math.floor((now - s.watchingSince) / 60000) : null,
       };
     }),
     memoryMB: Math.round(app.getAppMetrics().reduce((t, m) => t + m.memory.workingSetSize, 0) / 1024),

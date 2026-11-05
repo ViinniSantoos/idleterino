@@ -14,14 +14,14 @@ const P = {
     emote: (id) => `https://static-cdn.jtvnw.net/emoticons/v2/${id}/default/dark/1.0`,
     bonusKey: (b) => b.kind,
     targets: (s) => [['', 'Bônus automático'], ...(s.bonusOptions || []).map((o) => [o.value, `${o.kind === 'xp' ? 'XP' : o.kind === 'capture' ? 'Capture Boost' : 'Secret Lure'} · ${o.hours} h — ${fmt(o.cost)} pts`])],
-    rate: 2, hasChest: true,
+    rate: 2, hasChest: true, firstCount: 5,
   },
   kick: {
     name: 'Kick', letter: 'K', login: 'Entrar com a Kick',
     emote: (id) => `https://files.kick.com/emotes/${id}/fullsize`,
     bonusKey: (b) => b.cost,
     targets: () => [['0', 'Bônus automático'], ['300', '+15% XP — 300 pts'], ['500', '+15% Capture Boost — 500 pts'], ['1000', '+15% Secret Lure — 1.000 pts']],
-    rate: 2, hasChest: false,
+    rate: 2, hasChest: false, firstCount: 7,
   },
 };
 const short = (name) => String(name).replace('+15% ', '');
@@ -194,12 +194,17 @@ function row(ns, s, ch) {
   if (ch.subscribed) name.append(el('span', 'tag sub', 'SUB'));
   if (ch.rewardsLoaded && ch.hasBonus === false) name.append(el('span', 'tag soon', 'em breve'));
   const sub = el('div', 'ch-sub');
-  if (ch.earning === 'earning') sub.append(el('span', 'earn', '● ganhando'));
-  else if (ch.earning === 'warming') sub.append('◌ aquecendo');
-  else if (ch.earning === 'idle') sub.append('○ sem pontos');
-  else sub.append(ch.live ? `${fmt(ch.viewers)} assistindo${ch.watching ? '' : ' · na fila'}` : 'offline');
-  if (ch.watching && ch.goalLeft > 0) sub.append(` · ⏱ ${clock((ch.goalLeft / (P[ns].rate * (ch.multiplier || 1))) * 60000)}`);
+  // Status com o tempo desta vez de assistir: aquecendo X de Y min → ganhando há X min.
+  const first = P[ns].firstCount; // minutos até a primeira contagem de pontos
+  const tm = ch.turnMin ?? 0;
+  if (ch.earning === 'earning') sub.append(el('span', 'earn', `● ganhando · ${clock(tm * 60000)}`));
+  else if (ch.earning === 'warming') { const w = el('span', 'warm', `◌ aquecendo · ${Math.min(tm, first)} de ${first} min`); w.title = `A primeira contagem de pontos chega ~${first} min depois que a live abre.`; sub.append(w); }
+  else if (ch.earning === 'idle') { const w = el('span', 'idle', `○ sem pontos há ${clock(tm * 60000)}`); w.title = 'Tocando sem o saldo subir: o app troca para outra live sozinho.'; sub.append(w); }
+  else if (ch.live) { const q = el('span', null, ch.watching ? `${fmt(ch.viewers)} assistindo` : `na fila · ${fmt(ch.viewers)} assistindo`); if (!ch.watching) q.title = 'Na fila: entra quando abrir uma vaga (o foco põe primeiro quem está mais perto do bônus).'; sub.append(q); }
+  else sub.append('offline');
+  const eta = ch.watching && ch.goalLeft > 0 && ch.earning !== 'idle' ? el('div', 'ch-eta', `próx. bônus em ${clock((ch.goalLeft / (P[ns].rate * (ch.multiplier || 1))) * 60000)}`) : null;
   info.append(name, sub);
+  if (eta) info.append(eta);
   const pts = el('div', 'ch-pts', ch.points != null ? fmt(ch.points) : '—');
   if (ch.gained > 0 && showGain(s, ch)) pts.append(el('small', null, `+${fmt(ch.gained)}`));
   r.append(avatar(ns, ch), info);

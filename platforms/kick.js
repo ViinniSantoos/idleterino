@@ -818,6 +818,7 @@ function snapshot() {
         goal: s.points != null ? goalRank(s.points).goal : null,
         goalLeft: s.points != null ? goalRank(s.points).left : null,
         watchedMin: Math.floor(watchedMs / 60000), error: s.error || null,
+        turnMin: s.watchingSince ? Math.floor((now - s.watchingSince) / 60000) : null,
       };
     }),
     memoryMB: Math.round(app.getAppMetrics().reduce((t, m) => t + m.memory.workingSetSize, 0) / 1024),
