@@ -1,7 +1,7 @@
 {
   "name": "idleterino",
   "productName": "Idleterino",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "PokeIdle, Twitch e Kick num só app: bônus, pontos, lives e contas do jogo, leve e organizado.",
   "author": "VinniiSaantos",
   "license": "MIT",
@@ -49,8 +49,7 @@
       "enableNodeOptionsEnvironmentVariable": false,
       "enableNodeCliInspectArguments": false,
       "onlyLoadAppFromAsar": true,
-      "enableEmbeddedAsarIntegrityValidation": true,
-      "grantFileProtocolExtraPrivileges": false
+      "enableEmbeddedAsarIntegrityValidation": true
     },
     "win": {
       "target": [
