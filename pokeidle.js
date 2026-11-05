@@ -35,7 +35,8 @@ const wantsOriginalUA = (url) => GOOGLE_LOGIN.test(hostOf(url));
 const sessionsWithUA = new WeakSet();
 
 // Só o jogo e as páginas de login que ele usa abrem nas sessões das contas.
-const TRUSTED = ['pokeidle.io', 'challenges.cloudflare.com', 'google.com', 'accounts.google.com', 'discord.com'];
+// twitch.tv e kick.com: o jogo leva para o login delas ao vincular o Bônus Twitch/Kick da conta.
+const TRUSTED = ['pokeidle.io', 'challenges.cloudflare.com', 'google.com', 'accounts.google.com', 'discord.com', 'twitch.tv', 'kick.com'];
 function isTrustedUrl(url) {
   if (url === 'about:blank') return true;
   try {

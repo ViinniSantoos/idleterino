@@ -1,7 +1,7 @@
 // Idleterino — a casca do app: janela, bandeja, atualização, iniciar com o sistema e o registro de
 // quais sites cada sessão pode abrir. Twitch e Kick moram em platforms/ (cada um com seu login,
 // sua configuração e seus canais de IPC "twitch:..." e "kick:..."). O PokeIdle mora em pokeidle.js.
-const { app, BrowserWindow, ipcMain, session, Tray, Menu, Notification, nativeImage, powerMonitor } = require('electron');
+const { app, BrowserWindow, ipcMain, session, shell, Tray, Menu, Notification, nativeImage, powerMonitor } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const fs = require('fs');
@@ -46,6 +46,13 @@ function trustFor(wc) {
   for (const [partition, fn] of trusts) if (wc.session === session.fromPartition(partition)) return { partition, fn };
   return null;
 }
+let lastOutside = 0;
+function openOutside(url) {
+  try { if (new URL(url).protocol !== 'https:') return; } catch { return; }
+  if (Date.now() - lastOutside < 2000) return;
+  lastOutside = Date.now();
+  shell.openExternal(url).catch(() => {});
+}
 app.on('web-contents-created', (_e, wc) => {
   // Ferramentas de desenvolvedor fechadas no app instalado: ninguém abre o console de uma conta
   // para copiar cookies ou injetar código.
@@ -58,6 +65,9 @@ app.on('web-contents-created', (_e, wc) => {
   wc.on('will-attach-webview', (event) => event.preventDefault());
   wc.setWindowOpenHandler(({ url }) => {
     const t = trustFor(wc);
+    // Contas do PokeIdle: link de outro site (ex.: "Votar no TopIdle", Discord) abre no navegador
+    // padrão da pessoa, fora da sessão da conta. Só https e no máximo um a cada 2 s.
+    if (t && !t.fn(url) && t.partition.startsWith('persist:poke-')) { openOutside(url); return { action: 'deny' }; }
     return t && t.fn(url) ? {
       action: 'allow',
       overrideBrowserWindowOptions: { width: 520, height: 720, autoHideMenuBar: true, icon: ICON, webPreferences: { partition: t.partition } },

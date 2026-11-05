@@ -41,6 +41,11 @@ window.HELP = [
     '5. Pronto: a extensão aparece na lista, ligada. As contas do PokeIdle recarregam sozinhas para aplicar.',
     'Para desligar, use o botão ao lado da extensão. Para tirar de vez, clique em Remover.',
   ]],
+  ['PokeIdle', 'Cliquei em "Votar no TopIdle" (ou num link de fora). Onde abre?', [
+    'Links de outros sites que o jogo abre (TopIdle, Discord, ChatGPT…) abrem no seu navegador padrão (Chrome, Edge…), fora do app.',
+    'No TopIdle, clique em Votar agora e espere a conferência. O nome do personagem já vai no link, então o diamante cai na conta certa.',
+    'O voto libera de novo depois de 25h.',
+  ]],
   ['PokeIdle', 'O mercado/RMT abre apertado e a barra de busca some. Como resolver?', [
     'O jogo muda de layout conforme o espaço. Com mais espaço ele mostra a barra de busca e mais coisas.',
     'Na barra de cima da conta, use o zoom (− 100% +): em 80% ou 90% o jogo cabe muito mais. Também dá para usar Ctrl + rodinha do mouse dentro do jogo.',
