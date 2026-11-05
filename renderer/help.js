@@ -41,6 +41,12 @@ window.HELP = [
     '5. Pronto: a extensão aparece na lista, ligada. As contas do PokeIdle recarregam sozinhas para aplicar.',
     'Para desligar, use o botão ao lado da extensão. Para tirar de vez, clique em Remover.',
   ]],
+  ['PokeIdle', 'Dá para ver as ALTs todas juntas, lado a lado?', [
+    'Sim. Em PokeIdle, clique em "▦ Ver ALTs juntas" (em cima, ao lado de Ajustes). Ao abrir uma ALT, todas as ALTs aparecem lado a lado, cada uma na sua coluna.',
+    'A conta principal (★) continua sempre sozinha. Por padrão é a primeira conta adicionada; para trocar, abra a conta certa e clique na estrela ☆ ao lado do nome.',
+    'Clique no nome em cima de uma coluna para controlar aquela ALT pela barra (modo, zoom, congelar…).',
+    'Dica: o modo ULTRA e o zoom menor (− na barra) deixam cada coluna mais leve e com mais coisa à vista. "▢ Ver ALTs uma por vez" volta ao normal.',
+  ]],
   ['PokeIdle', 'Cliquei em "Votar no TopIdle" (ou num link de fora). Onde abre?', [
     'Links de outros sites que o jogo abre (TopIdle, Discord, ChatGPT…) abrem no seu navegador padrão (Chrome, Edge…), fora do app.',
     'No TopIdle, clique em Votar agora e espere a conferência. O nome do personagem já vai no link, então o diamante cai na conta certa.',

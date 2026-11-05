@@ -88,8 +88,11 @@ module.exports = function createPokeIdle(ctx) {
   const account = (id) => config.accounts.find((a) => a.id === id);
 
   // Modo que vale agora para a conta: o escolhido, ou ULTRA quando ela está no fundo (se a pessoa ligou isso).
+  // Contas na tela: só a escolhida, ou várias lado a lado ("Ver juntas": a tela manda um retângulo por conta).
+  let tiles = null; // { id: {x,y,width,height} } no modo juntas
+  const isShown = (id) => visible && (tiles ? !!tiles[id] : config.selected === id);
   function effectiveMode(a) {
-    const inFront = visible && config.selected === a.id;
+    const inFront = isShown(a.id);
     if (!inFront && config.autoBackgroundUltra) return 'ultra';
     return a.mode;
   }
@@ -181,9 +184,10 @@ module.exports = function createPokeIdle(ctx) {
     if (!mainWin || mainWin.isDestroyed()) return;
     const cv = mainWin.contentView;
     for (const [id, v] of views) {
-      const show = visible && bounds && config.selected === id && !frozen.has(id);
+      const rect = tiles ? tiles[id] : (config.selected === id ? bounds : null);
+      const show = visible && rect && !frozen.has(id);
       const attached = cv.children.includes(v);
-      if (show) { if (!attached) cv.addChildView(v); v.setBounds(bounds); lastSeen.set(id, Date.now()); }
+      if (show) { if (!attached) cv.addChildView(v); v.setBounds(rect); lastSeen.set(id, Date.now()); }
       else if (attached) cv.removeChildView(v);
     }
   }
@@ -212,14 +216,15 @@ module.exports = function createPokeIdle(ctx) {
     if (!config.autoFreezeMin) return;
     const limit = config.autoFreezeMin * 60 * 1000;
     for (const a of config.accounts) {
-      if (frozen.has(a.id) || (visible && config.selected === a.id)) continue;
+      if (frozen.has(a.id) || isShown(a.id)) continue;
       if (Date.now() - (lastSeen.get(a.id) || 0) > limit) frozen.set(a.id, '');
     }
   }
 
   function snapshot() {
     return {
-      max: MAX_ACCOUNTS, selected: config.selected, autoBackgroundUltra: config.autoBackgroundUltra, autoFreezeMin: config.autoFreezeMin,
+      max: MAX_ACCOUNTS, selected: config.selected,
+      mainId: account(config.mainId) ? config.mainId : (config.accounts[0] ? config.accounts[0].id : null), autoBackgroundUltra: config.autoBackgroundUltra, autoFreezeMin: config.autoFreezeMin,
       pokeCount: config.accounts.filter((a) => isPokeIdle(urlOf(a))).length, maxWindows: MAX_WINDOWS, defaultUrl: GAME,
       accounts: config.accounts.map((a) => ({ ...a, url: urlOf(a), isPoke: isPokeIdle(urlOf(a)), host: hostOf(urlOf(a)), effectiveMode: effectiveMode(a), zoom: a.zoom || 1, info: info.get(a.id) || null, frozen: frozen.has(a.id), frozenImg: frozen.get(a.id) || null })),
     };
@@ -275,6 +280,8 @@ module.exports = function createPokeIdle(ctx) {
     if (a && MODES[mode]) { a.mode = mode; saveConfig(); applyMode(id); }
     return snapshot();
   });
+  // Conta principal: a pessoa escolhe; sem escolha, é a primeira conta adicionada.
+  ipcMain.handle('poke:main', (_e, id) => { if (account(id)) { config.mainId = id; saveConfig(); } return snapshot(); });
   ipcMain.handle('poke:zoom', (_e, id, z) => { setZoom(id, z); return snapshot(); });
   ipcMain.handle('poke:mute', (_e, id, muted) => { const a = account(id); const v = views.get(id); if (a) { a.muted = !!muted; saveConfig(); if (v) v.webContents.setAudioMuted(a.muted); } return snapshot(); });
   ipcMain.handle('poke:autoBackgroundUltra', (_e, on) => { config.autoBackgroundUltra = !!on; saveConfig(); for (const a of config.accounts) applyMode(a.id); return snapshot(); });
@@ -283,12 +290,19 @@ module.exports = function createPokeIdle(ctx) {
   ipcMain.handle('poke:unfreeze', (_e, id) => { unfreeze(id); return snapshot(); });
   ipcMain.handle('poke:reload', (_e, id) => { const v = views.get(id); if (v) v.webContents.reload(); return snapshot(); });
   // A tela diz onde a conta aparece e se a página PokeIdle está aberta.
-  ipcMain.handle('poke:view', (_e, isVisible, rect) => {
-    const wasVisible = visible;
+  const toRect = (r) => ({ x: Math.round(r.x), y: Math.round(r.y), width: Math.max(1, Math.round(r.width)), height: Math.max(1, Math.round(r.height)) });
+  ipcMain.handle('poke:view', (_e, isVisible, rect, tileRects) => {
+    const before = config.accounts.map((a) => isShown(a.id)).join();
     visible = !!isVisible;
-    bounds = rect ? { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) } : bounds;
+    bounds = rect ? toRect(rect) : bounds;
+    tiles = null;
+    if (tileRects && typeof tileRects === 'object') {
+      tiles = {};
+      for (const [id, r] of Object.entries(tileRects)) if (account(id) && r && r.width > 0 && r.height > 0) tiles[id] = toRect(r);
+    }
     layout();
-    if (wasVisible !== visible && config.autoBackgroundUltra && config.selected) applyMode(config.selected);
+    // Quem entrou ou saiu da tela troca de modo (se "ULTRA automático no fundo" estiver ligado).
+    if (config.autoBackgroundUltra && before !== config.accounts.map((a) => isShown(a.id)).join()) for (const a of config.accounts) applyMode(a.id);
     return true;
   });
 

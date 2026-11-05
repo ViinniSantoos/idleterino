@@ -493,11 +493,13 @@ function accCard(a, onclick, active) {
   top.append(el('b', null, nick), el('span', 'lvl', i.logged && i.level ? `Nv ${i.level.replace(/\D+/g, '')}` : ''));
   const sub = el('div', 'acc-sub', !a.isPoke ? a.host : !a.info ? 'carregando…' : !i.logged ? 'entre na conta do jogo' : [i.xpH && `${i.xpH}`, i.where].filter(Boolean).join(' · ') || a.name);
   c.append(top, sub, accTags(a));
+  c.title = [nick, sub.textContent].filter(Boolean).join(' · ');
   c.onclick = onclick;
   return c;
 }
 
 let pokeStageRect = null;
+let pokeGrid = (() => { try { return localStorage.getItem('pokeGrid') === '1'; } catch { return false; } })();
 let pokeExpanded = (() => { try { return localStorage.getItem('pokeExpanded') === '1'; } catch { return false; } })();
 function renderPoke() {
   const root = $('#page-poke');
@@ -507,6 +509,12 @@ function renderPoke() {
   const h = el('h1'); h.append(el('i'), 'PokeIdle'); top.append(h);
   if (!s) { root.append(top, emptyBox('Carregando…', '')); return pokeView(false); }
   const chip = el('span', 'chip'); chip.append(el('b', null, `${s.pokeCount}/${s.max}`), 'contas do PokeIdle'); top.append(chip, el('span', 'spacer'));
+  const alts = s.accounts.filter((x) => x.id !== s.mainId);
+  if (alts.length > 1) {
+    const g = button(pokeGrid ? '▢ Ver ALTs uma por vez' : '▦ Ver ALTs juntas', pokeGrid ? 'on' : null, () => { pokeGrid = !pokeGrid; try { localStorage.setItem('pokeGrid', pokeGrid ? '1' : '0'); } catch {} renderPoke(); });
+    g.title = pokeGrid ? 'Voltar a ver uma ALT por vez' : 'Ao abrir uma ALT, mostra todas as ALTs lado a lado (a principal continua sozinha)';
+    top.append(g);
+  }
   top.append(button('⚙ Ajustes', null, openPokeDrawer));
   if (!s.accounts.length) {
     root.append(top, emptyBox('Adicione sua primeira conta', 'Cada conta tem a sua sessão e o modo de tela que você escolher. O PokeIdle permite até 4 contas por pessoa.', button('＋ Adicionar conta', 'primary', addAccount)));
@@ -514,7 +522,11 @@ function renderPoke() {
   }
   const body = el('div', 'poke-body');
   const list = el('div', 'acc-list');
-  for (const a of s.accounts) list.append(accCard(a, async () => { S.poke = await call('poke:select', a.id); renderPoke(); }, a.id === s.selected));
+  for (const a of s.accounts) {
+    const c = accCard(a, async () => { S.poke = await call('poke:select', a.id); renderPoke(); }, a.id === s.selected);
+    if (a.id === s.mainId) { const tg = c.querySelector('.acc-tags'); if (tg) tg.prepend(el('span', 'mtag main', '★ Principal')); }
+    list.append(c);
+  }
   if (s.accounts.length < s.maxWindows) list.append(button('＋ Adicionar conta', 'acc-add', addAccount));
   list.append(el('div', 'acc-rule', `Regra do PokeIdle: até ${s.max} contas por pessoa. Contas acima disso são removidas pelo jogo.`));
   const a = s.accounts.find((x) => x.id === s.selected) || s.accounts[0];
@@ -530,7 +542,9 @@ function renderPoke() {
     if (m === 'ultra') b.append(el('span', 'star', '★'));
     seg.append(b);
   }
-  bar.append(name, seg, el('span', 'spacer'));
+  const star = button(a.id === s.mainId ? '★' : '☆', a.id === s.mainId ? 'ghost main-on' : 'ghost', async () => { if (a.id !== s.mainId) { S.poke = await call('poke:main', a.id); renderPoke(); } });
+  star.title = a.id === s.mainId ? 'Esta é a sua conta principal: ela aparece sempre sozinha' : 'Marcar esta conta como a principal (as outras viram ALTs)';
+  bar.append(name, star, seg, el('span', 'spacer'));
   // Painel das extensões (ex.: o Cockpit do Rotom Sniper), aberto na sessão desta conta.
   for (const x of (S.ext || []).filter((x) => x.enabled && x.hasPanel)) {
     const b = button(`🧩 ${x.name.split(/\s[-–—|]\s/)[0].slice(0, 18)}`, null, async () => { const r = await call('poke:ext:open', x.id, a.id, a.info && a.info.nick && a.info.nick !== '—' ? a.info.nick : a.name); if (r && r.error) toast(`⚠ ${r.error}`); });
@@ -555,7 +569,31 @@ function renderPoke() {
   bar.append(button('↻', 'ghost', () => call('poke:reload', a.id)));
   const remove = button('✕', 'ghost', () => confirmRemove(a)); remove.title = 'Remover a conta deste app'; bar.append(remove);
   const stage = el('div'); stage.id = 'poke-stage';
-  if (a.frozen) {
+  if (pokeGrid && alts.length > 1 && a.id !== s.mainId) {
+    // Modo juntas: uma coluna por conta (até 4 por linha), com o nome em cima. Clicar no nome escolhe
+    // a conta que a barra de cima controla.
+    stage.classList.add('grid');
+    stage.style.setProperty('--cols', Math.min(4, Math.ceil(alts.length / Math.ceil(alts.length / 4))));
+    for (const x of alts) {
+      const t = el('div', `tile${x.id === a.id ? ' on' : ''}`);
+      const i = x.info || {};
+      const hd = el('div', 'tile-hd');
+      hd.append(el('b', null, i.logged && i.nick && i.nick !== '—' ? i.nick : x.name), el('span', `mtag ${x.effectiveMode === 'ultra' ? 'ultra' : ''}`, (MODE_INFO[x.effectiveMode] || [x.effectiveMode])[0]));
+      if (i.logged && i.level) hd.append(el('span', 'lvl', `Nv ${i.level.replace(/\D+/g, '')}`));
+      hd.title = 'Clique para controlar esta conta pela barra de cima';
+      hd.onclick = async () => { S.poke = await call('poke:select', x.id); renderPoke(); };
+      const bd = el('div', 'tile-bd'); bd.dataset.id = x.id;
+      if (x.frozen) {
+        const f = el('div', 'frozen-shot');
+        if (x.frozenImg) { const img = el('img'); img.src = x.frozenImg; f.append(img); }
+        f.append(el('div', 'pill', '❄ Congelada · clique'));
+        f.onclick = async () => { S.poke = await call('poke:unfreeze', x.id); renderPoke(); };
+        bd.append(f);
+      }
+      t.append(hd, bd);
+      stage.append(t);
+    }
+  } else if (a.frozen) {
     const f = el('div', 'frozen-shot');
     if (a.frozenImg) { const img = el('img'); img.src = a.frozenImg; f.append(img); }
     f.append(el('div', 'pill', '❄ Conta congelada — continua caçando. Clique para voltar.'));
@@ -572,7 +610,12 @@ function renderPoke() {
 function pokeView(visible) {
   const st = $('#poke-stage');
   const r = st && visible ? st.getBoundingClientRect() : null;
-  call('poke:view', !!(visible && r), r ? { x: r.left, y: r.top, width: r.width, height: r.height } : null);
+  let tiles = null;
+  if (st && visible && st.classList.contains('grid')) {
+    tiles = {};
+    for (const b of st.querySelectorAll('.tile-bd')) { const q = b.getBoundingClientRect(); tiles[b.dataset.id] = { x: q.left, y: q.top, width: q.width, height: q.height }; }
+  }
+  call('poke:view', !!(visible && r), r ? { x: r.left, y: r.top, width: r.width, height: r.height } : null, tiles);
 }
 function addAccount() {
   pokeView(false);
