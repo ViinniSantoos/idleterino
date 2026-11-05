@@ -14,7 +14,11 @@ const path = require('path');
 const fs = require('fs');
 
 const GAME = 'https://pokeidle.io/app';
-const MAX_ACCOUNTS = 4;
+const MAX_ACCOUNTS = 4;   // regra do PokeIdle: até 4 contas por pessoa
+const MAX_WINDOWS = 8;    // contas de outros sites também cabem, mas o total fica em 8 para não pesar
+const hostOf = (url) => { try { return new URL(url).hostname; } catch { return ''; } };
+const isPokeIdle = (url) => /(^|\.)pokeidle\.io$/.test(hostOf(url));
+const urlOf = (a) => a.url || GAME;
 const MODES = {
   cena: { 'cfg-otimizado': '0', 'cfg-economia': '0', 'cfg-ultra': '0' },
   otimizado: { 'cfg-otimizado': '1', 'cfg-economia': '0', 'cfg-ultra': '0' },
@@ -85,7 +89,7 @@ module.exports = function createPokeIdle(ctx) {
   // Grava as preferências do jogo e recarrega quando elas não batem com o modo pedido.
   async function applyMode(id) {
     const a = account(id); const v = views.get(id);
-    if (!a || !v || v.webContents.isDestroyed()) return;
+    if (!a || !v || v.webContents.isDestroyed() || !isPokeIdle(urlOf(a))) return;
     const want = MODES[effectiveMode(a)] || MODES.cena;
     const changed = await v.webContents.executeJavaScript(`(() => { const p = ${JSON.stringify(want)}; let c = false;
       for (const k in p) if (localStorage.getItem(k) !== p[k]) { localStorage.setItem(k, p[k]); c = true; } return c; })()`).catch(() => false);
@@ -95,16 +99,17 @@ module.exports = function createPokeIdle(ctx) {
   function createView(a) {
     const ses = session.fromPartition(partitionOf(a.id));
     ses.setPermissionRequestHandler((_wc, perm, cb) => cb(perm === 'clipboard-sanitized-write' || perm === 'notifications' || perm === 'fullscreen'));
-    ctx.registerTrust(partitionOf(a.id), isTrustedUrl);
+    const gameHost = hostOf(urlOf(a));
+    ctx.registerTrust(partitionOf(a.id), (url) => isTrustedUrl(url) || hostOf(url) === gameHost || hostOf(url).endsWith(`.${gameHost}`));
     const v = new WebContentsView({ webPreferences: { partition: partitionOf(a.id), backgroundThrottling: false, spellcheck: false } });
     v.setBackgroundColor('#090a0f');
     v.webContents.setAudioMuted(!!a.muted);
     v.webContents.on('did-finish-load', () => { applyMode(a.id); setTimeout(() => readOne(a.id), 4000); });
     // Caiu ou não carregou: tenta de novo sozinho (a conta precisa ficar conectada).
-    const retry = () => setTimeout(() => { if (views.get(a.id) === v && !v.webContents.isDestroyed()) v.webContents.loadURL(GAME); }, 20 * 1000);
+    const retry = () => setTimeout(() => { if (views.get(a.id) === v && !v.webContents.isDestroyed()) v.webContents.loadURL(urlOf(a)); }, 20 * 1000);
     v.webContents.on('render-process-gone', retry);
     v.webContents.on('did-fail-load', (_e, code, _d, _u, main) => { if (main && code !== -3) retry(); });
-    v.webContents.loadURL(GAME);
+    v.webContents.loadURL(urlOf(a));
     views.set(a.id, v);
     return v;
   }
@@ -123,7 +128,8 @@ module.exports = function createPokeIdle(ctx) {
 
   async function readOne(id) {
     const v = views.get(id);
-    if (!v || v.webContents.isDestroyed()) return;
+    const acc = account(id);
+    if (!v || v.webContents.isDestroyed() || !acc || !isPokeIdle(urlOf(acc))) return;
     const r = await v.webContents.executeJavaScript(READ_SCRIPT).catch(() => null);
     if (r) { info.set(id, { ...r, at: Date.now() }); send('status', snapshot()); }
   }
@@ -152,16 +158,27 @@ module.exports = function createPokeIdle(ctx) {
   function snapshot() {
     return {
       max: MAX_ACCOUNTS, selected: config.selected, autoBackgroundUltra: config.autoBackgroundUltra, autoFreezeMin: config.autoFreezeMin,
-      accounts: config.accounts.map((a) => ({ ...a, effectiveMode: effectiveMode(a), info: info.get(a.id) || null, frozen: frozen.has(a.id), frozenImg: frozen.get(a.id) || null })),
+      pokeCount: config.accounts.filter((a) => isPokeIdle(urlOf(a))).length, maxWindows: MAX_WINDOWS, defaultUrl: GAME,
+      accounts: config.accounts.map((a) => ({ ...a, url: urlOf(a), isPoke: isPokeIdle(urlOf(a)), host: hostOf(urlOf(a)), effectiveMode: effectiveMode(a), info: info.get(a.id) || null, frozen: frozen.has(a.id), frozenImg: frozen.get(a.id) || null })),
     };
   }
 
   // ---------- IPC ----------
   ipcMain.handle('poke:state', () => snapshot());
-  ipcMain.handle('poke:add', (_e, name) => {
-    if (config.accounts.length >= MAX_ACCOUNTS) return snapshot();
+  ipcMain.handle('poke:add', (_e, name, rawUrl) => {
+    let url = String(rawUrl || GAME).trim();
+    // Outro protocolo (ftp:, file:, javascript:…) não entra; sem protocolo, vira https://.
+    if (/^[a-z][a-z0-9+.-]*:\/\//i.test(url) && !/^https?:\/\//i.test(url)) return { ...snapshot(), error: 'Use um endereço que comece com https://' };
+    if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
+    try {
+      const u = new URL(url);
+      if ((u.protocol !== 'https:' && u.protocol !== 'http:') || !/\.[a-z]{2,}$/i.test(u.hostname)) throw 0;
+      url = u.href;
+    } catch { return { ...snapshot(), error: 'Endereço inválido' }; }
+    if (isPokeIdle(url) && config.accounts.filter((a) => isPokeIdle(urlOf(a))).length >= MAX_ACCOUNTS) return { ...snapshot(), error: 'O PokeIdle permite até 4 contas por pessoa.' };
+    if (config.accounts.length >= MAX_WINDOWS) return { ...snapshot(), error: `Máximo de ${MAX_WINDOWS} contas no app.` };
     const id = Math.random().toString(36).slice(2, 10);
-    const a = { id, name: String(name || `Conta ${config.accounts.length + 1}`).slice(0, 24), mode: config.accounts.length ? 'ultra' : 'cena', muted: true };
+    const a = { id, url, name: String(name || `Conta ${config.accounts.length + 1}`).slice(0, 24), mode: config.accounts.length ? 'ultra' : 'cena', muted: true };
     config.accounts.push(a);
     config.selected = id;
     saveConfig();

@@ -409,7 +409,7 @@ function accCard(a, onclick, active) {
   const top = el('div', 'acc-top');
   const nick = i.logged && i.nick && i.nick !== '—' ? i.nick : a.name;
   top.append(el('b', null, nick), el('span', 'lvl', i.logged && i.level ? `Nv ${i.level.replace(/\D+/g, '')}` : ''));
-  const sub = el('div', 'acc-sub', !a.info ? 'carregando…' : !i.logged ? 'entre na conta do jogo' : [i.xpH && `${i.xpH}`, i.where].filter(Boolean).join(' · ') || a.name);
+  const sub = el('div', 'acc-sub', !a.isPoke ? a.host : !a.info ? 'carregando…' : !i.logged ? 'entre na conta do jogo' : [i.xpH && `${i.xpH}`, i.where].filter(Boolean).join(' · ') || a.name);
   c.append(top, sub, accTags(a));
   c.onclick = onclick;
   return c;
@@ -423,7 +423,7 @@ function renderPoke() {
   const top = el('div', 'ptop');
   const h = el('h1'); h.append(el('i'), 'PokeIdle'); top.append(h);
   if (!s) { root.append(top, emptyBox('Carregando…', '')); return pokeView(false); }
-  const chip = el('span', 'chip'); chip.append(el('b', null, `${s.accounts.length}/${s.max}`), 'contas'); top.append(chip, el('span', 'spacer'));
+  const chip = el('span', 'chip'); chip.append(el('b', null, `${s.pokeCount}/${s.max}`), 'contas do PokeIdle'); top.append(chip, el('span', 'spacer'));
   top.append(button('⚙ Ajustes', null, openPokeDrawer));
   if (!s.accounts.length) {
     root.append(top, emptyBox('Adicione sua primeira conta', 'Cada conta tem a sua sessão e o modo de tela que você escolher. O PokeIdle permite até 4 contas por pessoa.', button('＋ Adicionar conta', 'primary', addAccount)));
@@ -432,7 +432,7 @@ function renderPoke() {
   const body = el('div', 'poke-body');
   const list = el('div', 'acc-list');
   for (const a of s.accounts) list.append(accCard(a, async () => { S.poke = await call('poke:select', a.id); renderPoke(); }, a.id === s.selected));
-  if (s.accounts.length < s.max) list.append(button('＋ Adicionar conta', 'acc-add', addAccount));
+  if (s.accounts.length < s.maxWindows) list.append(button('＋ Adicionar conta', 'acc-add', addAccount));
   list.append(el('div', 'acc-rule', `Regra do PokeIdle: até ${s.max} contas por pessoa. Contas acima disso são removidas pelo jogo.`));
   const a = s.accounts.find((x) => x.id === s.selected) || s.accounts[0];
   const wrap = el('div', 'stage-wrap');
@@ -440,6 +440,7 @@ function renderPoke() {
   const name = el('span', 'name', a.info && a.info.logged && a.info.nick && a.info.nick !== '—' ? `${a.info.nick} · ${a.name}` : a.name); name.title = 'Clique duas vezes para renomear';
   name.ondblclick = () => renameAccount(a);
   const seg = el('div', 'seg');
+  if (!a.isPoke) seg.hidden = true;
   for (const [m, [label, help]] of Object.entries(MODE_INFO)) {
     const b = button(label, a.mode === m ? 'on' : '', async () => { S.poke = await call('poke:mode', a.id, m); renderPoke(); });
     b.title = help + (m === 'ultra' ? ' Recomendado para as contas que você não está olhando.' : '');
@@ -474,13 +475,20 @@ function addAccount() {
   pokeView(false);
   const card = $('#modal-card');
   const input = el('input'); input.type = 'text'; input.placeholder = 'Ex.: Principal, ALT 1…'; input.style.width = '100%';
+  const url = el('input'); url.type = 'text'; url.value = (S.poke && S.poke.defaultUrl) || 'https://pokeidle.io/app'; url.style.width = '100%'; url.style.marginTop = '8px';
+  url.title = 'Endereço da página onde você joga. Padrão: https://pokeidle.io/app';
+  const err = el('p', 'warn-google'); err.hidden = true;
   card.replaceChildren(el('h3', null, 'Nova conta do PokeIdle'),
-    el('p', null, 'Dê um nome para reconhecer a conta. Depois é só entrar no jogo nela, como no navegador. Cada conta fica com o login separado.'), input,
+    el('p', null, 'Dê um nome para reconhecer a conta e confira o endereço do jogo. Depois é só entrar no jogo nela, como no navegador. Cada conta fica com o login separado.'), input, url,
     el('p', null, 'Lembrete: o PokeIdle permite até 4 contas por pessoa. Se a conta estiver aberta em outro lugar (navegador, IdleDeck), ela cai lá quando entrar aqui.'),
     el('p', 'warn-google', '⚠ Entre com Discord ou com e-mail e senha. O Google bloqueia login dentro de apps ("Não foi possível fazer o login"), então contas criadas só com Gmail não entram aqui.'));
   const actions = el('div', 'actions');
-  actions.append(button('Cancelar', null, closeModal), button('Adicionar', 'primary', async () => { closeModal(); S.poke = await call('poke:add', input.value.trim()); go('poke'); }));
-  card.append(actions);
+  actions.append(button('Cancelar', null, closeModal), button('Adicionar', 'primary', async () => {
+    const res = await call('poke:add', input.value.trim(), url.value.trim());
+    if (res.error) { err.textContent = res.error; err.hidden = false; return; }
+    S.poke = res; closeModal(); go('poke');
+  }));
+  card.append(err, actions);
   $('#modal').hidden = false; input.focus();
 }
 function renameAccount(a) {
