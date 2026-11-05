@@ -40,7 +40,8 @@
       "pokeidle.js",
       "platforms/**/*",
       "renderer/**/*",
-      "build/icon.png"
+      "build/icon.png",
+      "extensions.js"
     ],
     "electronFuses": {
       "enableCookieEncryption": true,

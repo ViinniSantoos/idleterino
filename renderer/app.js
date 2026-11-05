@@ -27,7 +27,7 @@ const P = {
 const short = (name) => String(name).replace('+15% ', '');
 
 // ---------- Estado ----------
-const S = { app: null, twitch: null, kick: null, poke: null };
+const S = { app: null, twitch: null, kick: null, poke: null, ext: null };
 const view = { twitch: { active: null, filter: '', offline: false }, kick: { active: null, filter: '', offline: false } };
 const chat = { twitch: new Map(), kick: new Map() }; // slug -> [nós]
 const MAX_MSG = 300, MAX_BG = 120;
@@ -42,6 +42,8 @@ function go(p) {
   if (p === 'poke') renderPoke(); else pokeView(false);
   if (p === 'home') renderHome();
   if (p === 'settings') renderSettings();
+  if (p === 'ext') renderExt();
+  if (p === 'help') renderHelp();
 }
 for (const b of document.querySelectorAll('.nav')) b.onclick = () => go(b.dataset.page);
 
@@ -553,6 +555,81 @@ function renderHomePoke() {
   box.className = 'home-accs';
   for (const a of s.accounts) box.append(accCard(a, async () => { S.poke = await call('poke:select', a.id); go('poke'); }, false));
 }
+
+// ---------- Extensões ----------
+async function renderExt() {
+  const root = $('#page-ext');
+  if (!S.ext) S.ext = await call('poke:ext:list');
+  root.replaceChildren();
+  const head = el('header', 'page-head');
+  const t = el('div'); t.append(el('h1', null, 'Extensões'), el('p', 'sub', 'As extensões que você já usa no PokeIdle (sniper, /hunt e outras). Valem só nas contas do jogo.'));
+  const add = el('div', 'actions'); add.style.margin = '0';
+  const run = async (ch) => { const r = await call(ch); if (r.error) toast(`⚠ ${r.error}`); else if (r.ok) toast('Extensão instalada. As contas recarregaram para aplicar.'); S.ext = r.list; renderExt(); };
+  add.append(button('? Como instalar', 'ghost', () => openHelp('extensão')), button('📁 Instalar pasta', null, () => run('poke:ext:addFolder')), button('📦 Instalar .zip / .crx', 'primary', () => run('poke:ext:addFile')));
+  head.append(t, add);
+  const warn = el('div', 'card ext-warn');
+  warn.append(el('b', null, '⚠ Antes de instalar'));
+  const ul = el('ul');
+  for (const w of [
+    'Uma extensão roda dentro das suas contas do PokeIdle e consegue ver o que acontece nelas. Instale só extensões de quem você confia.',
+    'Elas nunca entram nas sessões da Twitch e da Kick, onde estão esses logins.',
+    'Nem toda extensão do Chrome funciona fora do navegador. As que mexem só na página do jogo costumam funcionar; as que dependem de recursos específicos do Chrome podem falhar.',
+    'Respeite as regras do PokeIdle: o que o jogo não permite continua não permitido com extensão.',
+  ]) ul.append(el('li', null, w));
+  warn.append(ul);
+  const list = el('div', 'card list');
+  if (!S.ext.length) list.append(el('div', 'empty', 'Nenhuma extensão instalada. Use os botões acima para adicionar a pasta ou o arquivo da extensão.'));
+  for (const e of S.ext) {
+    const r = rowOpt(`${e.name}${e.version ? ` · v${e.version}` : ''}`, e.error ? `Não carregou: ${e.error}` : (e.description || (e.mv === 3 ? 'Manifest V3' : 'Manifest V2')), el('span'));
+    const ctrl = el('div'); ctrl.style.display = 'flex'; ctrl.style.gap = '10px'; ctrl.style.alignItems = 'center';
+    ctrl.append(sw(e.enabled, async (v) => { S.ext = await call('poke:ext:toggle', e.id, v); renderExt(); }),
+      button('Remover', 'ghost', async () => { S.ext = await call('poke:ext:remove', e.id); renderExt(); }));
+    r.lastChild.replaceWith(ctrl);
+    list.append(r);
+  }
+  root.append(head, warn, list);
+}
+
+// ---------- Ajuda ----------
+let helpQuery = '';
+function renderHelp() {
+  const root = $('#page-help');
+  root.replaceChildren();
+  const head = el('header', 'page-head');
+  const t = el('div'); t.append(el('h1', null, 'Ajuda'), el('p', 'sub', 'As dúvidas mais comuns. Não achou? Pergunte no Discord da comunidade.'));
+  const q = el('input', 'help-search'); q.type = 'text'; q.placeholder = 'Buscar: extensão, gmail, ULTRA, baú…'; q.value = helpQuery;
+  q.oninput = () => { helpQuery = q.value; fill(); };
+  head.append(t, q);
+  const box = el('div', 'help-list');
+  const norm = (s) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+  function fill() {
+    box.replaceChildren();
+    const term = norm(helpQuery.trim());
+    let cat = null;
+    for (const [c, question, lines] of window.HELP || []) {
+      if (term && !norm(`${c} ${question} ${lines.join(' ')}`).includes(term)) continue;
+      if (c !== cat) { cat = c; box.append(el('h2', 'section', c)); }
+      const d = el('details', 'help-item');
+      if (term) d.open = true;
+      d.append(el('summary', null, question));
+      const body = el('div', 'help-body');
+      let ol = null;
+      for (const line of lines) {
+        const m = /^(\d+)\.\s+(.*)$/.exec(line);
+        if (m) { if (!ol) { ol = el('ol'); body.append(ol); } ol.append(el('li', null, m[2])); }
+        else { ol = null; body.append(el('p', null, line)); }
+      }
+      d.append(body);
+      box.append(d);
+    }
+    if (!box.childElementCount) box.append(el('div', 'empty', 'Nada encontrado. Tente outra palavra.'));
+  }
+  fill();
+  root.append(head, box);
+  if (helpQuery) { q.focus(); q.setSelectionRange(q.value.length, q.value.length); }
+}
+// Atalho: abrir a ajuda já filtrada (ex.: botão "?" da página de extensões).
+function openHelp(term) { helpQuery = term || ''; go('help'); }
 
 // ---------- Atualizações ----------
 function apply(ns, snap) { if (!snap) return; S[ns] = snap; refreshAll(); }

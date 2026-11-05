@@ -137,6 +137,12 @@ const modules = {
   kick: require('./platforms/kick')(ctx),
 };
 const poke = require('./pokeidle')(ctx);
+// Extensões: só nas sessões das contas do PokeIdle.
+ctx.mainWin = () => mainWin;
+ctx.pokePartitions = () => poke.partitions();
+ctx.reloadPoke = () => poke.reloadAll();
+const extensions = require('./extensions')(ctx);
+ctx.applyExtensions = (partition) => extensions.applyTo(partition);
 
 function setPlatform(ns, on) {
   config.platforms[ns] = !!on;
@@ -228,6 +234,7 @@ app.whenReady().then(() => {
   powerMonitor.on('resume', () => { for (const m of Object.values(modules)) if (m.started) m.recoverAfterResume(); });
   setupAutoUpdate();
   for (const [ns, m] of Object.entries(modules)) if (config.platforms[ns]) m.start();
+  extensions.load();
   poke.start();
 });
 

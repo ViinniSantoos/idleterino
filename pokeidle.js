@@ -116,7 +116,8 @@ module.exports = function createPokeIdle(ctx) {
     const retry = () => setTimeout(() => { if (views.get(a.id) === v && !v.webContents.isDestroyed()) v.webContents.loadURL(urlOf(a)); }, 20 * 1000);
     v.webContents.on('render-process-gone', retry);
     v.webContents.on('did-fail-load', (_e, code, _d, _u, main) => { if (main && code !== -3) retry(); });
-    v.webContents.loadURL(urlOf(a));
+    // Primeiro as extensões que o usuário ligou, depois o jogo (para elas valerem desde o começo).
+    Promise.resolve(ctx.applyExtensions ? ctx.applyExtensions(partitionOf(a.id)) : null).catch(() => {}).finally(() => { if (!v.webContents.isDestroyed()) v.webContents.loadURL(urlOf(a)); });
     views.set(a.id, v);
     return v;
   }
@@ -243,6 +244,7 @@ module.exports = function createPokeIdle(ctx) {
     timers.push(setInterval(readAll, READ_MS));
   }
   return {
+    partitions: () => config.accounts.map((a) => partitionOf(a.id)),
     reloadAll: () => { for (const v of views.values()) if (!v.webContents.isDestroyed()) v.webContents.reload(); },
     start, snapshot, setMain: (w) => { mainWin = w; mainWin.on('resize', () => send('relayout', true)); },
     trayInfo: () => ({ accounts: config.accounts.length }),

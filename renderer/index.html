@@ -17,6 +17,7 @@
     <button class="nav" data-page="kick" title="Kick"><svg viewBox="0 0 24 24"><path d="M5 3h5v6l3-3h3v3l-3 3 3 3v3h-3l-3-3v6H5z"/></svg><span>Kick</span><i class="nav-dot" id="dot-kick"></i></button>
     <button class="nav" data-page="ext" title="Extensões"><svg viewBox="0 0 24 24"><path d="M9 3h4v3a2 2 0 1 0 4 0V3h3v7h-3a2 2 0 1 0 0 4h3v7H3V10h3a2 2 0 1 0 0-4H3V3h6"/></svg><span>Extensões</span></button>
     <div class="rail-fill"></div>
+    <button class="nav" data-page="help" title="Ajuda e dúvidas"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.3-1 .9-1 1.6v.6M12 17h.01"/></svg><span>Ajuda</span></button>
     <button class="nav" data-page="settings" title="Configurações"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3m0 14v3M2 12h3m14 0h3M4.9 4.9l2.1 2.1m10 10l2.1 2.1M4.9 19.1l2.1-2.1m10-10l2.1-2.1"/></svg><span>Ajustes</span></button>
   </nav>
 
@@ -39,9 +40,10 @@
     <section class="page platform" id="page-kick" data-ns="kick"></section>
 
     <!-- EXTENSÕES (etapa 4) -->
-    <section class="page" id="page-ext">
-      <header class="page-head"><div><h1>Extensões</h1><p class="sub">Em breve: instale as extensões que você já usa no PokeIdle. Elas valem só nas contas do jogo.</p></div></header>
-    </section>
+    <section class="page" id="page-ext"></section>
+
+    <!-- AJUDA -->
+    <section class="page" id="page-help"></section>
 
     <!-- AJUSTES -->
     <section class="page" id="page-settings">
@@ -53,6 +55,7 @@
   <div id="drawer" hidden><div id="drawer-card"></div></div>
   <div id="modal" hidden><div id="modal-card"></div></div>
   <div id="toasts"></div>
+  <script src="help.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
