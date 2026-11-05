@@ -67,6 +67,8 @@ const READ_SCRIPT = `(() => {
     sess: (() => { try { const n = txt('#tr-nick'); const o = n && JSON.parse(localStorage.getItem('sessao-hunt:' + n.toLowerCase()) || 'null');
       return o && o.ms > 0 ? { ms: o.ms, xpTreinador: +o.xpTreinador || 0, xpPokemon: +o.xpPokemon || 0, gold: +o.gold || 0, abates: +o.abates || 0, capturas: +o.capturas || 0, shVistos: +o.shiniesVistos || 0, shCapt: +o.shinies || 0, lucroH: txt('#sessao-lucro-h') } : null; } catch { return null; } })(),
     evento: (() => { const f = q('#evento-faixa'); return f && !f.classList.contains('hidden') ? { texto: txt('#evento-texto'), tempo: txt('#evento-tempo') } : null; })(),
+    bonusXp: (() => { try { return window.__idleterinoMercado ? window.__idleterinoMercado.bonusXp() : null; } catch { return null; } })(),
+    hunts: (() => { try { return window.__idleterinoMercado ? window.__idleterinoMercado.hunts() : null; } catch { return null; } })(),
     canais: (() => { try { return window.__idleterinoMercado ? window.__idleterinoMercado.canais() : null; } catch { return null; } })(),
     mercado: (() => { try { const r = window.__idleterinoMercado && window.__idleterinoMercado.ler(); if (!r) return null;
       const out = {};
@@ -205,6 +207,7 @@ module.exports = function createPokeIdle(ctx) {
     }
   }
 
+  let huntLevels = []; // [{ nome, nivel }] do jogo, em ordem de nível
   async function readOne(id) {
     const v = views.get(id);
     const acc = account(id);
@@ -212,6 +215,8 @@ module.exports = function createPokeIdle(ctx) {
     const r = await v.webContents.executeJavaScript(READ_SCRIPT).catch(() => null);
     if (r) {
       const canais = r.canais; delete r.canais;
+      if (Array.isArray(r.hunts) && r.hunts.length) huntLevels = r.hunts;
+      delete r.hunts;
       info.set(id, { ...r, at: Date.now() });
       if (canais && ctx.onOfficial) { try { ctx.onOfficial(canais, id); } catch {} }
       send('status', snapshot());
@@ -276,7 +281,7 @@ module.exports = function createPokeIdle(ctx) {
       max: MAX_ACCOUNTS, selected: config.selected,
       mainId: account(config.mainId) ? config.mainId : (config.accounts[0] ? config.accounts[0].id : null), autoBackgroundUltra: config.autoBackgroundUltra, autoFreezeMin: config.autoFreezeMin,
       pokeCount: config.accounts.filter((a) => isPokeIdle(urlOf(a))).length, maxWindows: MAX_WINDOWS, defaultUrl: GAME,
-      voteMs: VOTE_MS, marketAt: lastMarket,
+      voteMs: VOTE_MS, marketAt: lastMarket, hunts: huntLevels,
       accounts: config.accounts.map((a) => ({ ...a, vote: (config.votes || {})[a.id] || null, url: urlOf(a), isPoke: isPokeIdle(urlOf(a)), host: hostOf(urlOf(a)), effectiveMode: effectiveMode(a), zoom: a.zoom || 1, info: info.get(a.id) || null, frozen: frozen.has(a.id), frozenImg: frozen.get(a.id) || null })),
     };
   }

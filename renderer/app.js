@@ -546,7 +546,9 @@ function renderPoke() {
     g.title = pokeGrid ? 'Voltar a ver uma ALT por vez' : 'Ao abrir uma ALT, mostra todas as ALTs lado a lado (a principal continua sozinha)';
     top.append(g);
   }
-  top.append(button('⚙ Ajustes', null, openPokeDrawer));
+  const prc = button('🏷 Precificador', null, () => call('app:tool:open', 'precificador'));
+  prc.title = 'Quanto pedir por um Pokémon, pelas vendas recentes do mercado (ferramenta do briaoale)';
+  top.append(prc, button('⚙ Ajustes', null, openPokeDrawer));
   if (!s.accounts.length) {
     root.append(top, emptyBox('Adicione sua primeira conta', 'Cada conta tem a sua sessão e o modo de tela que você escolher. O PokeIdle permite até 4 contas por pessoa.', button('＋ Adicionar conta', 'primary', addAccount)));
     return pokeView(false);
@@ -723,6 +725,50 @@ function openPokeDrawer() {
   $('#drawer').hidden = false;
 }
 
+// Meta de XP: XP total do nível L (a mesma conta do jogo: 50 × (L² − 3L + 4) por nível).
+const xpTotal = (L) => (L <= 1 ? 0 : Math.round((50 / 3) * (L ** 3 - 6 * L ** 2 + 17 * L - 12)));
+const longDur = (ms) => { const m = Math.max(1, Math.round(ms / 60000)); if (m < 60) return `${m} min`; const h = Math.floor(m / 60); if (h < 48) return `${h}h${String(m % 60).padStart(2, '0')}`; return `${Math.floor(h / 24)}d ${h % 24}h`; };
+const BOOST_NAMES = { vip: 'VIP', passe: 'Passe', passeVip: 'Passe', twitch: 'Twitch', kick: 'Kick', guild: 'Guild', guildBoost: 'Guild', evento: 'Evento', atrasados: 'Atrasados', item: 'Boost', raid: 'Raid', sacrificio: 'Sacrifício' };
+// Quanto falta para o próximo nível e para o nível que libera a próxima hunt.
+// Leva em conta os bônus de XP de treinador e quando cada um acaba (o jogo manda os dois): o XP/h
+// medido na sessão é dividido pelo bônus de agora (= ritmo sem bônus) e a conta anda no tempo,
+// tirando cada bônus quando ele vence (o "atrasados" vale até o nível-alvo dele).
+function metaOf(a, xpH, hunts) {
+  const i = a.info || {};
+  const L = Number(String(i.level || '').replace(/\D+/g, ''));
+  if (!L || !(xpH > 0)) return null;
+  const m = /([\d.]+)\s*\/\s*([\d.]+)/.exec(i.xp || '');
+  const start = xpTotal(L) + (m ? Number(m[1].replace(/\./g, '')) : 0);
+  const t0 = Date.now();
+  const bx = i.bonusXp;
+  const parts = bx ? bx.partes.filter((p) => !(p.ate > 0) || p.ate > t0) : [];
+  const prod = (list) => list.reduce((x, p) => x * (p.tr || 1), 1);
+  const rest = bx ? (bx.tr / Math.max(1e-9, prod(bx.partes))) : 1; // parte que o jogo não detalha: fica valendo
+  const restF = Math.abs(rest - 1) < 1e-4 ? 1 : rest;
+  const multAt = (t, xp) => restF * prod(parts.filter((p) => (!(p.ate > 0) || p.ate > t) && !(p.id === 'atrasados' && p.alvo && xp >= xpTotal(p.alvo))));
+  const nowMult = multAt(t0, start);
+  const base = xpH / Math.max(1e-9, nowMult); // XP/h sem bônus
+  const eta = (target) => {
+    const goal = xpTotal(target);
+    let t = t0, xp = start;
+    for (let k = 0; k < 60 && xp < goal; k++) {
+      const rate = (base * multAt(t, xp)) / 3600000; // XP por ms
+      if (!(rate > 0)) return Infinity;
+      let dt = (goal - xp) / rate;
+      for (const p of parts) {
+        if (p.ate > t && p.ate - t < dt) dt = p.ate - t;
+        if (p.id === 'atrasados' && p.alvo) { const g = xpTotal(p.alvo); if (g > xp && (g - xp) / rate < dt) dt = (g - xp) / rate; }
+      }
+      xp += rate * dt; t += dt + 1;
+    }
+    return Math.max(0, t - t0);
+  };
+  const next = (hunts || []).find((h) => h.nivel > L);
+  const ending = parts.filter((p) => p.ate > t0 && p.ate - t0 < 400 * 86400000).sort((x, y) => x.ate - y.ate)
+    .map((p) => `${BOOST_NAMES[p.id] || p.id} +${Math.round((p.tr - 1) * 1000) / 10}% acaba em ${longDur(p.ate - t0)}`);
+  return { L, nextMs: eta(L + 1), hunt: next ? { nome: next.nome, nivel: next.nivel, ms: eta(next.nivel) } : null,
+    boost: bx ? Math.round((nowMult - 1) * 1000) / 10 : null, ending };
+}
 function renderHomePoke() {
   const box = $('#home-poke');
   box.replaceChildren();
@@ -790,6 +836,15 @@ function renderHomePoke() {
     mc.append(mg, sh);
   }
   if (!mg.parentNode) mc.append(mg);
+  const mm = mf && metaOf(main, mf.xp, s.hunts);
+  if (mm) {
+    const g = el('div', 'meta-strip');
+    g.append(el('span', 'ico', '🎯'), el('span', null, `Nv ${mm.L + 1} em`), el('b', null, longDur(mm.nextMs)));
+    if (mm.hunt) { g.append(el('span', 'sep', '·'), el('span', null, 'próxima hunt'), el('b', 'hn', mm.hunt.nome), el('span', null, `(Nv ${fmt(mm.hunt.nivel)}) em`), el('b', null, longDur(mm.hunt.ms))); }
+    if (mm.boost != null) g.append(el('span', 'bx', mm.boost > 0 ? `com XP +${String(mm.boost).replace('.', ',')}%` : 'sem bônus de XP'));
+    g.title = ['No ritmo de XP/h desta sessão, já contando quando cada bônus de XP de treinador acaba.', ...mm.ending, 'Hunt liberada quando o seu nível alcança o nível da área.'].join('\n');
+    mc.append(g);
+  }
   mc.append(el('span', 'farm-open', 'Abrir a conta →'));
   mc.onclick = () => openAcc(main);
   farm.append(mc);
@@ -808,6 +863,8 @@ function renderHomePoke() {
       const f = fs[i];
       const r = el('div', 'alt-row');
       const n = el('span', 'n'); n.append(el('b', null, nickOf(a)), el('i', null, `${lvl(a)} · ${(MODE_INFO[a.effectiveMode] || [a.effectiveMode])[0]}`));
+      const am = f && metaOf(a, f.xp, s.hunts);
+      if (am) { const t = el('i', 'meta', am.hunt ? `🎯 ${am.hunt.nome} (Nv ${fmt(am.hunt.nivel)}) em ${longDur(am.hunt.ms)}` : `🎯 Nv ${am.L + 1} em ${longDur(am.nextMs)}`); t.title = [`Próximo nível (Nv ${am.L + 1}) em ${longDur(am.nextMs)}`, am.boost != null ? (am.boost > 0 ? `Bônus de XP agora: +${am.boost}%` : 'Sem bônus de XP agora') : '', ...am.ending, 'Já conta quando cada bônus acaba.'].filter(Boolean).join('\n'); n.append(t); }
       r.append(n, el('span', null, f ? big(f.xp) : '—'), el('span', 'gold', f ? big(f.gold) : '—'), el('span', null, f ? big(f.ab) : '—'), el('span', null, f ? fmt(f.cap) : '—'), el('span', f && (f.shV || f.shC) ? 'shiny' : null, f ? `${fmt(f.shV)} / ${fmt(f.shC)}` : '—'));
       r.onclick = () => openAcc(a);
       tbl.append(r);
@@ -826,7 +883,9 @@ function renderHomePoke() {
   const mhd = el('div', 'market-hd');
   mhd.append(el('h2', 'section', 'Mercado'), el('span', 'sub', lastAt ? `atualizado ${ago(lastAt)} · atualiza sozinho a cada 10 min` : 'primeira leitura 1 min depois de abrir o app'));
   const rf = button('↻ Atualizar', 'mini', async () => { S.poke = await call('poke:market:refresh'); toast('Atualizando o mercado das contas…'); });
-  mhd.append(rf);
+  const pr = button('🏷 Precificador', 'mini', () => call('app:tool:open', 'precificador'));
+  pr.title = 'Quanto pedir por um Pokémon, pelas vendas recentes do mercado (ferramenta do briaoale)';
+  mhd.append(pr, rf);
   const grid = el('div', 'home-market');
   const panel = (title, sub) => { const p = el('div', 'card mpanel'); const h = el('div', 'mp-hd'); h.append(el('b', null, title)); if (sub) h.append(el('span', 'sub', sub)); p.append(h); return p; };
   const line = (left, right, meta, cls) => { const r = el('div', `mrow${cls ? ' ' + cls : ''}`); const l = el('div', 'ml'); l.append(left); if (meta) l.append(el('span', 'meta', meta)); r.append(l, right); return r; };
@@ -889,9 +948,32 @@ async function renderExt() {
     'Respeite as regras do PokeIdle: o que o jogo não permite continua não permitido com extensão.',
   ]) ul.append(el('li', null, w));
   warn.append(ul);
+  // Padrões do app: já vêm instaladas (baixadas da Chrome Web Store).
+  const builtins = await call('poke:ext:builtins');
+  const pad = el('div', 'card list');
+  pad.append(el('div', 'ext-sec', 'Já vêm no app'));
+  for (const b of builtins) {
+    const inst = b.installed ? S.ext.find((e) => e.builtin && e.name.toLowerCase().includes(b.name.replace('/', '').toLowerCase())) : null;
+    const r = rowOpt(`${b.name}${inst && inst.version ? ` · v${inst.version}` : ''}`, `${b.why} Baixada da Chrome Web Store e atualizada sozinha.`, el('span'));
+    const tag = el('span', `ext-tag${b.installed ? ' on' : ''}`, b.installed ? 'Instalada' : b.dismissed ? 'Removida por você' : 'Baixando…');
+    const ctrl = el('div'); ctrl.style.display = 'flex'; ctrl.style.gap = '10px'; ctrl.style.alignItems = 'center';
+    if (inst) ctrl.append(sw(inst.enabled, async (v) => { S.ext = await call('poke:ext:toggle', inst.id, v); renderExt(); }),
+      button('Remover', 'ghost', async () => { S.ext = await call('poke:ext:remove', inst.id); renderExt(); }));
+    else ctrl.append(tag);
+    if (!b.installed) ctrl.append(button('Instalar', 'primary', async () => { toast(`Baixando ${b.name} da Chrome Web Store…`); const res = await call('poke:ext:builtin:install', b.cws); if (res.error) toast(`⚠ ${res.error}`); else toast(`${b.name} instalada. As contas recarregaram para aplicar.`); S.ext = res.list; renderExt(); }));
+    r.lastChild.replaceWith(ctrl);
+    pad.append(r);
+  }
+  const tools = el('div', 'card list');
+  tools.append(el('div', 'ext-sec', 'Ferramentas da comunidade'));
+  const tr = rowOpt('🏷 Precificador de Pokémon', 'Quanto pedir em gemas por um Pokémon, a partir das vendas recentes do mercado. No jogo, abra a ficha do Pokémon, clique em "Copiar p/ ChatGPT" e cole lá. Feito pelo briaoale; abre numa janela própria, sem acesso às suas contas.', el('span'));
+  tr.lastChild.replaceWith(button('Abrir', 'primary', () => call('app:tool:open', 'precificador')));
+  tools.append(tr);
   const list = el('div', 'card list');
-  if (!S.ext.length) list.append(el('div', 'empty', 'Nenhuma extensão instalada. Use os botões acima para adicionar a pasta ou o arquivo da extensão.'));
-  for (const e of S.ext) {
+  list.append(el('div', 'ext-sec', 'Suas extensões'));
+  const mine = S.ext.filter((e) => !e.builtin);
+  if (!mine.length) list.append(el('div', 'empty', 'Nenhuma outra extensão. Use os botões acima para adicionar a pasta ou o arquivo de uma extensão.'));
+  for (const e of mine) {
     const r = rowOpt(`${e.name}${e.version ? ` · v${e.version}` : ''}`, e.error ? `Não carregou: ${e.error}` : `${e.description || (e.mv === 3 ? 'Manifest V3' : 'Manifest V2')}${e.hasPanel && e.enabled ? ' · Painel: botão 🧩 na tela de cada conta do PokeIdle.' : ''}`, el('span'));
     const ctrl = el('div'); ctrl.style.display = 'flex'; ctrl.style.gap = '10px'; ctrl.style.alignItems = 'center';
     ctrl.append(sw(e.enabled, async (v) => { S.ext = await call('poke:ext:toggle', e.id, v); renderExt(); }),
@@ -899,8 +981,10 @@ async function renderExt() {
     r.lastChild.replaceWith(ctrl);
     list.append(r);
   }
-  root.append(head, warn, list);
+  // As padrões aparecem na lista de cima; aqui ficam também (com o liga/desliga e o remover).
+  root.append(head, pad, tools, list, warn);
 }
+window.idle.on('poke:ext:changed', (list) => { S.ext = list; if (page === 'ext') renderExt(); });
 
 // ---------- Ajuda ----------
 let helpQuery = '';

@@ -454,3 +454,18 @@ button.mini { padding: 3px 10px; font-size: 12px; border-radius: 8px; }
 .shiny-strip.tem { background: linear-gradient(90deg, rgba(255, 226, 122, .12), var(--s2)); }
 .shiny-strip.tem b { color: #ffe27a; }
 .shiny-strip .ico { font-size: 14px; }
+
+/* Meta de XP: próximo nível e próxima hunt. */
+.meta-strip { display: flex; flex-wrap: wrap; align-items: baseline; gap: 5px; padding: 9px 11px; border-radius: 10px; background: linear-gradient(90deg, rgba(124, 77, 255, .14), var(--s2)); font-size: 12.5px; color: var(--muted); }
+.meta-strip b { color: var(--text); font-size: 14px; }
+.meta-strip .hn { color: #c8b8ff; }
+.meta-strip .sep { margin: 0 3px; }
+.alt-row .n i.meta { color: #c8b8ff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Extensões: padrões do app e ferramentas. */
+.ext-sec { font-size: 11px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--dim); padding: 2px 2px 8px; }
+.ext-tag { font-size: 11.5px; font-weight: 700; padding: 3px 9px; border-radius: 999px; background: var(--s2); color: var(--muted); white-space: nowrap; }
+.ext-tag.on { color: var(--ok); background: color-mix(in srgb, var(--ok) 12%, var(--s2)); }
+#page-ext .card.list + .card.list, #page-ext .card.list + .ext-warn { margin-top: 14px; }
+.meta-strip .bx { margin-left: auto; font-size: 11.5px; color: #ffcf66; }
+.market-hd button + button { margin-left: 8px; }

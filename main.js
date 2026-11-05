@@ -258,6 +258,24 @@ ipcMain.handle('app:autostart', (_e, on) => { try { setOpenAtLogin(!!on); } catc
 ipcMain.handle('app:introDone', () => { config.lastSeenVersion = app.getVersion(); firstRun = false; saveConfig(); return appState(); });
 ipcMain.handle('app:quit', quitApp);
 ipcMain.handle('app:update:install', () => installUpdate());
+// Ferramentas da comunidade numa janela do app, com sessão própria (sem acesso às contas).
+// Precificador de Pokémon, do briaoale (liberado por ele no Discord do PokeIdle).
+const TOOLS = { precificador: { url: 'https://briaoale.github.io/precificador-pokemon/', title: 'Precificador de Pokémon — por briaoale' } };
+const toolWins = new Map();
+trusts.set('persist:tools', (url) => { try { const u = new URL(url); return u.protocol === 'https:' && u.hostname === 'briaoale.github.io' && u.pathname.startsWith('/precificador-pokemon'); } catch { return false; } });
+ipcMain.handle('app:tool:open', (_e, name) => {
+  const t = TOOLS[name];
+  if (!t) return false;
+  const open = toolWins.get(name);
+  if (open && !open.isDestroyed()) { open.show(); open.focus(); return true; }
+  const win = new BrowserWindow({ width: 1240, height: 820, minWidth: 700, minHeight: 500, autoHideMenuBar: true, backgroundColor: '#1b1b1b', title: t.title, icon: ICON, webPreferences: { partition: 'persist:tools', spellcheck: false, sandbox: true, contextIsolation: true } });
+  win.on('page-title-updated', (ev) => ev.preventDefault());
+  win.on('closed', () => toolWins.delete(name));
+  win.webContents.setWindowOpenHandler(({ url }) => { openOutside(url); return { action: 'deny' }; });
+  toolWins.set(name, win);
+  win.loadURL(t.url);
+  return true;
+});
 // Apaga TODOS os logins guardados neste PC (Twitch, Kick e todas as contas do PokeIdle). A lista de
 // canais, as contas cadastradas e as preferências ficam; cada uma pede login de novo.
 ipcMain.handle('app:wipeLogins', async () => {

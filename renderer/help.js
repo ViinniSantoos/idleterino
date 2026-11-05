@@ -106,6 +106,22 @@ window.HELP = [
     'Mercado: seus anúncios e suas vendas de todas as contas, e as maiores vendas do servidor (Tabela de preços), em coins ou gemas. Atualiza sozinho a cada 10 min.',
     'O app só consulta o mercado, pela conexão que a conta já tem aberta. Nunca compra, vende ou edita nada.',
   ]],
+  ['Início', 'Como funciona a meta de XP (🎯)?', [
+    'No cartão de cada conta aparece em quanto tempo ela chega no próximo nível e no nível que libera a próxima hunt.',
+    'A conta usa o seu XP/h da sessão e os bônus de XP de treinador (VIP, Twitch, Kick, guild, evento…): quando um bônus acaba, o ritmo cai e o tempo já leva isso em conta.',
+    'Passe o mouse em cima da meta para ver quais bônus estão valendo e quando cada um acaba.',
+  ]],
+  ['Extensões', 'O Rotom Sniper e o /hunt já vêm no app?', [
+    'Sim. O Idleterino baixa as duas da Chrome Web Store (a fonte oficial) na primeira vez que abre, e confere versão nova uma vez por dia.',
+    'Rotom Sniper: a extensão oficial do PokeIdle (painel no botão 🧩 de cada conta). /hunt: mostra as melhores hunts para o seu pokémon; só mostra, não joga sozinha.',
+    'Não quer alguma? Em Extensões, desligue ou remova. Removida não volta sozinha; o botão "Instalar" traz de volta.',
+  ]],
+  ['PokeIdle', 'Como uso o Precificador de Pokémon?', [
+    '1. No jogo, abra a ficha do Pokémon e clique em "Copiar p/ ChatGPT".',
+    '2. No Idleterino, clique em 🏷 Precificador (no PokeIdle, no Mercado do Início ou em Extensões).',
+    '3. Cole o texto, marque Z-Move e AoE se ele tiver, e clique em Precificar.',
+    'Ferramenta feita pelo briaoale, a partir das vendas do mercado. Abre numa janela própria, sem acesso às suas contas.',
+  ]],
   ['Twitch e Kick', 'Entrou streamer novo no PokeIdle. Preciso adicionar?', [
     'Não. O app lê a lista oficial de canais que o próprio jogo mostra (Bônus Twitch e Bônus na Kick) e adiciona sozinho os canais novos com "Pontos ativos".',
     'Canal que você removeu da lista não volta sozinho.',
