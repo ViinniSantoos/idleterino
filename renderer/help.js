@@ -241,4 +241,13 @@ window.HELP = [
     'É fixo e pequeno, para um canto sem cobrir o jogo. Mostra a sua principal: nick, nível, XP ganho na live, XP/h e shinys, com animação quando aparece shiny ou sobe de nível. "Testar animação" mostra como fica. Zere a contagem no começo de cada live.',
     'O overlay só funciona neste PC (o OBS precisa estar no mesmo computador). Ninguém da internet acessa.',
   ]],
+  ['Comércio da guild', 'Como meus anúncios aparecem no #comércio da guild no Discord?', [
+    '1. O líder cria um webhook no canal de comércio (Editar canal > Integrações > Webhooks > Novo) com a tag da guild entre colchetes no nome, ex.: "Comércio [TFT]", e passa o link só para os membros.',
+    '2. No Idleterino: Ajustes > Comércio da guild > cole o link e salve. Ponha também o seu Discord.',
+    '3. Ligue "Postar os anúncios" nas contas que quiser.',
+    'Pronto: o que você anunciar no Market do jogo aparece no canal em até 5 min, com preço, IV, qualidade e potência. Vendeu? O post vira "VENDIDO". Tirou do Market? Vira "RETIRADO".',
+    'Cada post tem o botão "Abrir no Idleterino": quem clica cai direto no anúncio, no Market do jogo dentro do app (na conta logada; se ela estiver no ULTRA, sai dele enquanto o Market estiver aberto e volta depois). Na primeira vez o navegador pergunta se pode abrir o Idleterino. A compra é você quem confirma.',
+    'Só posta conta que é de fato da guild do nome do webhook (o app lê a guild no jogo). O app não compra nem vende nada.',
+    'O link do webhook é a chave do canal. Se vazar, o líder apaga o webhook e cria outro.',
+  ]],
 ];

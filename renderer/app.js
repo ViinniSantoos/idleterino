@@ -1148,6 +1148,7 @@ for (const ns of ['twitch', 'kick']) {
 }
 window.idle.on('twitch:toast', toast);
 window.idle.on('poke:status', (p) => { S.poke = p; refreshAll(); });
+window.idle.on('poke:abrir', (p) => { S.poke = p; go('poke'); });
 window.idle.on('poke:relayout', () => { if (page === 'poke') pokeView($('#drawer').hidden && $('#modal').hidden); });
 window.idle.on('app:state', (a) => { S.app = a; refreshAll(); });
 setInterval(() => { if (page === 'home') renderHome(); }, 20000);

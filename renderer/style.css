@@ -684,3 +684,4 @@ button.warn { border-color: rgba(255, 159, 67, .6); color: #ffb36b; }
 .stream-opts .sopt { display: flex; flex-direction: column; gap: 3px; }
 .stream-opts select { width: 100%; }
 @media (max-width: 1100px) { .stream-opts { grid-template-columns: 1fr 1fr; } }
+.row.aviso-linha .txt small { color: #ffb366; }

@@ -27,7 +27,7 @@ contextBridge.executeInMainWorld({
 
     // ---- estado leve do jogador: o que a sugestão de hunt e o PvP precisam ----
     const jogo = { hunts: null, tabelaTipos: null, amp: 1.5, eu: {}, pks: new Map(), keys: [] };
-    const CAMPOS_EU = ['xp', 'xpNivel', 'xpProximo', 'gold', 'nick', 'level', 'activeId', 'bicicleta', 'pvp', 'pvpRank', 'pvpPosicao', 'pvpHistorico', 'pvpTime', 'huntSlug', 'hunt', 'huntAtual', 'area'];
+    const CAMPOS_EU = ['guild', 'xp', 'xpNivel', 'xpProximo', 'gold', 'nick', 'level', 'activeId', 'bicicleta', 'pvp', 'pvpRank', 'pvpPosicao', 'pvpHistorico', 'pvpTime', 'huntSlug', 'hunt', 'huntAtual', 'area'];
     const DUELO = (k) => ({ ivs: k.ivs || null, quality: k.quality ?? k.qualidade ?? null, potencia: k.potencia ?? null, refino: k.refino || null, tmElemental: k.tmElemental || null, tmFisico: !!k.tmFisico });
     const slimPk = (k) => ({
       ...DUELO(k),
@@ -424,7 +424,7 @@ contextBridge.executeInMainWorld({
       if (!e.nick) return null;
       const dentro = Math.max(0, (Number(e.xp) || 0) - (Number(e.xpNivel) || 0));
       const faixa = Math.max(1, (Number(e.xpProximo) || 0) - (Number(e.xpNivel) || 0));
-      return { nick: String(e.nick), level: Number(e.level) || 0, dentro, faixa, gold: Number(e.gold) || 0, at: jogo.at || 0 };
+      return { nick: String(e.nick), level: Number(e.level) || 0, dentro, faixa, gold: Number(e.gold) || 0, guildTag: (e.guild && e.guild.tag) || null, guildNome: (e.guild && e.guild.nome) || null, at: jogo.at || 0 };
     }
     // Faixa do Idleterino no modo ULTRA: nick, nível e XP do nível, em cima da caixa do jogo. Só
     // mostra (não clica em nada) e some fora do ULTRA.

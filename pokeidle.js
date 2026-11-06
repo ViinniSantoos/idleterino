@@ -69,7 +69,7 @@ const READ_SCRIPT = `(() => {
   return {
     temSessao: (() => { try { const x = JSON.parse(localStorage.getItem('sessao') || 'null'); return !!(x && x.token); } catch { return false; } })(),
     logged, nick: nickV, level: temTela ? txt('#tr-level') : (T_ok ? String(T.level) : txt('#tr-level')), gold: temTela ? txt('#tr-gold') : (T_ok ? nf(T.gold) : txt('#tr-gold')), gems: txt('#tr-gemas'), diamonds: txt('#tr-diamantes'),
-    xp: temTela ? txt('#tr-xp-txt') : (T_ok ? nf(T.dentro) + ' / ' + nf(T.faixa) + ' xp' : txt('#tr-xp-txt')), ultraFonte: !temTela && T_ok, guild: txt('#tr-guild'), xpH: txt('#sessao-xp-treinador-h'), where: txt('#eco-onde'), ativos, autos,
+    xp: temTela ? txt('#tr-xp-txt') : (T_ok ? nf(T.dentro) + ' / ' + nf(T.faixa) + ' xp' : txt('#tr-xp-txt')), ultraFonte: !temTela && T_ok, guildTag: T && T.guildTag ? T.guildTag : null, guild: txt('#tr-guild'), xpH: txt('#sessao-xp-treinador-h'), where: txt('#eco-onde'), ativos, autos,
     autoCount: txt('#auto-cnt'),
     // O placar da sessão que o próprio jogo grava (o mesmo do painel do modo Economia).
     sess: (() => { try { const n = nickV && nickV !== '—' ? nickV : null; const o = n && JSON.parse(localStorage.getItem('sessao-hunt:' + n.toLowerCase()) || 'null');
@@ -80,7 +80,7 @@ const READ_SCRIPT = `(() => {
     canais: (() => { try { return window.__idleterinoMercado ? window.__idleterinoMercado.canais() : null; } catch { return null; } })(),
     mercado: (() => { try { const r = window.__idleterinoMercado && window.__idleterinoMercado.ler(); if (!r) return null;
       const out = {};
-      if (r.meus) out.meus = { at: r.meus.at, linhas: (r.meus.m.linhas || []).slice(0, 40).map((a) => ({ id: a.id, tipo: a.tipo, nome: (a.ficha && (a.ficha.nome || (a.ficha.casaId ? 'Casa' : a.ficha.caixaId ? 'Caixa' : ''))) || a.nome || '—', level: a.ficha && a.ficha.level, shiny: !!(a.ficha && a.ficha.shiny), qtd: a.qtd || 1, preco: a.preco, moeda: a.moeda, retidoAte: a.compravelEm || 0, favoritos: a.favoritos })) };
+      if (r.meus) out.meus = { at: r.meus.at, linhas: (r.meus.m.linhas || []).slice(0, 40).map((a) => ({ id: a.id, tipo: a.tipo, nome: (a.ficha && (a.ficha.nome || (a.ficha.casaId ? 'Casa' : a.ficha.caixaId ? 'Caixa' : ''))) || a.nome || '—', level: a.ficha && a.ficha.level, shiny: !!(a.ficha && a.ficha.shiny), qtd: a.qtd || 1, preco: a.preco, moeda: a.moeda, retidoAte: a.compravelEm || 0, sp: a.ficha && a.ficha.speciesId, iv: a.ficha && a.ficha.ivs ? Object.values(a.ficha.ivs).reduce((t, x) => t + (Number(x) || 0), 0) : 0, q: a.ficha && (a.ficha.quality != null ? a.ficha.quality : a.ficha.qualidade), pot: a.ficha && a.ficha.potencia, aoe: !!(a.ficha && (a.ficha.tmAoe === true || a.ficha.tmAoe === 1)), favoritos: a.favoritos })) };
       const hist = (m) => (m.linhas || []).slice(0, 30).map((l) => ({ em: l.em, tipo: l.tipo, descricao: l.descricao, shiny: !!(l.ficha && l.ficha.shiny), bruto: l.bruto, moeda: l.moeda, vendedor: l.vendedor, comprador: l.comprador }));
       if (r.historico) out.vendas = { at: r.historico.at, linhas: hist(r.historico.m) };
       const g = Object.keys(r).filter((k) => k.indexOf('historicoGlobal:') === 0).map((k) => r[k]);
@@ -681,7 +681,8 @@ module.exports = function createPokeIdle(ctx) {
     setTimeout(() => pvpSnapshotMe().catch(() => {}), 2 * 60 * 1000);
     timers.push(setInterval(() => pvpSnapshotMe().catch(() => {}), 60 * 60 * 1000));
     timers.push(setInterval(() => pvpWatch().catch(() => {}), 30 * 60 * 1000));
-    timers.push(setInterval(askMarket, MARKET_MS));
+    // Com o comércio da guild ligado, a leitura dos anúncios vem a cada 5 min (senão, 10 min).
+    timers.push(setInterval(() => { const cada = ctx.comercioAtivo && ctx.comercioAtivo() ? 5 * 60 * 1000 : MARKET_MS; if (Date.now() - lastMarket >= cada - 5000) askMarket(); }, 60 * 1000));
   }
   return {
     partitions: () => config.accounts.map((a) => partitionOf(a.id)),
@@ -695,6 +696,46 @@ module.exports = function createPokeIdle(ctx) {
     setModes: (map) => { for (const [id, m] of Object.entries(map || {})) { const a = account(id); if (a && MODES[m] && a.mode !== m) { a.mode = m; applyMode(id); } } saveConfig(); send('status', snapshot()); },
     getOptimizeEvery: () => config.optimizeEvery || 0,
     mainId: () => mainAccId(),
+    refreshMarket: () => { if (Date.now() - lastMarket > 60 * 1000) askMarket(); },
+    // Link do #comércio no Discord: leva ao anúncio no Market do jogo, na conta logada (a da frente,
+    // senão a principal). Usa o mesmo caminho do link de anúncio do chat do jogo: o jogo busca o
+    // anúncio na hora e mostra a folha dele. Comprar continua sendo um clique da pessoa.
+    abrirAnuncio: async (anuncioId) => {
+      const n = Number(anuncioId);
+      if (!Number.isSafeInteger(n) || n <= 0) return { erro: 'Link de anúncio inválido.' };
+      const logada = (a) => a && isPokeIdle(urlOf(a)) && views.get(a.id) && (info.get(a.id) || {}).logged;
+      const acc = [account(config.selected), account(mainAccId()), ...config.accounts].find(logada);
+      if (!acc) return { erro: 'Entre numa conta do PokeIdle no Idleterino para ver o anúncio.' };
+      const prev = config.selected;
+      config.selected = acc.id; saveConfig();
+      frozen.delete(acc.id);
+      if (config.autoBackgroundUltra) { if (prev && prev !== acc.id) applyMode(prev); applyMode(acc.id); }
+      layout();
+      send('abrir', snapshot());
+      // No ULTRA o jogo esconde tudo: sai dele pelo botão "Sair" da própria caixa (sem recarregar) e,
+      // quando a pessoa fechar o Market, o app põe a conta de volta no modo dela.
+      const js = `(async () => { const dorme = (ms) => new Promise((r) => setTimeout(r, ms)); let saiuUltra = false;
+        for (let i = 0; i < 60; i++) { const box = document.getElementById('chat-msgs');
+          if (box && document.querySelector('.menu-topo')) {
+            const sair = document.documentElement.classList.contains('modo-ultra') && document.getElementById('ultra-sair');
+            if (sair) { sair.click(); saiuUltra = true; await dorme(700); }
+            const b = document.createElement('button'); b.type = 'button'; b.className = 'm-anuncio-link';
+            b.dataset.anuncio = '${n}'; b.style.display = 'none'; box.appendChild(b); b.click(); b.remove(); return { ok: true, saiuUltra }; }
+          await dorme(250); } return { ok: false }; })()`;
+      const wc = views.get(acc.id).webContents;
+      const r = await wc.executeJavaScript(js).catch(() => ({ ok: false }));
+      if (r.saiuUltra) {
+        // Volta para o ULTRA quando o Market fechar (confere a cada 3 s, por até 30 min).
+        const fim = Date.now() + 30 * 60 * 1000;
+        const vigia = setInterval(async () => {
+          if (wc.isDestroyed()) return clearInterval(vigia);
+          const aberto = await wc.executeJavaScript("(() => { const m = document.getElementById('modal'); return !!m && getComputedStyle(m).display !== 'none'; })()").catch(() => false);
+          if (!aberto || Date.now() > fim) { clearInterval(vigia); applyMode(acc.id); }
+        }, 3000);
+      }
+      const i = info.get(acc.id) || {};
+      return r.ok ? { ok: true, nick: i.nick && i.nick !== '—' ? i.nick : acc.name } : { erro: 'O jogo ainda está carregando. Clique no link de novo em instantes.' };
+    },
     setOptimizeEvery: (min) => { config.optimizeEvery = [0, 30, 60, 120, 300].includes(Number(min)) ? Number(min) : 0; saveConfig(); send('status', snapshot()); },
   };
 };

@@ -265,6 +265,7 @@ async function settingsExtras(box) {
   const my = ++settingsTok;
   if (!S.diario) await refreshDiario();
   const st = await call('app:seg:state');
+  const cm = await call('app:comercio:state').catch(() => null);
   // Outra pintura começou enquanto esperava: ela é que desenha (senão as seções saem dobradas).
   if (my !== settingsTok) return;
   const d = S.diario; if (!d) return;
@@ -306,6 +307,7 @@ async function settingsExtras(box) {
   av.append(el('b', 'tipos-hd', 'O que avisar'), tp, el('p', 'small', 'O mesmo aviso da mesma conta não se repete por 15 min.'));
   box.append(av);
 
+  if (cm) box.append(comercioSection(cm));
   box.append(streamSection(d));
   // Painel Wi-Fi
   const pn = el('div', 'card list xsec');
@@ -540,5 +542,42 @@ function streamSection(d) {
       button('Trocar o código', 'ghost', async () => { S.diario = await call('app:diario:stream', { novoCodigo: true }); toast('Código trocado: atualize o link no OBS.'); renderSettings(); })));
     if (s.liveInicio) sec.append(el('p', 'small', `Contando a live desde ${new Date(s.liveInicio).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}. Zere no começo de cada live.`));
   }
+  return sec;
+}
+
+// ---------- 🏪 Comércio da guild no Discord ----------
+function comercioSection(c) {
+  const sec = el('div', 'card list xsec'); sec.id = 'sec-comercio';
+  sec.append(el('h3', null, '🏪 Comércio da guild no Discord'), el('p', 'sub', 'Anunciou no Market do jogo? O anúncio aparece sozinho no canal de comércio da sua guild, com preço, IV e qualidade. Quando vende ou tira do Market, o post atualiza sozinho.'));
+  const setC = async (patch) => { const r = await call('app:comercio:set', patch); if (r.error) toast(`⚠ ${r.error}`); renderSettings(); };
+  // Link do canal
+  const url = el('input'); url.type = 'text'; url.placeholder = 'Link do webhook que o líder da guild passou'; url.style.flex = '1';
+  if (c.temWebhook) url.placeholder = `Conectado (${c.webhookFim}). Cole outro link para trocar.`;
+  const r1 = el('div', 'inline wide'); r1.append(url, button('Salvar', 'primary', () => { if (url.value.trim()) setC({ webhook: url.value.trim() }); }));
+  if (c.temWebhook) r1.append(button('Desconectar', 'ghost', () => setC({ webhook: '' })));
+  sec.append(rowOpt('Canal da guild', 'O líder cria um webhook no canal de comércio e põe a tag da guild entre colchetes no nome dele, ex.: "Comércio [TFT]". O link fica só neste PC.', el('span')), r1);
+  if (c.info && c.info.erro) sec.append(el('p', 'warn-google', `⚠ ${c.info.erro}`));
+  else if (c.info) sec.append(el('p', c.info.tag ? 'ok-line' : 'warn-google', c.info.tag ? `✓ Canal "${c.info.nome}" · só contas da guild [${c.info.tag}] postam.` : `⚠ O webhook "${c.info.nome}" não tem a tag da guild. Peça ao líder para renomear com a tag entre colchetes, ex.: "Comércio [TFT]".`));
+  // Discord do vendedor
+  const dc = el('input'); dc.type = 'text'; dc.placeholder = 'Seu Discord (ex.: vini.santos.) ou seu ID'; dc.value = c.discord || ''; dc.style.width = '260px';
+  const r2 = el('div', 'inline'); r2.append(dc, button('Salvar', null, () => setC({ discord: dc.value })));
+  sec.append(rowOpt('Seu Discord', 'Aparece no anúncio para o comprador saber com quem falar. Com o seu ID (Discord > Configurações > Avançado > Modo desenvolvedor > botão direito no seu nome > Copiar ID), vira um link clicável que não te notifica.', r2));
+  // O que postar
+  const so = el('select'); for (const [v, l] of [['pokemon', 'Só pokémon'], ['tudo', 'Tudo (pokémon e itens)']]) { const o = el('option', null, l); o.value = v; so.append(o); } so.value = c.so; so.onchange = () => setC({ so: so.value });
+  sec.append(rowOpt('O que postar', 'Os anúncios que você colocar no Market depois de ligar (e os que já estão lá).', so));
+  // Contas
+  for (const a of c.contas) {
+    const help = a.status ? a.status.texto : a.guild ? `Guild no jogo: [${a.guild}]` : 'Guild aparece quando a conta estiver logada.';
+    const r = rowOpt(`Postar os anúncios de ${a.nick}`, help, sw(a.on, (v) => setC({ conta: { id: a.id, on: v } })));
+    if (a.status && !a.status.ok) r.classList.add('aviso-linha');
+    sec.append(r);
+  }
+  if (c.posts.length) {
+    const ul = el('div', 'bk-list');
+    for (const p of c.posts) ul.append(el('div', 'bk', `${p.estado === 'vendido' ? '✅' : p.estado === 'retirado' ? '❌' : '📦'} ${p.nome} · ${p.preco ? `${fmt(p.preco)} ${p.moeda === 'orb' ? 'gemas' : 'ouro'}` : ''} · ${p.nick} · ${new Date(p.t).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}`));
+    sec.append(el('b', 'tipos-hd', 'Postados no canal'), ul);
+  }
+  sec.append(actionsRow(button('↻ Conferir agora', null, async () => { await call('app:comercio:atualizar'); toast('Lendo o Market das contas… os posts saem em instantes.'); setTimeout(renderSettings, 4000); })));
+  sec.append(el('p', 'small', 'O app só mostra o que você anunciou no jogo: a compra e a venda continuam no Market do jogo. O link do webhook é a chave do canal: não poste ele em lugar aberto.'));
   return sec;
 }

@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Anúncio no Market · Idleterino</title>
+  <meta name="description" content="Abre o anúncio do Market do PokeIdle direto no Idleterino.">
+  <meta name="robots" content="noindex">
+  <link rel="icon" href="icon.png">
+  <link rel="stylesheet" href="style.css">
+  <style>
+    .ponte { width: min(520px, 100%); margin: 9vh auto 40px; padding: 0 16px; text-align: center; }
+    .ponte .caixa { background: var(--s1); border: 1px solid var(--line); border-radius: 18px; padding: 28px 22px; }
+    .ponte img.logo { margin: 0 auto 14px; border-radius: 14px; }
+    .ponte h1 { font-size: 26px; margin: 0 0 6px; }
+    .ponte .item { font-size: 18px; font-weight: 700; margin: 14px 0 2px; overflow-wrap: anywhere; }
+    .ponte .quem { color: var(--muted); font-size: 15px; margin: 0 0 18px; overflow-wrap: anywhere; }
+    .ponte .cta { flex-direction: column; align-items: stretch; }
+    .ponte .passo { color: var(--muted); font-size: 14px; margin: 18px 0 0; }
+    .ponte .ok { color: var(--ok); }
+  </style>
+</head>
+<body>
+  <div class="glow" aria-hidden="true"></div>
+  <main class="ponte">
+    <div class="caixa">
+      <img class="logo" src="icon.png" alt="" width="56" height="56">
+      <h1>Abrindo no Idleterino…</h1>
+      <p class="item" id="item" hidden></p>
+      <p class="quem" id="quem" hidden></p>
+      <div class="cta">
+        <a class="btn primary" id="abrir" href="#">🏪 Abrir no Idleterino</a>
+        <a class="btn" href="https://pokeidle.io/app?modal=community">Abrir o Market no navegador</a>
+      </div>
+      <p class="passo" id="passo">Se o navegador perguntar, clique em <b>Abrir Idleterino</b>. O anúncio abre no Market do jogo, na sua conta logada; a compra é você quem confirma lá.</p>
+      <p class="passo">Ainda não tem o app? <a href="./">Baixe o Idleterino</a> (grátis, Windows e Linux).</p>
+    </div>
+  </main>
+  <script>
+    (function () {
+      var q = new URLSearchParams(location.search);
+      var id = /^\d{1,12}$/.test(q.get('id') || '') ? q.get('id') : null;
+      var nome = (q.get('n') || '').slice(0, 80);
+      var vend = (q.get('v') || '').slice(0, 40);
+      if (nome) { var it = document.getElementById('item'); it.textContent = nome; it.hidden = false; }
+      if (vend) { var qm = document.getElementById('quem'); qm.textContent = 'Vendedor: ' + vend; qm.hidden = false; }
+      var bt = document.getElementById('abrir');
+      if (!id) {
+        document.querySelector('h1').textContent = 'Link de anúncio inválido';
+        bt.hidden = true;
+        return;
+      }
+      var link = 'idleterino://anuncio/' + id;
+      bt.href = link;
+      setTimeout(function () { location.href = link; }, 400);
+    })();
+  </script>
+</body>
+</html>

@@ -178,7 +178,11 @@ const extensions = require('./extensions')(ctx);
 ctx.applyExtensions = (partition) => extensions.applyTo(partition);
 // Diário: horas logadas, histórico, vigia com avisos (PC, celular, Discord), modo noite e painel Wi-Fi.
 const diario = require('./diario')(ctx, poke);
-ctx.onPokeRead = (id, r) => diario.onRead(id, r);
+// #comércio da guild no Discord: anúncios do Market postados sozinhos (webhook do canal).
+const comercio = require('./comercio')(ctx, poke);
+ctx.comercioAtivo = () => comercio.ativo();
+ctx.refreshMarket = () => poke.refreshMarket();
+ctx.onPokeRead = (id, r) => { diario.onRead(id, r); comercio.onRead(id, r).catch(() => {}); };
 ctx.onPokeEvent = (id, kind, motivo) => diario.onEvent(id, kind, motivo);
 ctx.horasOf = (id) => diario.horasOf(id);
 ctx.alert = (tipo, titulo, texto, chave) => diario.alerta(tipo, titulo, texto, chave);
@@ -369,7 +373,32 @@ ipcMain.handle('app:wipeLogins', async () => {
 
 // ---------- Início ----------
 if (!app.requestSingleInstanceLock()) app.quit();
-app.on('second-instance', showMain);
+// idleterino://anuncio/<id>: o botão "Abrir no Idleterino" dos posts do #comércio (via a página do site,
+// porque o Discord só deixa clicar em link https). Só aceita o número do anúncio, nada mais.
+const PROTOCOLO = 'idleterino';
+let linkPendente = null;
+function linkDe(argv) {
+  const a = (argv || []).find((x) => typeof x === 'string' && x.toLowerCase().startsWith(`${PROTOCOLO}://`));
+  const m = a && /^idleterino:\/\/anuncio\/(\d{1,12})\/?(?:[?#].*)?$/i.exec(a);
+  return m ? Number(m[1]) : null;
+}
+async function abrirLink(id) {
+  if (!id) return;
+  showMain();
+  if (!appPronto) { linkPendente = id; return; }
+  const r = await poke.abrirAnuncio(id).catch(() => ({ erro: 'Não deu para abrir o anúncio.' }));
+  send('twitch:toast', r.ok ? `🏪 Abrindo o anúncio no Market (${r.nick})…` : `⚠ ${r.erro}`);
+}
+let appPronto = false;
+app.on('second-instance', (_e, argv) => { showMain(); abrirLink(linkDe(argv)); });
+if (app.isPackaged && !process.env.IDLETERINO_DATA) {
+  // Versão de teste (pasta separada) não registra o link: ele é da versão instalada.
+  try {
+    const exe = process.env.PORTABLE_EXECUTABLE_FILE;
+    if (exe) app.setAsDefaultProtocolClient(PROTOCOLO, exe, []); else app.setAsDefaultProtocolClient(PROTOCOLO);
+  } catch {}
+}
+linkPendente = linkDe(process.argv);
 app.setAppUserModelId('com.vinniisaantos.idleterino');
 
 app.whenReady().then(() => {
@@ -420,6 +449,19 @@ app.whenReady().then(() => {
   for (const [ns, m] of Object.entries(modules)) if (config.platforms[ns]) m.start();
   extensions.load();
   poke.start();
+  appPronto = true;
+  // Abriu o app pelo link do #comércio: espera o jogo carregar e a conta logar (até 2 min).
+  if (linkPendente) {
+    const id = linkPendente; linkPendente = null;
+    let tentativas = 0;
+    const tentar = async () => {
+      const r = await poke.abrirAnuncio(id).catch(() => ({ erro: 'Não deu para abrir o anúncio.' }));
+      if (r.ok) return send('twitch:toast', `🏪 Abrindo o anúncio no Market (${r.nick})…`);
+      if (++tentativas < 24) return setTimeout(tentar, 5000);
+      send('twitch:toast', `⚠ ${r.erro}`);
+    };
+    setTimeout(tentar, 4000);
+  }
   // A mesma versão caiu 3 vezes seguidas logo ao abrir: oferece as saídas.
   if (abertura.falhas >= 3) {
     setTimeout(async () => {

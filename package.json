@@ -1,7 +1,7 @@
 {
   "name": "idleterino",
   "productName": "Idleterino",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "PokeIdle, Twitch e Kick num só app: bônus, pontos, lives e contas do jogo, leve e organizado.",
   "author": "VinniiSaantos",
   "license": "MIT",
@@ -46,7 +46,16 @@
       "extensions.js",
       "diario.js",
       "seguranca.js",
-      "overlay.html"
+      "overlay.html",
+      "comercio.js"
+    ],
+    "protocols": [
+      {
+        "name": "Idleterino",
+        "schemes": [
+          "idleterino"
+        ]
+      }
     ],
     "electronFuses": {
       "enableCookieEncryption": true,
