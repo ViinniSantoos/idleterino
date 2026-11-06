@@ -238,7 +238,7 @@ module.exports = function createDiario(ctx, poke) {
     if (lv && c.lvl && lv > c.lvl) L.eventos.unshift({ id: ++L.seq, t: Date.now(), tipo: 'nivel', nick, texto: `NÍVEL ${lv}!` });
     if (lv) { if (!c.lvl0) c.lvl0 = lv; c.lvl = Math.max(c.lvl || 0, lv); }
     if (d && d.shC > 0) L.eventos.unshift({ id: ++L.seq, t: Date.now(), tipo: 'shiny', nick, texto: 'SHINY CAPTURADO!' });
-    else if (d && d.shV > 0) L.eventos.unshift({ id: ++L.seq, t: Date.now(), tipo: 'shiny', nick, texto: 'SHINY À VISTA!' });
+    else if (d && d.shV > 0) L.eventos.unshift({ id: ++L.seq, t: Date.now(), tipo: 'shiny', nick, texto: 'SHINY!' });
     L.eventos = L.eventos.slice(0, 20);
   }
   const novaLive = () => ({ inicio: Date.now(), contas: {}, eventos: [], seq: 0 });
@@ -258,26 +258,8 @@ module.exports = function createDiario(ctx, poke) {
       }),
     };
   }
-  const OVERLAY = `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Idleterino · overlay</title>
-<style>html,body{margin:0;background:transparent;font-family:"Segoe UI",system-ui,sans-serif;color:#fff;overflow:hidden}
-.w{display:flex;flex-direction:column;gap:10px;padding:12px}.c{background:rgba(10,11,18,.78);border:1px solid rgba(255,255,255,.14);border-radius:16px;padding:12px 16px;box-shadow:0 8px 24px rgba(0,0,0,.35);min-width:300px}
-.t{display:flex;align-items:baseline;gap:10px}.t b{font-size:22px}.t span{color:#c9b8ff;font-weight:700}.bar{height:8px;border-radius:8px;background:rgba(255,255,255,.12);overflow:hidden;margin:8px 0}.bar i{display:block;height:100%;background:linear-gradient(90deg,#ff4d6d,#a970ff,#53fc18);transition:width 1s}
-.g{display:flex;gap:16px;flex-wrap:wrap}.g div{display:flex;flex-direction:column}.g b{font-size:20px}.g small{color:#b8bdd0;font-size:12px;font-weight:600}.gold{color:#ffd166}.sh{color:#ffe28a}
-.barra .c{display:flex;align-items:center;gap:18px}.barra .bar{width:160px;margin:0}.barra .g{gap:14px}
-.ev{position:fixed;left:50%;top:40%;transform:translate(-50%,-50%) scale(.6);opacity:0;font-size:56px;font-weight:900;text-align:center;text-shadow:0 4px 24px rgba(0,0,0,.6);transition:all .5s cubic-bezier(.2,1.6,.4,1);pointer-events:none;white-space:nowrap}
-.ev.on{opacity:1;transform:translate(-50%,-50%) scale(1)}.ev small{display:block;font-size:24px;font-weight:700;color:#fff}.ev.shiny{color:#ffe28a}.ev.nivel{color:#9dffb0}</style></head>
-<body><div class="w" id="w"></div><div class="ev" id="ev"></div>
-<script>const q=new URLSearchParams(location.search);const k=q.get('k'),estilo=q.get('estilo')||'card',quem=q.get('contas')||'principal';document.body.classList.add(estilo);
-const big=n=>{n=+n||0;const a=Math.abs(n);return a>=1e9?(n/1e9).toFixed(1).replace('.',',')+'B':a>=1e6?(n/1e6).toFixed(1).replace('.',',')+'M':a>=1e4?Math.round(n/1e3)+'k':String(Math.round(n))};const hm=ms=>{const m=Math.round(ms/6e4);return Math.floor(m/60)+'h'+String(m%60).padStart(2,'0')};
-const E=(t,c,x)=>{const e=document.createElement(t);if(c)e.className=c;if(x!=null)e.textContent=x;return e};let visto=null;const fila=[];let mostrando=false;
-function anim(){if(mostrando||!fila.length)return;mostrando=true;const e=fila.shift();const ev=document.getElementById('ev');ev.className='ev '+e.tipo;ev.replaceChildren((e.tipo==='shiny'?'✨ ':'⬆ ')+e.texto,E('small',null,e.nick));requestAnimationFrame(()=>ev.classList.add('on'));setTimeout(()=>{ev.classList.remove('on');setTimeout(()=>{mostrando=false;anim()},600)},5000)}
-async function go(){try{const d=await (await fetch('/dados?k='+encodeURIComponent(k))).json();const w=document.getElementById('w');w.replaceChildren();
-let cs=d.contas.filter(c=>c.logged);if(quem==='principal')cs=cs.filter(c=>c.main).slice(0,1);
-for(const c of cs){const b=E('div','c');const t=E('div','t');t.append(E('b',null,c.nick),E('span',null,'Nv '+c.nivel+(c.live.niveis?'  (+'+c.live.niveis+')':'')));const bar=E('div','bar');const f=E('i');f.style.width=c.pct+'%';bar.append(f);
-const g=E('div','g');const st=(v,l,cl)=>{const x=E('div',cl);x.append(E('b',null,v),E('small',null,l));return x};g.append(st('+'+big(c.live.xp),'XP na live'),st(big(c.xpH),'XP/h'),st('+'+big(c.live.gold),'ouro na live','gold'),st((c.live.shV||0)+' / '+(c.live.shC||0),'✨ vistos / capt.','sh'),st(hm(c.live.ms),'farmando'));
-b.append(t,bar,g);w.append(b)}
-if(visto===null)visto=d.eventos.length?d.eventos[0].id:0;for(const e of [...d.eventos].reverse())if(e.id>visto){fila.push(e);visto=e.id}anim()}catch(e){}}
-go();setInterval(go,3000)</script></body></html>`;
+  // A página do overlay mora em overlay.html (compacta, para não cobrir o jogo da live).
+  const OVERLAY_FILE = path.join(__dirname, 'overlay.html');
   let sserver = null; let sErr = null;
   function startStream() {
     stopStream();
@@ -290,7 +272,7 @@ go();setInterval(go,3000)</script></body></html>`;
       if (!sameKey(u.searchParams.get('k'), D.stream.key) || req.method !== 'GET') { res.writeHead(403); return res.end('Acesso negado'); }
       res.setHeader('Cache-Control', 'no-store');
       if (u.pathname === '/dados') { res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' }); return res.end(JSON.stringify(overlayDados())); }
-      if (u.pathname === '/overlay') { res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'" }); return res.end(OVERLAY); }
+      if (u.pathname === '/overlay') { res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'" }); let html = ''; try { html = fs.readFileSync(OVERLAY_FILE, 'utf8'); } catch {} return res.end(html); }
       res.writeHead(404); res.end();
     });
     sserver.on('error', (e) => { sErr = e.code === 'EADDRINUSE' ? `A porta ${D.stream.port} está ocupada por outro programa.` : String(e.message || e); sserver = null; ctx.send('app:diario', state()); });
@@ -475,6 +457,15 @@ async function go(){try{const d=await (await fetch('/api?k='+encodeURIComponent(
   ipcMain.handle('app:diario:stream', (_e, patch) => {
     if (patch && 'on' in patch) { D.stream.on = !!patch.on; if (D.stream.on) startStream(); else stopStream(); }
     if (patch && patch.zerar) { D.stream.live = novaLive(); }
+    // Testar a animação (para posicionar no OBS): um shiny ou um nível de mentira, marcado como teste.
+    if (patch && (patch.testar === 'shiny' || patch.testar === 'nivel') && D.stream.live) {
+      const L = D.stream.live; const accs = poke.accounts().filter((x) => x.isPoke);
+      const a = accs.find((x) => x.id === (poke.mainId ? poke.mainId() : null)) || accs[0];
+      const i = a ? poke.infoOf(a.id) || {} : {};
+      const nick = i.nick && i.nick !== '—' ? i.nick : (a ? a.name : 'Treinador');
+      L.eventos.unshift({ id: ++L.seq, t: Date.now(), tipo: patch.testar, nick, texto: patch.testar === 'shiny' ? 'SHINY! (teste)' : `NÍVEL ${num(i.level) + 1}! (teste)`, teste: true });
+      L.eventos = L.eventos.slice(0, 20);
+    }
     if (patch && patch.novoCodigo) { D.stream.key = randKey(20); if (D.stream.on) startStream(); }
     save();
     return new Promise((res) => setTimeout(() => res(state()), 300));

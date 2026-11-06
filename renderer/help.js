@@ -235,10 +235,10 @@ window.HELP = [
     'O app só mede (com o placar do próprio jogo): quem troca de hunt é você. Não troque o pokémon em campo no meio do teste.',
   ]],
   ['Noite e recap', 'Como coloco o Idleterino na minha live (OBS)?', [
-    '1. Ajustes > Modo Streamer: ligue o overlay e escolha o estilo (Cartão ou Barra) e as contas.',
+    '1. Ajustes > Modo Streamer: ligue o overlay e escolha o tamanho (Mini, Barra ou Cartão) e as cores.',
     '2. Clique em "Copiar link".',
-    '3. No OBS: Fontes > + > Navegador (Browser) > cole o link em URL. Cartão: 900 × 400. Barra: 1400 × 120. O fundo já é transparente.',
-    'Mostra o XP e o ouro ganhos na live, XP/h, nível e shinys, com animação quando aparece shiny ou sobe de nível. Zere a contagem no começo de cada live.',
+    '3. No OBS: Fontes > + > Navegador (Browser) > cole o link em URL. Mini: 300 × 42. Barra: 560 × 52. Cartão: 290 × 120. O fundo já é transparente.',
+    'É fixo e pequeno, para um canto sem cobrir o jogo. Mostra a sua principal: nick, nível, XP ganho na live, XP/h e shinys, com animação quando aparece shiny ou sobe de nível. "Testar animação" mostra como fica. Zere a contagem no começo de cada live.',
     'O overlay só funciona neste PC (o OBS precisa estar no mesmo computador). Ninguém da internet acessa.',
   ]],
 ];

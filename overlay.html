@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Idleterino · overlay</title>
+<!-- Overlay do Modo Streamer (Fonte de navegador do OBS). Fixo, compacto e minimalista: só a conta
+     principal e só o que importa (nick, nível, XP da live, XP/h e shiny), num canto sem cobrir o jogo da
+     live (TFT, LoL, CS2, o próprio PokeIdle...). As animações de shiny e de nível acontecem DENTRO dele. -->
+<style>
+  :root { --a: #ff4d6d; --b: #a970ff; --c: #53fc18; --painel: rgba(13, 12, 24, .93); --txt: #f4f3ff; --sub: #a9a6c4; --ouro: #ffd166; --sh: #ffe58a; }
+  .tema-fogo { --a: #ff7a18; --b: #ff3d6e; --c: #ffd166; --painel: rgba(24, 12, 10, .93); }
+  .tema-gelo { --a: #4cc9f0; --b: #7b61ff; --c: #b8fff0; --painel: rgba(8, 16, 28, .93); }
+  .tema-pokeidle { --a: #ff4d6d; --b: #ffcb05; --c: #3d7dca; --painel: rgba(20, 12, 16, .93); }
+  html, body { margin: 0; background: transparent; overflow: hidden; }
+  body { font-family: "Segoe UI", system-ui, sans-serif; color: var(--txt); padding: 6px; }
+  .lista { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+  .w { position: relative; border-radius: 14px; padding: 2px; background: linear-gradient(110deg, var(--a), var(--b), var(--c), var(--a)); background-size: 300% 100%; animation: borda 8s linear infinite; box-shadow: 0 4px 16px rgba(0, 0, 0, .45); }
+  @keyframes borda { to { background-position: 300% 0; } }
+  .in { position: relative; border-radius: 12px; background: var(--painel); overflow: hidden; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: #ff3b3b; box-shadow: 0 0 6px #ff3b3b; animation: pisca 1.6s ease-in-out infinite; flex: none; }
+  @keyframes pisca { 50% { opacity: .35; } }
+  .nick { font-weight: 800; letter-spacing: .2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-shadow: 0 1px 2px rgba(0, 0, 0, .6); }
+  .lv { font-weight: 900; font-size: 11px; padding: 1px 7px; border-radius: 999px; color: #fff; background: linear-gradient(90deg, var(--a), var(--b)); white-space: nowrap; flex: none; }
+  .bar { position: relative; height: 6px; border-radius: 6px; background: rgba(255, 255, 255, .12); overflow: hidden; }
+  .bar .f { position: absolute; inset: 0 auto 0 0; width: 0; border-radius: 6px; background: linear-gradient(90deg, var(--a), var(--b), var(--c)); transition: width 1.2s ease; }
+  .bar .f::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .55), transparent); width: 40%; animation: brilho 2.4s ease-in-out infinite; }
+  @keyframes brilho { from { transform: translateX(-120%); } to { transform: translateX(320%); } }
+  .v { font-weight: 900; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .l { color: var(--sub); font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; white-space: nowrap; }
+  .grad { background: linear-gradient(90deg, var(--a), var(--b), var(--c)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .ouro { color: var(--ouro); } .sh { color: var(--sh); }
+  .float { position: absolute; font-weight: 900; font-size: 12px; pointer-events: none; animation: sobe 1.6s ease-out forwards; text-shadow: 0 1px 3px rgba(0, 0, 0, .7); }
+  @keyframes sobe { from { transform: translateY(0); opacity: 1; } to { transform: translateY(-22px); opacity: 0; } }
+
+  /* ---- Cartão compacto (~330 × 110) ---- */
+  .card .in { width: 268px; padding: 8px 12px 9px; }
+  .card .hd { display: flex; align-items: center; gap: 7px; margin-bottom: 6px; }
+  .card .nick { font-size: 16px; max-width: 150px; }
+  .card .marca { margin-left: auto; font-size: 9px; font-weight: 800; color: var(--sub); letter-spacing: .6px; white-space: nowrap; }
+  .card .pct { font-size: 10px; color: var(--sub); font-weight: 700; margin-top: 3px; display: flex; justify-content: space-between; }
+  .card .g { display: grid; grid-template-columns: 1.2fr 1fr .7fr; gap: 6px; margin-top: 6px; }
+  .card .g > div { position: relative; display: flex; flex-direction: column; }
+  .card .g .v { font-size: 15px; line-height: 1.15; }
+  .card .g .xp .v { font-size: 17px; }
+
+  /* ---- Barra (uma linha, ~620 × 40) ---- */
+  .barra .in { display: flex; align-items: center; gap: 12px; padding: 6px 14px; height: 30px; }
+  .barra .nick { font-size: 14px; max-width: 140px; }
+  .barra .bar { width: 90px; }
+  .barra .s { position: relative; display: flex; align-items: baseline; gap: 4px; }
+  .barra .s .v { font-size: 14px; }
+  .barra .marca { font-size: 9px; font-weight: 800; color: var(--sub); letter-spacing: .5px; }
+
+  /* ---- Mini (pílula, ~280 × 30) ---- */
+  .mini .w { border-radius: 999px; }
+  .mini .in { border-radius: 999px; display: flex; align-items: center; gap: 8px; padding: 4px 12px; height: 22px; }
+  .mini .nick { font-size: 13px; max-width: 120px; }
+  .mini .s { position: relative; display: flex; align-items: baseline; gap: 3px; }
+  .mini .s .v { font-size: 13px; }
+
+  /* ---- Aviso de shiny / nível: desliza POR CIMA do próprio overlay, sem sair dele ---- */
+  .aviso { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 8px; border-radius: inherit; font-weight: 900; letter-spacing: .5px; transform: translateX(-105%); transition: transform .45s cubic-bezier(.2, 1.3, .4, 1); z-index: 3; text-shadow: 0 2px 6px rgba(0, 0, 0, .5); white-space: nowrap; }
+  .aviso.on { transform: translateX(0); }
+  .aviso.shiny { background: linear-gradient(110deg, #ffb703, #ffe58a, #fff6c8, #ffb703); background-size: 200% 100%; animation: ouroCorre 1.4s linear infinite; color: #3a2400; text-shadow: none; }
+  .aviso.nivel { background: linear-gradient(110deg, var(--a), var(--b), var(--c)); color: #fff; }
+  @keyframes ouroCorre { to { background-position: 200% 0; } }
+  .aviso small { font-weight: 800; opacity: .85; }
+  .card .aviso { font-size: 19px; flex-direction: column; gap: 0; padding: 0 8px; }
+  .card .aviso small { font-size: 12px; }
+  .barra .aviso { font-size: 15px; }
+  .barra .aviso small { font-size: 12px; }
+  .mini .aviso { font-size: 13px; }
+  .mini .aviso small { display: none; }
+  .w.festa { animation: borda 1s linear infinite, pulso .6s ease-in-out 6; }
+  @keyframes pulso { 50% { box-shadow: 0 0 22px 4px var(--b); } }
+  .faisca { position: absolute; z-index: 4; pointer-events: none; font-size: 12px; animation: faisca 1.3s ease-out forwards; }
+  @keyframes faisca { from { transform: translate(0, 0) scale(.6); opacity: 1; } to { transform: translate(var(--dx), var(--dy)) scale(1.2); opacity: 0; } }
+</style>
+</head>
+<body>
+<div class="lista" id="lista"></div>
+<script>
+(function () {
+  var q = new URLSearchParams(location.search);
+  var k = q.get('k'), estilo = q.get('estilo') || 'card', tema = q.get('tema') || 'neon';
+  if (['card', 'barra', 'mini'].indexOf(estilo) < 0) estilo = 'card';
+  document.body.className = estilo + ' tema-' + tema;
+  var big = function (n) { n = +n || 0; var a = Math.abs(n); return a >= 1e9 ? (n / 1e9).toFixed(1).replace('.', ',') + 'B' : a >= 1e6 ? (n / 1e6).toFixed(1).replace('.', ',') + 'M' : a >= 1e4 ? Math.round(n / 1e3) + 'k' : String(Math.round(n)); };
+  var hm = function (ms) { var m = Math.round(ms / 6e4); return Math.floor(m / 60) + 'h' + String(m % 60).padStart(2, '0'); };
+  var E = function (t, c, x) { var e = document.createElement(t); if (c) e.className = c; if (x != null) e.textContent = x; return e; };
+  var cards = {};           // nick -> { el, campos, valores }
+  var visto = null, fila = [], ocupado = false;
+
+  // Número que sobe contando até o valor novo.
+  function conta(el, de, para, fmt) {
+    if (de === para) { el.textContent = fmt(para); return; }
+    var t0 = performance.now(), d = 1100;
+    (function passo(t) { var p = Math.min(1, (t - t0) / d); var e = 1 - Math.pow(1 - p, 3); el.textContent = fmt(de + (para - de) * e); if (p < 1) requestAnimationFrame(passo); })(t0);
+  }
+  function flutua(caixa, texto, cls) {
+    if (!caixa) return;
+    var f = E('span', 'float ' + (cls || 'grad'), texto); f.style.left = '0px'; f.style.top = '-4px';
+    caixa.appendChild(f); setTimeout(function () { f.remove(); }, 1700);
+  }
+  function stat(cls, rotulo) { var d = E('div', cls); var v = E('span', 'v'); d.appendChild(v); if (rotulo) d.appendChild(E('span', 'l', rotulo)); return { d: d, v: v }; }
+  function montar(c) {
+    var w = E('div', 'w'), inn = E('div', 'in'), cp = {};
+    var nick = E('span', 'nick', c.nick), lv = E('span', 'lv');
+    cp.lv = lv;
+    if (estilo === 'card') {
+      var hd = E('div', 'hd'); hd.append(E('i', 'dot'), nick, lv, E('span', 'marca', '⚡ IDLETERINO'));
+      var bar = E('div', 'bar'); cp.fill = E('i', 'f'); bar.appendChild(cp.fill);
+      var pct = E('div', 'pct'); cp.pct = E('span'); cp.prox = E('span'); pct.append(cp.pct, cp.prox);
+      var g = E('div', 'g');
+      cp.xp = stat('xp', 'XP na live'); cp.xph = stat('', 'XP/h'); cp.sh = stat('', '✨ Shiny');
+      cp.xp.v.className = 'v grad'; cp.sh.v.className = 'v sh';
+      g.append(cp.xp.d, cp.xph.d, cp.sh.d);
+      inn.append(hd, bar, pct, g);
+    } else if (estilo === 'barra') {
+      var bar2 = E('div', 'bar'); cp.fill = E('i', 'f'); bar2.appendChild(cp.fill);
+      cp.xp = stat('s', 'XP na live'); cp.xph = stat('s', '/h'); cp.sh = stat('s', '✨');
+      cp.xp.v.className = 'v grad'; cp.sh.v.className = 'v sh';
+      inn.append(E('i', 'dot'), nick, lv, bar2, cp.xp.d, cp.xph.d, cp.sh.d);
+    } else {
+      cp.xp = stat('s', 'XP'); cp.sh = stat('s', '✨');
+      cp.xp.v.className = 'v grad'; cp.sh.v.className = 'v sh';
+      inn.append(E('i', 'dot'), nick, lv, cp.xp.d, cp.sh.d);
+    }
+    cp.aviso = E('div', 'aviso'); inn.appendChild(cp.aviso);
+    w.appendChild(inn);
+    return { el: w, inn: inn, cp: cp, val: {} };
+  }
+  function atualizar(card, c) {
+    var cp = card.cp, v = card.val;
+    cp.lv.textContent = 'NV ' + c.nivel;
+    if (cp.fill) cp.fill.style.width = c.pct + '%';
+    if (cp.pct) cp.pct.textContent = c.pct.toFixed(1).replace('.', ',') + '% do nível';
+    if (cp.prox) cp.prox.textContent = c.live.niveis ? '+' + c.live.niveis + ' nível na live' : '';
+    var xp = c.live.xp, sh = (c.live.shV || 0) + (c.live.shC || 0);
+    if (v.xp != null && xp > v.xp) flutua(cp.xp.d, '+' + big(xp - v.xp));
+    conta(cp.xp.v, v.xp == null ? xp : v.xp, xp, function (n) { return '+' + big(n); });
+    if (cp.xph) conta(cp.xph.v, v.xph == null ? c.xpH : v.xph, c.xpH, big);
+    cp.sh.v.textContent = estilo === 'mini' ? String(sh) : (c.live.shV || 0) + '/' + (c.live.shC || 0);
+    card.val = { xp: xp, xph: c.xpH };
+  }
+  function faiscas(card, n, simbolo) {
+    var r = card.inn.getBoundingClientRect();
+    for (var i = 0; i < n; i++) {
+      var f = E('span', 'faisca', simbolo);
+      f.style.left = (Math.random() * r.width) + 'px'; f.style.top = (r.height / 2) + 'px';
+      f.style.setProperty('--dx', ((Math.random() - .5) * 60) + 'px'); f.style.setProperty('--dy', ((Math.random() - .7) * r.height) + 'px');
+      f.style.animationDelay = (Math.random() * .5) + 's';
+      card.inn.appendChild(f); (function (x) { setTimeout(function () { x.remove(); }, 2000); })(f);
+    }
+  }
+  function proximo() {
+    if (ocupado || !fila.length) return;
+    var e = fila.shift();
+    var card = cards[e.nick] || cards[Object.keys(cards)[0]];
+    if (!card) return;
+    ocupado = true;
+    var a = card.cp.aviso;
+    a.className = 'aviso ' + e.tipo;
+    a.replaceChildren(E('span', null, (e.tipo === 'shiny' ? '✨ ' : '⬆ ') + e.texto), E('small', null, e.nick));
+    card.el.classList.add('festa');
+    requestAnimationFrame(function () { a.classList.add('on'); faiscas(card, e.tipo === 'shiny' ? 14 : 10, e.tipo === 'shiny' ? '✨' : '★'); });
+    setTimeout(function () { a.classList.remove('on'); card.el.classList.remove('festa'); setTimeout(function () { ocupado = false; proximo(); }, 500); }, 4200);
+  }
+  function go() {
+    fetch('/dados?k=' + encodeURIComponent(k)).then(function (r) { return r.json(); }).then(function (d) {
+      var cs = d.contas.filter(function (c) { return c.logged; });
+      cs = cs.filter(function (c) { return c.main; }).slice(0, 1); // só a principal
+      var lista = document.getElementById('lista'), vivos = {};
+      cs.forEach(function (c) {
+        var card = cards[c.nick] || (cards[c.nick] = montar(c));
+        if (card.el.parentNode !== lista) lista.appendChild(card.el);
+        atualizar(card, c); vivos[c.nick] = 1;
+      });
+      Object.keys(cards).forEach(function (n) { if (!vivos[n]) { cards[n].el.remove(); delete cards[n]; } });
+      if (visto === null) visto = d.eventos.length ? d.eventos[0].id : 0;
+      d.eventos.slice().reverse().forEach(function (e) { if (e.id > visto) { fila.push(e); visto = e.id; } });
+      proximo();
+    }).catch(function () {});
+  }
+  go(); setInterval(go, 3000);
+})();
+</script>
+</body>
+</html>

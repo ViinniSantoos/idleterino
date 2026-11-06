@@ -511,27 +511,32 @@ function desenharLab(L) {
 // ---------- 📺 Modo Streamer (Ajustes) ----------
 function streamSection(d) {
   const sec = el('div', 'card list xsec'); sec.id = 'sec-stream';
-  sec.append(el('h3', null, '📺 Modo Streamer (overlay para o OBS)'), el('p', 'sub', 'Mostre na live o XP e o ouro subindo, o nível e os shinys, com animação quando aparece shiny ou sobe de nível. Funciona só neste PC.'));
+  sec.append(el('h3', null, '📺 Modo Streamer (overlay para o OBS)'), el('p', 'sub', 'Um overlay fixo, pequeno e minimalista para um canto da live, sem cobrir o jogo: a sua principal com nick, nível, XP da live, XP/h e shinys, com animação quando aparece shiny ou sobe de nível. Funciona só neste PC.'));
   const s = d.stream;
   sec.append(rowOpt('Overlay ligado', 'Liga uma página local que o OBS lê. Ninguém de fora acessa.', sw(s.on, async (v) => { S.diario = await call('app:diario:stream', { on: v }); renderSettings(); })));
   if (s.on && s.base) {
     if (s.erro) sec.append(el('p', 'warn-google', `⚠ ${s.erro}`));
-    let estilo = 'card', contas = 'principal';
-    try { estilo = localStorage.getItem('streamEstilo') || 'card'; contas = localStorage.getItem('streamContas') || 'principal'; } catch {}
-    const url = () => `${s.base}&estilo=${estilo}&contas=${contas}`;
-    const e1 = el('select'); for (const [v, l] of [['card', 'Cartão'], ['barra', 'Barra fina']]) { const o = el('option', null, l); o.value = v; e1.append(o); } e1.value = estilo;
-    const e2 = el('select'); for (const [v, l] of [['principal', 'Só a principal'], ['todas', 'Todas as contas']]) { const o = el('option', null, l); o.value = v; e2.append(o); } e2.value = contas;
+    const pref = (k, d) => { try { return localStorage.getItem(k) || d; } catch { return d; } };
+    const op = { estilo: pref('streamEstilo', 'card'), tema: pref('streamTema', 'neon') };
+    const url = () => `${s.base}&estilo=${op.estilo}&tema=${op.tema}`;
+    const TAM = { card: 'Largura 290 × altura 120', barra: 'Largura 560 × altura 52', mini: 'Largura 300 × altura 42' };
     const code = el('code', 'url', url());
-    e1.onchange = () => { estilo = e1.value; try { localStorage.setItem('streamEstilo', estilo); } catch {} code.textContent = url(); };
-    e2.onchange = () => { contas = e2.value; try { localStorage.setItem('streamContas', contas); } catch {} code.textContent = url(); };
-    const opts = el('div', 'inline wide'); opts.append(el('span', 'sub', 'Estilo'), e1, el('span', 'sub', 'Contas'), e2);
-    sec.append(opts, code);
+    const tam = el('p', 'small');
+    const mostrar = () => { code.textContent = url(); tam.textContent = `Tamanho no OBS: ${TAM[op.estilo]}. Sugestão: canto de cima à esquerda (no TFT fica livre acima das sinergias). No OBS dá para arrastar e redimensionar para onde quiser. Mostra só a conta principal.`; };
+    const sel = (k, chave, itens) => { const e = el('select'); for (const [v, l] of itens) { const o = el('option', null, l); o.value = v; e.append(o); } e.value = op[k]; e.onchange = () => { op[k] = e.value; try { localStorage.setItem(chave, e.value); } catch {} mostrar(); }; return e; };
+    const opts = el('div', 'stream-opts');
+    const campo = (rot, ctrl) => { const d = el('label', 'sopt'); d.append(el('span', 'sub', rot), ctrl); return d; };
+    opts.append(campo('Tamanho', sel('estilo', 'streamEstilo', [['mini', 'Mini (pílula)'], ['barra', 'Barra fina'], ['card', 'Cartão compacto']])),
+      campo('Cores', sel('tema', 'streamTema', [['neon', 'Neon (Idleterino)'], ['pokeidle', 'PokeIdle'], ['fogo', 'Fogo'], ['gelo', 'Gelo']])));
+    sec.append(opts, code, tam);
+    mostrar();
     const passos = el('ol', 'steps');
-    for (const p of ['Copie o link.', 'No OBS: Fontes > + > Navegador (Browser) > cole o link em URL.', 'Largura 900 e altura 400 (Cartão) ou 1400 e 120 (Barra). O fundo já é transparente.']) passos.append(el('li', null, p));
+    for (const p2 of ['Copie o link.', 'No OBS: Fontes > + > Navegador (Browser) > cole o link em URL e use o tamanho acima. O fundo já é transparente.', 'Clique em "Testar animação" para ver o aviso de shiny e de nível enquanto posiciona.']) passos.append(el('li', null, p2));
     sec.append(passos);
     sec.append(actionsRow(button('📋 Copiar link', 'primary', () => { navigator.clipboard.writeText(url()); toast('Link do overlay copiado. Cole no OBS.'); }),
       button('Ver como fica', null, () => call('app:stream:preview', url())),
-      button('↺ Zerar contagem da live', null, async () => { S.diario = await call('app:diario:stream', { zerar: true }); toast('Contagem da live zerada.'); renderSettings(); }),
+      button('✨ Testar animação', null, async () => { await call('app:diario:stream', { testar: 'shiny' }); setTimeout(() => call('app:diario:stream', { testar: 'nivel' }), 6000); toast('Animação de teste enviada: shiny e, logo depois, nível.'); }),
+      button('↺ Zerar a live', null, async () => { S.diario = await call('app:diario:stream', { zerar: true }); toast('Contagem da live zerada.'); renderSettings(); }),
       button('Trocar o código', 'ghost', async () => { S.diario = await call('app:diario:stream', { novoCodigo: true }); toast('Código trocado: atualize o link no OBS.'); renderSettings(); })));
     if (s.liveInicio) sec.append(el('p', 'small', `Contando a live desde ${new Date(s.liveInicio).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}. Zere no começo de cada live.`));
   }
