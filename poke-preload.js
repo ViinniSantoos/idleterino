@@ -31,7 +31,7 @@ contextBridge.executeInMainWorld({
     const DUELO = (k) => ({ ivs: k.ivs || null, quality: k.quality ?? k.qualidade ?? null, potencia: k.potencia ?? null, refino: k.refino || null, tmElemental: k.tmElemental || null, tmFisico: !!k.tmFisico });
     const slimPk = (k) => ({
       ...DUELO(k),
-      id: k.id, speciesId: k.speciesId, level: Number(k.level) || 0, shiny: !!k.shiny,
+      id: k.id, speciesId: k.speciesId, level: Number(k.level) || 0, shiny: !!k.shiny, starter: !!k.starter,
       aoe: k.tmAoe === true || k.tmAoe === 1 || k.tmAoe === 'true' || k.tm_aoe === true,
       el: k.tmElemental || k.tm_elemental || null, apelido: k.apelido || null, poder: Number(k.poder || k.power) || 0,
     });
@@ -46,14 +46,16 @@ contextBridge.executeInMainWorld({
     }
 
     // ---- consultas do app que o jogo NÃO deve desenhar (o perfil de outro jogador abriria na tela) ----
-    const nossos = { tabela: 0, perfis: new Map(), especies: 0 };
+    const nossos = { tabela: 0, perfis: new Map(), especies: 0, lista: 0 };
     const precos = {}; // nome em minúsculas -> { em, linhas }
     let ultimaEspecies = null;
+    let ultimaLista = null;
     const recente = (t) => t && Date.now() - t < 30000;
     function ehNosso(d) {
       if (typeof d !== 'string') return false;
       if (d.indexOf('"pvpTabela"') >= 0 && recente(nossos.tabela)) return true;
       if (d.indexOf('"especies"') >= 0 && d.indexOf('"market"') >= 0 && Date.now() - nossos.especies < 8000) return true;
+      if (d.indexOf('"vitrine"') >= 0 && d.indexOf('"market"') >= 0 && Date.now() - nossos.lista < 8000) return true;
       if (d.indexOf('"perfil"') >= 0 && nossos.perfis.size) {
         try { const m = JSON.parse(d); if (m.t === 'perfil' && m.perfil && recente(nossos.perfis.get(String(m.perfil.nick || '').toLowerCase()))) return true; } catch {}
       }
@@ -142,6 +144,7 @@ contextBridge.executeInMainWorld({
             try {
               const m = JSON.parse(d);
               if (m && m.t === 'market' && m.aba === 'especies' && Date.now() - nossos.especies < 8000) { ultimaEspecies = { em: Date.now(), m }; return; }
+              if (m && m.t === 'market' && m.aba === 'vitrine' && Date.now() - nossos.lista < 8000) { ultimaLista = { em: Date.now(), m }; return; }
               if (!m || m.t !== 'market' || !ABAS[m.aba]) return;
               if (m.aba !== 'meus' && m.seq != null && m.seq !== SEQ) return;
               const key = m.aba === 'historicoGlobal' ? `historicoGlobal:${m.pagina || 0}` : m.aba;
@@ -371,6 +374,39 @@ contextBridge.executeInMainWorld({
       return res;
     }
 
+    // Busca no Market NA HORA (o orçamento da pessoa): as ofertas mais baratas de cada espécie boa no
+    // PvP, uma consulta a cada 2,5 s, e cada pokémon à venda avaliado no duelo 1×1 do jogo contra o top
+    // (o pokémon de verdade: nível, IV, qualidade, potência, refino, shiny, Z-Move). Só leitura.
+    async function ofertas(ids, moeda, meta) {
+      const g = await gin();
+      const esp = await especies();
+      const tab = jogo.tabelaTipos || {};
+      const alvo = (meta || []).slice(0, 250);
+      const out = [];
+      for (const id of (ids || []).slice(0, 15)) {
+        if (!sock || sock.readyState !== 1) break;
+        if (document.querySelector('#community:not(.hidden)')) return { erro: 'mercado-aberto', lista: out };
+        const antes = ultimaLista && ultimaLista.em;
+        nossos.lista = Date.now();
+        sock.send(JSON.stringify({ t: 'market.listar', tipo: 'pokemon', moeda: moeda === 'gold' ? 'gold' : 'orb', ordem: 'baratos', busca: '', criterios: [], elementos: [], pagina: 0, especieId: Number(id) }));
+        for (let i = 0; i < 12 && (ultimaLista && ultimaLista.em) === antes; i++) await espera(400);
+        if (ultimaLista && ultimaLista.em !== antes) {
+          for (const a of (ultimaLista.m.linhas || []).slice(0, 8)) {
+            const f = a.ficha || {};
+            if (a.tipo !== 'pokemon' || !f.speciesId) continue;
+            const c = esp.get(f.speciesId);
+            if (!c) continue;
+            const pk = { id: 1, speciesId: f.speciesId, level: Number(f.level) || 1, ivs: f.ivs || null, quality: f.quality ?? null, potencia: f.potencia ?? null, refino: f.refino || null, tmElemental: f.tmElemental || null, tmFisico: !!f.tmFisico, shiny: !!f.shiny };
+            let soma = 0, peso = 0;
+            if (g && g.compararDuelo1v1) for (const e of alvo) { const eb = esp.get(e.speciesId); if (!eb) continue; let p = 0.5; try { const r = g.compararDuelo1v1(pk, c, { ...e, id: 2 }, eb, { amostras: 24, tabelaTipos: tab }); if (r) p = r.pctA; } catch {} soma += p * (e.w || 1); peso += e.w || 1; }
+            out.push({ anuncio: a.id, speciesId: f.speciesId, nome: f.nome || c.name, level: pk.level, shiny: pk.shiny, aoe: f.tmAoe === true || f.tmAoe === 1, el: f.tmElemental || null, potencia: f.potencia ?? null, preco: Number(a.preco) || 0, qtd: Number(a.qtd) || 1, moeda: a.moeda, vendedor: a.vendedor || '', retido: a.compravelEm && a.compravelEm > Date.now(), win: peso ? Math.round((soma / peso) * 1000) / 1000 : 0, tipos: tiposDe(c) });
+          }
+        }
+        await espera(2500);
+      }
+      return { lista: out };
+    }
+
     const PEDIDOS = { 'market.meus': 1, 'market.historico': 1, 'market.historicoGlobal': 1 };
     Object.defineProperty(window, '__idleterinoMercado', {
       value: Object.freeze({
@@ -392,6 +428,7 @@ contextBridge.executeInMainWorld({
         // Duelo 1×1 do próprio jogo (o "Comparar" e o ginásio): matriz de chance de vitória de A contra B.
         duelos(a, b) { return duelos(a, b).then((r) => JSON.parse(JSON.stringify(r))).catch((e) => ({ erro: String(e) })); },
         candidatos(meta, opts) { return candidatos(meta, opts).then((r) => JSON.parse(JSON.stringify(r))).catch((e) => ({ erro: String(e) })); },
+        ofertas(ids, moeda, meta) { return ofertas(ids, moeda, meta).then((r) => JSON.parse(JSON.stringify(r))).catch((e) => ({ erro: String(e) })); },
         precos(nomes) { return precosDe(nomes).then((r) => JSON.parse(JSON.stringify(r))).catch((e) => ({ erro: String(e) })); },
         pvpLer(ids) { return pvpLer(ids).then((r) => JSON.parse(JSON.stringify(r))).catch((e) => ({ erro: String(e) })); },
       }),

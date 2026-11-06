@@ -517,6 +517,24 @@ module.exports = function createPokeIdle(ctx) {
     if (!v || v.webContents.isDestroyed()) return null;
     return v.webContents.executeJavaScript(`window.__idleterinoMercado.duelos(${JSON.stringify(a || [])}, ${JSON.stringify(b || [])})`).catch(() => null);
   });
+  // Busca no Market na hora: as espécies mais fortes contra o meta (sem lendário) e as ofertas delas.
+  let buscando = false;
+  ipcMain.handle('poke:pvp:mercado', async (_e, moeda) => {
+    if (buscando) return { erro: 'Já estou procurando. Espere terminar.' };
+    if (!pvpMeta || !pvpMeta.candidatos) return { erro: 'Atualize o meta primeiro.' };
+    const v = views.get(mainAccId());
+    if (!v || v.webContents.isDestroyed()) return { erro: 'A conta principal precisa estar aberta no app.' };
+    buscando = true;
+    try {
+      const entries = [];
+      for (const l of pvpMeta.linhas) { const p = pvpMeta.perfis[l.nick]; if (!p) continue; const w = 1 + (51 - Math.min(50, l.pos)) / 50; for (const k of p.time) entries.push({ ...k, w }); }
+      const ids = pvpMeta.candidatos.filter((x) => !x.lend).slice(0, 15).map((x) => x.speciesId);
+      const r = await v.webContents.executeJavaScript(`window.__idleterinoMercado.ofertas(${JSON.stringify(ids)}, ${JSON.stringify(moeda === 'gold' ? 'gold' : 'orb')}, ${JSON.stringify(entries)})`).catch(() => null);
+      if (!r) return { erro: 'Não consegui consultar o Market agora.' };
+      if (r.erro === 'mercado-aberto') return { erro: 'Feche o Market dentro do jogo e tente de novo (com ele aberto, a consulta apareceria na sua tela).', lista: r.lista || [] };
+      return { lista: r.lista || [], em: Date.now() };
+    } finally { buscando = false; }
+  });
   ipcMain.handle('poke:pvp:watch', (_e, names) => {
     config.pvpWatch = [...new Set((Array.isArray(names) ? names : []).map((n) => String(n).slice(0, 40)))].slice(0, 8);
     saveConfig();

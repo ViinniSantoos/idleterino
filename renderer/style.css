@@ -584,3 +584,9 @@ button.mini.on { border-color: var(--ok); color: var(--ok); }
 .pd-row { display: grid; grid-template-columns: 120px 90px 90px 90px; gap: 8px; padding: 5px 2px; border-top: 1px solid var(--line); font-size: 12.5px; }
 .pd-row.hd { color: var(--dim); font-size: 11px; text-transform: uppercase; border-top: 0; }
 .pd-row .ok { color: var(--ok); } .pd-row .bad { color: #ff8a8a; }
+
+.budget select { width: auto; }
+.ext-sec.mk-sub { margin-top: 14px; }
+
+.lvl-warn { font-size: 11px; color: #ffcf66; }
+.pp-item.off { opacity: .55; cursor: not-allowed; }
