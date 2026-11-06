@@ -174,4 +174,58 @@ window.HELP = [
     'Sim, de propósito: ele fica na bandeja, perto do relógio, juntando pontos e com as contas conectadas.',
     'Para sair de vez: botão direito no ícone > Sair, ou Ajustes > Sair do app.',
   ]],
+  ['Vigia e avisos', 'Como recebo aviso no celular quando uma conta para?', [
+    '1. Ajustes > Vigia e avisos: ligue "Aviso no celular (ntfy)".',
+    '2. Instale o app ntfy no celular (gratuito, sem cadastro).',
+    '3. Android: leia o QR code com a câmera. iPhone: no ntfy, toque em + e cole o nome do canal que aparece no app.',
+    '4. Toque em "Testar". A notificação chega até com a tela bloqueada, no Wi-Fi ou no 4G.',
+    'O aviso leva só o nick e o que aconteceu (parada, caiu, travou, shiny, Market, relatório). Nunca login nem senha.',
+  ]],
+  ['Vigia e avisos', 'E pelo Discord?', [
+    '1. No Discord, num servidor ou canal SEU: Configurações do canal > Integrações > Webhooks > Novo webhook > Copiar URL.',
+    '2. No Idleterino: Ajustes > Vigia e avisos > cole o link em "Aviso no Discord" > Salvar > Testar.',
+    'Quem tiver o link do webhook consegue mandar mensagem no canal: não compartilhe.',
+  ]],
+  ['Vigia e avisos', 'O que o vigia considera "conta parada"?', [
+    'Conta logada que não ganha XP há 5 min (dá para mudar para 3, 10, 15 ou 30 min). Costuma ser pokémon morto, poção acabada ou a conta parada num menu.',
+    'Também avisa quando a conta cai ou desloga (2 min fora) e quando trava e o app reabre sozinho.',
+  ]],
+  ['Vigia e avisos', 'Como ver as contas no celular sem notificação?', [
+    '1. Ajustes > Painel no celular: ligue o painel.',
+    '2. Na primeira vez, o Windows pergunta se o Idleterino pode usar a rede: escolha só "Redes privadas".',
+    '3. Leia o QR code com a câmera do celular, no mesmo Wi-Fi do PC.',
+    'É só leitura: nível, XP/h, ouro/h, horas e se alguma conta está parada. Tem código de acesso e não sai da sua casa. "Trocar o código" invalida o link antigo.',
+  ]],
+  ['Noite e recap', 'Como funciona o "Vou dormir"?', [
+    '1. No Início, clique em "🌙 Vou dormir". O app mostra cada conta: se está logada, se a hunt gasta muita poção e qual hunt rende mais com pouca poção.',
+    '2. Troque a hunt no jogo se quiser (o app não troca nem joga por você) e clique em "Boa noite!".',
+    '3. Todas vão para o ULTRA e o Otimizar liga a cada 1 h.',
+    'Quando você voltar ao PC (depois de 4 h), tudo volta como estava e aparece o relatório "Bom dia, treinador", que dá para copiar e postar. Também dá para clicar em "☀ Acordei".',
+  ]],
+  ['Noite e recap', 'O que é o Wrapped e o Cartão do Treinador?', [
+    'O Wrapped é a retrospectiva da semana ou do mês: horas de farm, XP, ouro, hunt favorita, shinys e o melhor dia. No fim vira uma imagem para copiar e postar.',
+    'O Cartão do Treinador mostra a sua principal, as horas de farm, os shinys e as conquistas.',
+    'Os números começam a contar a partir da 0.3.0 e ficam só no seu PC.',
+  ]],
+  ['PokeIdle', 'O que são as horas na lista de contas?', [
+    '"Logada há" é desde quando a conta está logada sem cair. "Hoje" e "7 dias" somam todo o tempo logada pelo Idleterino.',
+  ]],
+  ['Extensões', 'Dá para instalar sem baixar zip nem pasta?', [
+    '1. Abra a página da extensão na Chrome Web Store (vale para quem usa Chrome, Opera, Opera GX, Edge ou Brave) ou na loja do Opera.',
+    '2. Copie o link da barra de endereço.',
+    '3. Em Extensões, clique em "🔗 Instalar pelo link" e cole. O app baixa da loja oficial e mostra o que a extensão pode fazer antes de instalar.',
+    'Ou use "📥 Trazer do meu navegador": o app acha as extensões do PokeIdle que você já tem no navegador e baixa a cópia oficial da loja.',
+  ]],
+  ['Extensões', 'O que é "✔ verificada" e "⚠ por sua conta"?', [
+    'Verificada: o Idleterino conhece e confere (ex.: Rotom Sniper, /hunt). Atualiza sozinha.',
+    'Por sua conta: o app instala, mas não conferiu. Ela só se atualiza quando você aceitar, e o app mostra antes se a versão nova pede permissões novas.',
+    'Qualquer extensão roda dentro das contas do PokeIdle e pode ver o que acontece nelas, inclusive o login do jogo. Instale só de quem você confia.',
+  ]],
+  ['Segurança', 'Uma atualização deu problema. Como volto atrás?', [
+    'Ajustes > Backups e versões:',
+    '1. "Restaurar" volta contas, canais, ajustes e extensões como estavam no dia escolhido (os logins não mudam).',
+    '2. "Ver versões anteriores" > "Voltar para a 0.x.x": o app baixa a versão do GitHub, confere a assinatura, instala e abre sozinho. A versão com problema não volta sozinha; a correção chega normalmente.',
+    'Se a mesma versão fechar sozinha 3 vezes seguidas ao abrir, o próprio app oferece essas saídas.',
+    'No portátil e no Linux, baixe a versão anterior em github.com/ViinniSantoos/idleterino/releases.',
+  ]],
 ];

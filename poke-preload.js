@@ -27,7 +27,7 @@ contextBridge.executeInMainWorld({
 
     // ---- estado leve do jogador: o que a sugestão de hunt e o PvP precisam ----
     const jogo = { hunts: null, tabelaTipos: null, amp: 1.5, eu: {}, pks: new Map(), keys: [] };
-    const CAMPOS_EU = ['nick', 'level', 'activeId', 'bicicleta', 'pvp', 'pvpRank', 'pvpPosicao', 'pvpHistorico', 'pvpTime', 'huntSlug', 'hunt', 'huntAtual', 'area'];
+    const CAMPOS_EU = ['xp', 'xpNivel', 'xpProximo', 'gold', 'nick', 'level', 'activeId', 'bicicleta', 'pvp', 'pvpRank', 'pvpPosicao', 'pvpHistorico', 'pvpTime', 'huntSlug', 'hunt', 'huntAtual', 'area'];
     const DUELO = (k) => ({ ivs: k.ivs || null, quality: k.quality ?? k.qualidade ?? null, potencia: k.potencia ?? null, refino: k.refino || null, tmElemental: k.tmElemental || null, tmFisico: !!k.tmFisico });
     const slimPk = (k) => ({
       ...DUELO(k),
@@ -40,6 +40,7 @@ contextBridge.executeInMainWorld({
       const { cheio, pokemons, pkMud, pkFora } = p;
       if (cheio || cheioForcado) jogo.keys = Object.keys(p);
       for (const k of CAMPOS_EU) if (k in p) jogo.eu[k] = p[k];
+      if ('nick' in p || 'xp' in p || 'level' in p) jogo.at = Date.now();
       if (Array.isArray(pokemons)) jogo.pks = new Map(pokemons.map((k) => [k.id, slimPk(k)]));
       for (const k of pkMud || []) jogo.pks.set(k.id, slimPk(k));
       for (const id of pkFora || []) jogo.pks.delete(id);
@@ -417,6 +418,43 @@ contextBridge.executeInMainWorld({
       return { lista: out };
     }
 
+    // ---- Treinador pela conexão: nick, nível, XP e ouro chegam mesmo no ULTRA (que não desenha nada) ----
+    function treinador() {
+      const e = jogo.eu;
+      if (!e.nick) return null;
+      const dentro = Math.max(0, (Number(e.xp) || 0) - (Number(e.xpNivel) || 0));
+      const faixa = Math.max(1, (Number(e.xpProximo) || 0) - (Number(e.xpNivel) || 0));
+      return { nick: String(e.nick), level: Number(e.level) || 0, dentro, faixa, gold: Number(e.gold) || 0, at: jogo.at || 0 };
+    }
+    // Faixa do Idleterino no modo ULTRA: nick, nível e XP do nível, em cima da caixa do jogo. Só
+    // mostra (não clica em nada) e some fora do ULTRA.
+    setInterval(() => {
+      const ultra = document.documentElement.classList.contains('modo-ultra');
+      let f = document.getElementById('idleterino-ultra');
+      const t = ultra ? treinador() : null;
+      if (!t) { if (f) f.remove(); return; }
+      // Dentro da caixa do ULTRA (o jogo esconde tudo o que fica fora dela), logo abaixo do título.
+      const caixa = document.querySelector('#ultra .ultra-caixa') || document.querySelector('.ultra-caixa');
+      if (f && caixa && f.parentElement !== caixa) { f.remove(); f = null; }
+      if (!f) {
+        f = document.createElement('div'); f.id = 'idleterino-ultra';
+        f.style.cssText = 'pointer-events:none;display:flex;flex-direction:column;gap:4px;margin:6px 0 8px;padding:8px 12px;border-radius:10px;background:rgba(12,13,20,.82);border:1px solid rgba(255,255,255,.14);color:#eef0f7;font:700 14px/1.3 "Segoe UI",system-ui,sans-serif;text-align:center';
+        if (!caixa) f.style.cssText += ';position:fixed;left:50%;top:8px;transform:translateX(-50%);z-index:2147483646;min-width:260px';
+        const l1 = document.createElement('div'); l1.className = 'l1';
+        const bar = document.createElement('div'); bar.style.cssText = 'height:6px;border-radius:6px;background:rgba(255,255,255,.1);overflow:hidden';
+        const fill = document.createElement('i'); fill.style.cssText = 'display:block;height:100%;background:linear-gradient(90deg,#ff4d6d,#a970ff,#53fc18)'; bar.append(fill);
+        const l2 = document.createElement('div'); l2.className = 'l2'; l2.style.cssText = 'font-weight:500;font-size:12px;color:#a7adc2';
+        f.append(l1, bar, l2);
+        if (caixa) { const titulo = caixa.firstElementChild; if (titulo) titulo.after(f); else caixa.prepend(f); }
+        else { (document.body || document.documentElement).append(f); f.style.setProperty('display', 'flex', 'important'); }
+      }
+      const n = (x) => Number(x || 0).toLocaleString('pt-BR');
+      const pct = Math.min(100, (t.dentro / t.faixa) * 100);
+      f.querySelector('.l1').textContent = `${t.nick} · Nv ${t.level}`;
+      f.querySelector('i').style.width = `${pct}%`;
+      f.querySelector('.l2').textContent = `${n(t.dentro)} / ${n(t.faixa)} xp (${pct.toFixed(1).replace('.', ',')}%) · ouro ${n(t.gold)}`;
+    }, 2000);
+
     const PEDIDOS = { 'market.meus': 1, 'market.historico': 1, 'market.historicoGlobal': 1 };
     Object.defineProperty(window, '__idleterinoMercado', {
       value: Object.freeze({
@@ -433,6 +471,7 @@ contextBridge.executeInMainWorld({
         bonusXp() { return bonusXp ? JSON.parse(JSON.stringify(bonusXp)) : null; },
         huntRank() { return huntRank().then((r) => JSON.parse(JSON.stringify(r))).catch((e) => ({ pronto: false, erro: String(e) })); },
         pvpColetar(n, passo) { return pvpColetar(n, passo).catch((e) => ({ ok: false, motivo: String(e) })); },
+        treinador() { const t = treinador(); return t ? { ...t } : null; },
         pvpEu() { return jogo.eu.pvp ? { ...JSON.parse(JSON.stringify(jogo.eu.pvp)), nick: jogo.eu.nick || null } : null; },
         pvpEstado() { return { coletando: pvp.coletando, feitos: pvp.feitos, total: pvp.total, at: pvp.at }; },
         // Duelo 1×1 do próprio jogo (o "Comparar" e o ginásio): matriz de chance de vitória de A contra B.

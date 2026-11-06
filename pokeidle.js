@@ -50,7 +50,14 @@ const READ_SCRIPT = `(() => {
   const q = (s) => document.querySelector(s);
   const txt = (s) => { const e = q(s); return e ? e.textContent.trim().replace(/\\s+/g, ' ') : null; };
   const app = q('#app');
-  const logged = !!app && !app.classList.contains('hidden');
+  const ultra = document.documentElement.classList.contains('modo-ultra');
+  const T = (() => { try { return window.__idleterinoMercado && window.__idleterinoMercado.treinador ? window.__idleterinoMercado.treinador() : null; } catch { return null; } })();
+  const T_ok = !!(T && T.nick && Date.now() - T.at < 5 * 60 * 1000);
+  const nf = (x) => Number(x || 0).toLocaleString('pt-BR');
+  const domNick = txt('#tr-nick');
+  const nickV = domNick && domNick !== '—' ? domNick : (T_ok ? T.nick : domNick);
+  const temTela = domNick && domNick !== '—';
+  const logged = (!!app && !app.classList.contains('hidden')) || (ultra && T_ok);
   const ativos = [...document.querySelectorAll('#tr-ativos .tr-ativo')].map((e) => ({
     kind: e.classList.contains('twitch') ? 'twitch' : e.classList.contains('kick') ? 'kick' : e.classList.contains('vip') ? 'vip'
       : e.classList.contains('passe-vip') ? 'passe' : e.classList.contains('guild-boost') ? 'guild' : 'item',
@@ -61,11 +68,11 @@ const READ_SCRIPT = `(() => {
     .map((id) => { const c = q('#' + id); return c ? { id, on: !!c.checked } : null; }).filter(Boolean);
   return {
     temSessao: (() => { try { const x = JSON.parse(localStorage.getItem('sessao') || 'null'); return !!(x && x.token); } catch { return false; } })(),
-    logged, nick: txt('#tr-nick'), level: txt('#tr-level'), gold: txt('#tr-gold'), gems: txt('#tr-gemas'), diamonds: txt('#tr-diamantes'),
-    xp: txt('#tr-xp-txt'), guild: txt('#tr-guild'), xpH: txt('#sessao-xp-treinador-h'), where: txt('#eco-onde'), ativos, autos,
+    logged, nick: nickV, level: temTela ? txt('#tr-level') : (T_ok ? String(T.level) : txt('#tr-level')), gold: temTela ? txt('#tr-gold') : (T_ok ? nf(T.gold) : txt('#tr-gold')), gems: txt('#tr-gemas'), diamonds: txt('#tr-diamantes'),
+    xp: temTela ? txt('#tr-xp-txt') : (T_ok ? nf(T.dentro) + ' / ' + nf(T.faixa) + ' xp' : txt('#tr-xp-txt')), ultraFonte: !temTela && T_ok, guild: txt('#tr-guild'), xpH: txt('#sessao-xp-treinador-h'), where: txt('#eco-onde'), ativos, autos,
     autoCount: txt('#auto-cnt'),
     // O placar da sessão que o próprio jogo grava (o mesmo do painel do modo Economia).
-    sess: (() => { try { const n = txt('#tr-nick'); const o = n && JSON.parse(localStorage.getItem('sessao-hunt:' + n.toLowerCase()) || 'null');
+    sess: (() => { try { const n = nickV && nickV !== '—' ? nickV : null; const o = n && JSON.parse(localStorage.getItem('sessao-hunt:' + n.toLowerCase()) || 'null');
       return o && o.ms > 0 ? { ms: o.ms, xpTreinador: +o.xpTreinador || 0, xpPokemon: +o.xpPokemon || 0, gold: +o.gold || 0, abates: +o.abates || 0, capturas: +o.capturas || 0, shVistos: +o.shiniesVistos || 0, shCapt: +o.shinies || 0, lucroH: txt('#sessao-lucro-h') } : null; } catch { return null; } })(),
     evento: (() => { const f = q('#evento-faixa'); return f && !f.classList.contains('hidden') ? { texto: txt('#evento-texto'), tempo: txt('#evento-tempo') } : null; })(),
     bonusXp: (() => { try { return window.__idleterinoMercado ? window.__idleterinoMercado.bonusXp() : null; } catch { return null; } })(),
@@ -253,6 +260,10 @@ module.exports = function createPokeIdle(ctx) {
         else if (Date.now() - stuckSince.get(id) > 20 * 1000 && Date.now() - (lastReopen.get(id) || 0) > 2 * 60 * 1000) { stuckSince.delete(id); reopen(id, 'login preso'); }
         setTimeout(() => readOne(id), 10 * 1000); // confere de novo logo
       } else stuckSince.delete(id);
+      // Diário: horas logadas, histórico do dia e vigia (conta parada, caiu, shiny).
+      // No ULTRA a tela não mostra a hunt: vale o nome que a sugestão de hunt leu pela conexão.
+      const hrAtual = prev && prev.huntRank && prev.huntRank.atualEst && prev.huntRank.atualEst.nome;
+      if (ctx.onPokeRead) { try { ctx.onPokeRead(id, { ...r, where: r.where && r.where !== '—' ? r.where : (hrAtual || null) }); } catch {} }
       if (canais && ctx.onOfficial) { try { ctx.onOfficial(canais, id); } catch {} }
       send('status', snapshot());
     }
@@ -285,6 +296,7 @@ module.exports = function createPokeIdle(ctx) {
     createView(a);
     layout();
     lastReopen.set(id, Date.now());
+    if (ctx.onPokeEvent) { try { ctx.onPokeEvent(id, 'reaberta', motivo); } catch {} }
     const log = optLog.get(id) || [];
     log.unshift({ t: Date.now(), mb, motivo });
     optLog.set(id, log.slice(0, 5));
@@ -439,7 +451,7 @@ module.exports = function createPokeIdle(ctx) {
         if (!(val > 0)) continue;
         const prev = h.map((x) => x[moeda]).filter((x) => x > 0).sort((a, b) => a - b);
         const mediana = prev.length >= 3 ? prev[Math.floor(prev.length / 2)] : null;
-        if (mediana && val <= mediana * 0.85 && ctx.notify) ctx.notify(`${row.nome} mais barato no Market`, `A partir de ${val.toLocaleString('pt-BR')} ${nome} (antes ~${mediana.toLocaleString('pt-BR')}). ${row.anuncios} ofertas. Abra o Market no jogo para ver.`);
+        if (mediana && val <= mediana * 0.85 && (ctx.alert || ctx.notify)) (ctx.alert ? (t, b) => ctx.alert('mercado', t, b, n) : ctx.notify)(`${row.nome} mais barato no Market`, `A partir de ${val.toLocaleString('pt-BR')} ${nome} (antes ~${mediana.toLocaleString('pt-BR')}). ${row.anuncios} ofertas. Abra o Market no jogo para ver.`);
       }
       h.push({ t: Date.now(), orb: Number(row.minOrb) || 0, gold: Number(row.minGold) || 0 });
       config.pvpWatchHist[n] = h.slice(-12);
@@ -519,7 +531,7 @@ module.exports = function createPokeIdle(ctx) {
       pokeCount: config.accounts.filter((a) => isPokeIdle(urlOf(a))).length, maxWindows: MAX_WINDOWS, defaultUrl: GAME,
       optimizeEvery: config.optimizeEvery || 0,
       voteMs: VOTE_MS, marketAt: lastMarket, hunts: huntLevels, pvpAt: pvpMeta ? pvpMeta.at : 0, pvpRunning,
-      accounts: config.accounts.map((a) => ({ ...a, memMB: memOf(a.id), optLog: optLog.get(a.id) || [], optNext: config.optimizeEvery ? Math.max(openedAt.get(a.id) || 0, lastReopen.get(a.id) || 0) + config.optimizeEvery * 60000 : null, vote: (config.votes || {})[a.id] || null, url: urlOf(a), isPoke: isPokeIdle(urlOf(a)), host: hostOf(urlOf(a)), effectiveMode: effectiveMode(a), zoom: a.zoom || 1, info: info.get(a.id) || null, frozen: frozen.has(a.id), frozenImg: frozen.get(a.id) || null })),
+      accounts: config.accounts.map((a) => ({ ...a, horas: ctx.horasOf ? ctx.horasOf(a.id) : null, memMB: memOf(a.id), optLog: optLog.get(a.id) || [], optNext: config.optimizeEvery ? Math.max(openedAt.get(a.id) || 0, lastReopen.get(a.id) || 0) + config.optimizeEvery * 60000 : null, vote: (config.votes || {})[a.id] || null, url: urlOf(a), isPoke: isPokeIdle(urlOf(a)), host: hostOf(urlOf(a)), effectiveMode: effectiveMode(a), zoom: a.zoom || 1, info: info.get(a.id) || null, frozen: frozen.has(a.id), frozenImg: frozen.get(a.id) || null })),
     };
   }
 
@@ -677,5 +689,11 @@ module.exports = function createPokeIdle(ctx) {
     start, snapshot, setMain: (w) => { mainWin = w; mainWin.on('resize', () => send('relayout', true)); },
     trayInfo: () => ({ accounts: config.accounts.length }),
     noteOutside,
+    // Para o diário (modo noite e painel): ler as contas e trocar o modo / o otimizar sozinho.
+    accounts: () => config.accounts.map((a) => ({ ...a, isPoke: isPokeIdle(urlOf(a)) })),
+    infoOf: (id) => info.get(id) || null,
+    setModes: (map) => { for (const [id, m] of Object.entries(map || {})) { const a = account(id); if (a && MODES[m] && a.mode !== m) { a.mode = m; applyMode(id); } } saveConfig(); send('status', snapshot()); },
+    getOptimizeEvery: () => config.optimizeEvery || 0,
+    setOptimizeEvery: (min) => { config.optimizeEvery = [0, 30, 60, 120, 300].includes(Number(min)) ? Number(min) : 0; saveConfig(); send('status', snapshot()); },
   };
 };

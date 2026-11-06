@@ -486,6 +486,7 @@ function renderSettings() {
   ]) ul.append(el('li', null, t));
   sec.append(ul, button('Apagar todos os logins deste PC', null, async () => { if (await call('app:wipeLogins')) toast('Logins apagados. Entre de novo quando quiser.'); }));
   box.append(sec);
+  if (typeof settingsExtras === 'function') settingsExtras(box);
 }
 async function setPlatform(ns, on) { S.app = await call('app:platform', ns, on); refreshAll(); }
 
@@ -524,8 +525,11 @@ function accCard(a, onclick, active) {
   const nick = i.logged && i.nick && i.nick !== '—' ? i.nick : a.name;
   top.append(el('b', null, nick), el('span', 'lvl', i.logged && i.level ? `Nv ${i.level.replace(/\D+/g, '')}` : ''));
   const sub = el('div', 'acc-sub', !a.isPoke ? a.host : !a.info ? 'carregando…' : !i.logged ? 'entre na conta do jogo' : [i.xpH && `${i.xpH}`, i.where].filter(Boolean).join(' · ') || a.name);
-  c.append(top, sub, accTags(a));
-  c.title = [nick, sub.textContent].filter(Boolean).join(' · ');
+  c.append(top, sub);
+  // Horas logadas: há quanto está logada agora, hoje e nos últimos 7 dias.
+  if (a.horas && typeof horasTxt === 'function') { const hr = el('div', `acc-hrs${a.horas.parada ? ' parada' : ''}`, a.horas.parada ? '⚠ parada · sem ganhar XP' : horasTxt(a.horas)); c.append(hr); }
+  c.append(accTags(a));
+  c.title = [nick, sub.textContent, a.horas && typeof horasTxt === 'function' ? horasTxt(a.horas) : ''].filter(Boolean).join(' · ');
   c.onclick = onclick;
   return c;
 }
@@ -579,7 +583,7 @@ function renderPoke() {
       const b = button('', `acc-chip${x.id === s.selected ? ' on' : ''}${x.id === s.mainId ? ' main' : ''}${x.frozen ? ' frozen' : ''}`, async () => { S.poke = await call('poke:select', x.id); renderPoke(); });
       b.append(el('i', `dot ${!i.logged ? 'off' : x.frozen ? 'frz' : 'ok'}`), `${x.id === s.mainId ? '★ ' : ''}${nick}`);
       if (['twitch', 'kick'].some((k) => { const v = kindOfAtivo(x, k); return v && v.end && v.end > now; })) b.append(el('i', 'dot bonus'));
-      b.title = [nick, x.id === s.mainId ? 'Principal' : 'ALT', (MODE_INFO[x.effectiveMode] || [x.effectiveMode])[0], i.logged && i.level ? `Nv ${i.level.replace(/\D+/g, '')}` : 'entre na conta do jogo', x.frozen ? 'congelada' : ''].filter(Boolean).join(' · ');
+      b.title = [nick, x.horas && typeof horasTxt === 'function' ? horasTxt(x.horas) : '', x.id === s.mainId ? 'Principal' : 'ALT', (MODE_INFO[x.effectiveMode] || [x.effectiveMode])[0], i.logged && i.level ? `Nv ${i.level.replace(/\D+/g, '')}` : 'entre na conta do jogo', x.frozen ? 'congelada' : ''].filter(Boolean).join(' · ');
       strip.append(b);
     }
     if (s.accounts.length < s.maxWindows) { const add = button('＋', 'acc-chip add', addAccount); add.title = 'Adicionar conta'; strip.append(add); }
@@ -878,6 +882,7 @@ function renderHomePoke() {
   const mc = el('div', 'card farm-main');
   const mh = el('div', 'farm-hd');
   mh.append(el('span', 'star', '★'), el('b', null, nickOf(main)), el('span', 'lvl', lvl(main)), el('span', 'tagp', 'Principal'));
+  if (main.horas && typeof horasTxt === 'function') mh.append(el('span', `hrs${main.horas.parada ? ' parada' : ''}`, main.horas.parada ? '⚠ parada' : `⏱ ${horasTxt(main.horas)}`));
   mc.append(mh, accTags(main));
   const mf = farmOf(main);
   const mg = el('div', 'fstats');
@@ -935,7 +940,7 @@ function renderHomePoke() {
     alts.forEach((a, i) => {
       const f = fs[i];
       const r = el('div', 'alt-row');
-      const n = el('span', 'n'); n.append(el('b', null, nickOf(a)), el('i', null, `${lvl(a)} · ${(MODE_INFO[a.effectiveMode] || [a.effectiveMode])[0]}`));
+      const n = el('span', 'n'); n.append(el('b', null, nickOf(a)), el('i', null, [lvl(a), (MODE_INFO[a.effectiveMode] || [a.effectiveMode])[0], a.horas ? (a.horas.parada ? '⚠ parada' : a.horas.agora ? `⏱ ${clock(a.horas.agora)}` : 'fora') : null].filter(Boolean).join(' · ')));
       const am = f && metaOf(a, f.xp, s.hunts);
       const ah = huntSugg(a.info && a.info.huntRank, f);
       if (ah) {
@@ -1001,6 +1006,7 @@ function renderHomePoke() {
 
   box.append(el('h2', 'section', 'PokeIdle'));
   if (alerts.children.length) box.append(alerts);
+  if (typeof homeExtras === 'function') box.append(homeExtras());
   box.append(farm, mhd, grid);
 }
 let homeCur = 'gold';
@@ -1014,7 +1020,8 @@ async function renderExt() {
   const t = el('div'); t.append(el('h1', null, 'Extensões'), el('p', 'sub', 'As extensões que você já usa no PokeIdle (sniper, /hunt e outras). Valem só nas contas do jogo.'));
   const add = el('div', 'actions'); add.style.margin = '0';
   const run = async (ch) => { const r = await call(ch); if (r.error) toast(`⚠ ${r.error}`); else if (r.ok) toast('Extensão instalada. As contas recarregaram para aplicar.'); S.ext = r.list; renderExt(); };
-  add.append(button('? Como instalar', 'ghost', () => openHelp('extensão')), button('📁 Instalar pasta', null, () => run('poke:ext:addFolder')), button('📦 Instalar .zip / .crx', 'primary', () => run('poke:ext:addFile')));
+  add.append(button('? Como instalar', 'ghost', () => openHelp('extensão')), button('📁 Pasta', null, () => run('poke:ext:addFolder')), button('📦 .zip / .crx', null, () => run('poke:ext:addFile')),
+    button('📥 Trazer do meu navegador', null, trazerDoNavegador), button('🔗 Instalar pelo link', 'primary', () => instalarPorLink()));
   head.append(t, add);
   const warn = el('div', 'card ext-warn');
   warn.append(el('b', null, '⚠ Antes de instalar'));
@@ -1033,6 +1040,7 @@ async function renderExt() {
   for (const b of builtins) {
     const inst = b.installed ? S.ext.find((e) => e.builtin && e.name.toLowerCase().includes(b.name.replace('/', '').toLowerCase())) : null;
     const r = rowOpt(`${b.name}${inst && inst.version ? ` · v${inst.version}` : ''}`, `${b.why} Baixada da Chrome Web Store e atualizada sozinha.`, el('span'));
+    { const tb = r.querySelector('.txt b'); if (tb) tb.append(el('span', 'ext-mini ok', '✔ verificada')); }
     const tag = el('span', `ext-tag${b.installed ? ' on' : ''}`, b.installed ? 'Instalada' : b.dismissed ? 'Removida por você' : 'Baixando…');
     const ctrl = el('div'); ctrl.style.display = 'flex'; ctrl.style.gap = '10px'; ctrl.style.alignItems = 'center';
     if (inst) ctrl.append(sw(inst.enabled, async (v) => { S.ext = await call('poke:ext:toggle', inst.id, v); renderExt(); }),
@@ -1050,10 +1058,13 @@ async function renderExt() {
   const list = el('div', 'card list');
   list.append(el('div', 'ext-sec', 'Suas extensões'));
   const mine = S.ext.filter((e) => !e.builtin);
-  if (!mine.length) list.append(el('div', 'empty', 'Nenhuma outra extensão. Use os botões acima para adicionar a pasta ou o arquivo de uma extensão.'));
+  if (!mine.length) list.append(el('div', 'empty', 'Nenhuma outra extensão. Cole o link da loja (🔗 Instalar pelo link) ou traga do seu navegador (📥).'));
   for (const e of mine) {
     const r = rowOpt(`${e.name}${e.version ? ` · v${e.version}` : ''}`, e.error ? `Não carregou: ${e.error}` : `${e.description || (e.mv === 3 ? 'Manifest V3' : 'Manifest V2')}${e.hasPanel && e.enabled ? ' · Painel: botão 🧩 na tela de cada conta do PokeIdle.' : ''}`, el('span'));
+    const tb = r.querySelector('.txt b');
+    if (tb) tb.append(el('span', `ext-mini ${e.verified ? 'ok' : 'warn'}`, e.verified ? '✔ verificada' : e.src ? `⚠ por sua conta · ${e.src === 'opera' ? 'loja do Opera' : 'Chrome Web Store'}` : '⚠ por sua conta · instalada à mão'));
     const ctrl = el('div'); ctrl.style.display = 'flex'; ctrl.style.gap = '10px'; ctrl.style.alignItems = 'center';
+    if (e.update) { const ub = button(`⬆ v${e.update.version}`, 'mini primary', () => atualizarExt(e)); ub.title = 'Versão nova na loja. Veja o que mudou nas permissões antes de atualizar.'; ctrl.append(ub); }
     ctrl.append(sw(e.enabled, async (v) => { S.ext = await call('poke:ext:toggle', e.id, v); renderExt(); }),
       button('Remover', 'ghost', async () => { S.ext = await call('poke:ext:remove', e.id); renderExt(); }));
     r.lastChild.replaceWith(ctrl);
@@ -1117,7 +1128,8 @@ function refreshDots() {
 function refreshAll() {
   refreshDots();
   if (page === 'home') renderHome();
-  if (page === 'settings') renderSettings();
+  // Ajustes: não redesenhar enquanto a pessoa digita (ex.: o link do webhook).
+  if (page === 'settings' && !(document.activeElement && document.activeElement.tagName === 'INPUT' && $('#page-settings').contains(document.activeElement)) && $('#modal').hidden) renderSettings();
   if (page === 'poke' && $('#drawer').hidden && $('#modal').hidden) renderPoke();
   if (P[page]) {
     // Não redesenhar enquanto a pessoa digita no chat ou na busca.

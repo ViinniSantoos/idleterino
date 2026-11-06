@@ -1,7 +1,7 @@
 // Idleterino — a casca do app: janela, bandeja, atualização, iniciar com o sistema e o registro de
 // quais sites cada sessão pode abrir. Twitch e Kick moram em platforms/ (cada um com seu login,
 // sua configuração e seus canais de IPC "twitch:..." e "kick:..."). O PokeIdle mora em pokeidle.js.
-const { app, BrowserWindow, ipcMain, session, shell, Tray, Menu, Notification, nativeImage, powerMonitor } = require('electron');
+const { app, BrowserWindow, ipcMain, session, shell, Tray, Menu, Notification, nativeImage, powerMonitor, dialog, clipboard } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const fs = require('fs');
@@ -176,6 +176,14 @@ ctx.pokePartitions = () => poke.partitions();
 ctx.reloadPoke = () => poke.reloadAll();
 const extensions = require('./extensions')(ctx);
 ctx.applyExtensions = (partition) => extensions.applyTo(partition);
+// Diário: horas logadas, histórico, vigia com avisos (PC, celular, Discord), modo noite e painel Wi-Fi.
+const diario = require('./diario')(ctx, poke);
+ctx.onPokeRead = (id, r) => diario.onRead(id, r);
+ctx.onPokeEvent = (id, kind, motivo) => diario.onEvent(id, kind, motivo);
+ctx.horasOf = (id) => diario.horasOf(id);
+ctx.alert = (tipo, titulo, texto, chave) => diario.alerta(tipo, titulo, texto, chave);
+// Rede de segurança: backups das configurações, proteção ao abrir e voltar de versão.
+const seg = require('./seguranca')();
 
 function setPlatform(ns, on) {
   config.platforms[ns] = !!on;
@@ -191,6 +199,7 @@ function appState() {
     platforms: config.platforms, firstRun,
     news: config.lastSeenVersion && config.lastSeenVersion !== app.getVersion(),
     update,
+    seg: { falhas: seg.falhas(), canRollback: seg.canRollback() },
   };
 }
 
@@ -206,6 +215,7 @@ function installUpdate() {
   if (!update) return false;
   if (update.state === 'manual') { shell.openExternal(SITE).catch(() => {}); return true; }
   if (update.state !== 'ready') return false;
+  seg.backupNow(`antes da ${update.version}`);
   app.isQuitting = true;
   // Silencioso. Quem reabre é o ajudante abaixo: o "reabrir" do instalador usa o atalho do Menu
   // Iniciar e, sem ele, mostra o erro "O Windows não pode encontrar ... .lnk".
@@ -233,14 +243,20 @@ function setupAutoUpdate() {
     const feed = `https://github.com/ViinniSantoos/idleterino/releases/latest/download/${isLinux ? 'latest-linux.yml' : 'latest.yml'}`;
     const check = () => fetch(feed).then((r) => (r.ok ? r.text() : '')).then((t) => {
       const m = /^version:\s*([\d.]+)/m.exec(t);
-      if (m && newer(m[1], app.getVersion())) setUpdate({ state: 'manual', version: m[1] });
+      if (m && newer(m[1], app.getVersion()) && !seg.skipped(m[1])) setUpdate({ state: 'manual', version: m[1] });
     }).catch(() => {});
     check();
     setInterval(check, 60 * 60 * 1000); // procura versão nova de hora em hora
     return;
   }
+  // Baixa só depois de conferir: a versão que a pessoa pulou (voltou dela por problema) não volta sozinha.
+  autoUpdater.autoDownload = false;
   autoUpdater.on('error', () => { if (update && update.state === 'downloading') setUpdate(null); });
-  autoUpdater.on('update-available', (i) => setUpdate({ state: 'downloading', version: i.version, percent: 0 }));
+  autoUpdater.on('update-available', (i) => {
+    if (seg.skipped(i.version)) return;
+    setUpdate({ state: 'downloading', version: i.version, percent: 0 });
+    autoUpdater.downloadUpdate().catch(() => { if (update && update.state === 'downloading') setUpdate(null); });
+  });
   autoUpdater.on('download-progress', (p) => { if (update) { update.percent = Math.round(p.percent || 0); send('app:state', appState()); } });
   autoUpdater.on('update-downloaded', (i) => {
     setUpdate({ state: 'ready', version: i.version });
@@ -258,6 +274,48 @@ ipcMain.handle('app:autostart', (_e, on) => { try { setOpenAtLogin(!!on); } catc
 ipcMain.handle('app:introDone', () => { config.lastSeenVersion = app.getVersion(); firstRun = false; saveConfig(); return appState(); });
 ipcMain.handle('app:quit', quitApp);
 ipcMain.handle('app:update:install', () => installUpdate());
+// Segurança e versões
+ipcMain.handle('app:seg:state', () => ({ backups: seg.list(), falhas: seg.falhas(), canRollback: seg.canRollback(), version: app.getVersion(), minRollback: seg.MIN_ROLLBACK }));
+ipcMain.handle('app:seg:backup', () => { const id = seg.backupNow('feito por você'); return { ok: !!id, backups: seg.list() }; });
+ipcMain.handle('app:seg:restore', async (_e, id) => {
+  const { response } = await dialog.showMessageBox(mainWin, { type: 'question', buttons: ['Restaurar e reabrir', 'Cancelar'], defaultId: 0, cancelId: 1, title: 'Restaurar backup',
+    message: 'Restaurar as configurações deste backup?', detail: 'Contas, canais, ajustes, extensões e histórico voltam como estavam. Os logins não mudam. O app fecha e abre de novo. As configurações de agora viram um backup, para dar para desfazer.' });
+  if (response !== 0) return { ok: false, canceled: true };
+  app.isQuitting = true;
+  diario.save();
+  return seg.restore(id);
+});
+ipcMain.handle('app:seg:versions', () => seg.versions());
+let voltando = false;
+ipcMain.handle('app:seg:rollback', async (_e, version) => {
+  if (voltando) return { ok: false, error: 'Já estou fazendo isso.' };
+  if (!seg.canRollback()) return { ok: false, error: 'Voltar de versão funciona no app instalado do Windows. No portátil e no Linux, baixe a versão no GitHub.' };
+  const { response } = await dialog.showMessageBox(mainWin, { type: 'warning', buttons: [`Voltar para a ${version}`, 'Cancelar'], defaultId: 1, cancelId: 1, title: 'Voltar de versão',
+    message: `Instalar de volta o Idleterino ${version}?`, detail: `O app baixa a ${version} do GitHub, confere a assinatura, fecha, instala e abre de novo. A versão ${app.getVersion()} fica marcada para não voltar sozinha (quando sair uma correção, ela chega normalmente). Os logins e as configurações continuam.` });
+  if (response !== 0) return { ok: false, canceled: true };
+  voltando = true;
+  try {
+    const file = await seg.download(version, (p) => send('app:seg:progress', p));
+    seg.skip(app.getVersion());
+    seg.backupNow(`antes de voltar para a ${version}`);
+    diario.save();
+    if (!seg.runInstaller(file)) throw new Error('Não consegui iniciar o instalador.');
+    app.isQuitting = true;
+    setTimeout(() => forceQuit(), 500);
+    return { ok: true };
+  } catch (e) { return { ok: false, error: String(e.message || e) }; } finally { voltando = false; }
+});
+// Wrapped e Cartão do Treinador: salvar ou copiar a imagem.
+const pngOf = (dataUrl) => { const m = /^data:image\/png;base64,([A-Za-z0-9+/=]+)$/.exec(String(dataUrl || '')); return m ? Buffer.from(m[1], 'base64') : null; };
+ipcMain.handle('app:image:save', async (_e, dataUrl, name) => {
+  const buf = pngOf(dataUrl); if (!buf) return false;
+  const safe = String(name || 'idleterino').replace(/[^\w\- ]+/g, '').slice(0, 60) || 'idleterino';
+  const r = await dialog.showSaveDialog(mainWin, { title: 'Salvar imagem', defaultPath: path.join(app.getPath('pictures'), `${safe}.png`), filters: [{ name: 'Imagem PNG', extensions: ['png'] }] });
+  if (r.canceled || !r.filePath) return false;
+  fs.writeFileSync(r.filePath, buf);
+  return true;
+});
+ipcMain.handle('app:image:copy', (_e, dataUrl) => { const buf = pngOf(dataUrl); if (!buf) return false; clipboard.writeImage(nativeImage.createFromBuffer(buf)); return true; });
 // Ferramentas da comunidade numa janela do app, com sessão própria (sem acesso às contas).
 // Precificador de Pokémon, do briaoale (liberado por ele no Discord do PokeIdle).
 const TOOLS = { precificador: { url: 'https://briaoale.github.io/precificador-pokemon/', title: 'Precificador de Pokémon — por briaoale' } };
@@ -302,6 +360,9 @@ app.on('second-instance', showMain);
 app.setAppUserModelId('com.vinniisaantos.idleterino');
 
 app.whenReady().then(() => {
+  // Antes de qualquer módulo ler ou gravar as configurações: backup e contagem de aberturas.
+  const abertura = seg.beforeStart();
+  setTimeout(() => seg.markOk(), 2 * 60 * 1000);
   loadConfig();
   for (const m of Object.values(modules)) { m.loadConfig(); m.setupSession(); }
   // Kick com a identificação original do app, como no Kickterino: é assim que o login com Google
@@ -338,11 +399,26 @@ app.whenReady().then(() => {
   tray.on('click', showMain);
   updateTray();
   powerMonitor.on('resume', () => { for (const m of Object.values(modules)) if (m.started) m.recoverAfterResume(); });
+  // Voltou para o PC (abriu a janela ou desbloqueou a tela): com o modo noite ligado há 4 h, sai o relatório.
+  mainWin.on('focus', () => diario.onWake());
+  powerMonitor.on('unlock-screen', () => diario.onWake());
   setupAutoUpdate();
+  diario.start();
   for (const [ns, m] of Object.entries(modules)) if (config.platforms[ns]) m.start();
   extensions.load();
   poke.start();
+  // A mesma versão caiu 3 vezes seguidas logo ao abrir: oferece as saídas.
+  if (abertura.falhas >= 3) {
+    setTimeout(async () => {
+      showMain();
+      const { response } = await dialog.showMessageBox(mainWin, { type: 'warning', buttons: ['Ver backups e versões', 'Continuar'], defaultId: 0, cancelId: 1, title: 'O Idleterino fechou sozinho',
+        message: `O Idleterino ${app.getVersion()} fechou sozinho ${abertura.falhas} vezes seguidas logo depois de abrir.`,
+        detail: 'Você pode restaurar as configurações de antes (backup) ou voltar para a versão anterior. Se continuar, tudo segue normal.' });
+      if (response === 0) send('app:goto', 'seguranca');
+    }, 3000);
+  }
 });
 
-app.on('before-quit', () => { app.isQuitting = true; });
+// Saiu pelo Sair: a abertura foi boa (não conta como falha). O diário grava o que falta.
+app.on('before-quit', () => { app.isQuitting = true; seg.markOk(); try { diario.save(); diario.stopServer(); } catch {} });
 app.on('window-all-closed', () => app.quit());
