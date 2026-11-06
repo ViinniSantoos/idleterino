@@ -236,7 +236,7 @@ function setupAutoUpdate() {
       if (m && newer(m[1], app.getVersion())) setUpdate({ state: 'manual', version: m[1] });
     }).catch(() => {});
     check();
-    setInterval(check, 2 * 60 * 60 * 1000);
+    setInterval(check, 60 * 60 * 1000); // procura versão nova de hora em hora
     return;
   }
   autoUpdater.on('error', () => { if (update && update.state === 'downloading') setUpdate(null); });
@@ -248,7 +248,7 @@ function setupAutoUpdate() {
   });
   const check = () => autoUpdater.checkForUpdates().catch(() => {});
   check();
-  setInterval(check, 2 * 60 * 60 * 1000);
+  setInterval(check, 60 * 60 * 1000); // procura versão nova de hora em hora
 }
 
 // ---------- IPC da casca ----------
