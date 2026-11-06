@@ -60,6 +60,7 @@ const READ_SCRIPT = `(() => {
   const autos = ['auto-ball-captura', 'auto-ball-sem-parar', 'auto-revive', 'auto-potion', 'auto-voltar-hunt']
     .map((id) => { const c = q('#' + id); return c ? { id, on: !!c.checked } : null; }).filter(Boolean);
   return {
+    temSessao: (() => { try { const x = JSON.parse(localStorage.getItem('sessao') || 'null'); return !!(x && x.token); } catch { return false; } })(),
     logged, nick: txt('#tr-nick'), level: txt('#tr-level'), gold: txt('#tr-gold'), gems: txt('#tr-gemas'), diamonds: txt('#tr-diamantes'),
     xp: txt('#tr-xp-txt'), guild: txt('#tr-guild'), xpH: txt('#sessao-xp-treinador-h'), where: txt('#eco-onde'), ativos, autos,
     autoCount: txt('#auto-cnt'),
@@ -85,7 +86,7 @@ const READ_SCRIPT = `(() => {
 
 module.exports = function createPokeIdle(ctx) {
   const configPath = () => path.join(app.getPath('userData'), 'pokeidle.json');
-  const DEFAULT = { accounts: [], selected: null, autoBackgroundUltra: false, autoFreezeMin: 0 };
+  const DEFAULT = { accounts: [], selected: null, autoBackgroundUltra: false, autoFreezeMin: 0, optimizeEvery: 0 };
   let config = { ...DEFAULT };
   const loadConfig = () => { try { config = { ...DEFAULT, ...JSON.parse(fs.readFileSync(configPath(), 'utf8')) }; } catch {} };
   const saveConfig = () => fs.writeFileSync(configPath(), JSON.stringify(config, null, 2));
@@ -188,6 +189,18 @@ module.exports = function createPokeIdle(ctx) {
     const retry = () => setTimeout(() => { if (views.get(a.id) === v && !v.webContents.isDestroyed()) v.webContents.loadURL(urlOf(a)); }, 20 * 1000);
     v.webContents.on('render-process-gone', retry);
     v.webContents.on('did-fail-load', (_e, code, _d, _u, main) => { if (main && code !== -3) retry(); });
+    // Página travada (congelou): se em 15 s não voltar a responder, abre a conta de novo num processo
+    // novo — o mesmo que fechar e abrir o app, sem perder o login.
+    let travadaTimer = null;
+    v.webContents.on('unresponsive', () => {
+      travadas.add(a.id);
+      clearTimeout(travadaTimer);
+      travadaTimer = setTimeout(() => { if (views.get(a.id) === v && !v.webContents.isDestroyed()) reopen(a.id, 'travou'); }, 15 * 1000);
+    });
+    v.webContents.on('responsive', () => { travadas.delete(a.id); clearTimeout(travadaTimer); });
+    // Quando a pessoa mexe na conta: o "Otimizar sozinho" espera ela parar.
+    v.webContents.on('before-input-event', () => lastInput.set(a.id, Date.now()));
+    openedAt.set(a.id, Date.now());
     // Primeiro as extensões que o usuário ligou, depois o jogo (para elas valerem desde o começo).
     Promise.resolve(ctx.applyExtensions ? ctx.applyExtensions(partitionOf(a.id)) : null).catch(() => {}).finally(() => { if (!v.webContents.isDestroyed()) v.webContents.loadURL(urlOf(a)); });
     views.set(a.id, v);
@@ -213,6 +226,19 @@ module.exports = function createPokeIdle(ctx) {
     const v = views.get(id);
     const acc = account(id);
     if (!v || v.webContents.isDestroyed() || !acc || !isPokeIdle(urlOf(acc))) return;
+    let u = null;
+    try { u = new URL(v.webContents.getURL()); } catch {}
+    const naTelaDoJogo = u && isPokeIdle(u.href) && (u.pathname === '/app' || u.pathname.startsWith('/app/'));
+    if (u && isPokeIdle(u.href) && !naTelaDoJogo && !v.webContents.isLoading()) {
+      if (!fora.has(id)) { fora.set(id, Date.now()); setTimeout(() => readOne(id), 21 * 1000); }
+      else if (Date.now() - fora.get(id) > 20 * 1000) { fora.delete(id); v.webContents.loadURL(urlOf(acc)); }
+    } else fora.delete(id);
+    // Sinal de vida: a página congelada não responde (e conta parada não dispara o aviso do Electron,
+    // que depende de clique). Sem resposta em 15 s, a conta é reaberta num processo novo.
+    if (!v.webContents.isLoading()) {
+      const vivo = await Promise.race([v.webContents.executeJavaScript('1').then(() => true, () => true), new Promise((res) => setTimeout(() => res(false), 15 * 1000))]);
+      if (!vivo) { if (views.get(id) === v) reopen(id, 'travou'); return; }
+    }
     const r = await v.webContents.executeJavaScript(READ_SCRIPT).catch(() => null);
     if (r) {
       const canais = r.canais; delete r.canais;
@@ -220,11 +246,65 @@ module.exports = function createPokeIdle(ctx) {
       delete r.hunts;
       const prev = info.get(id);
       info.set(id, { ...r, at: Date.now(), huntRank: prev ? prev.huntRank : null });
+      // Login feito (a sessão já está salva) mas a tela continua no login: é o "trava e só entra
+      // fechando e abrindo o app". O app faz isso sozinho, só nesta conta.
+      if (!r.logged && r.temSessao) {
+        if (!stuckSince.has(id)) stuckSince.set(id, Date.now());
+        else if (Date.now() - stuckSince.get(id) > 20 * 1000 && Date.now() - (lastReopen.get(id) || 0) > 2 * 60 * 1000) { stuckSince.delete(id); reopen(id, 'login preso'); }
+        setTimeout(() => readOne(id), 10 * 1000); // confere de novo logo
+      } else stuckSince.delete(id);
       if (canais && ctx.onOfficial) { try { ctx.onOfficial(canais, id); } catch {} }
       send('status', snapshot());
     }
   }
   async function readAll() { for (const id of views.keys()) await readOne(id); autoFreeze(); }
+
+  // ---------- Otimizar: fecha e abre a conta num processo novo ----------
+  // Libera a memória que a página acumula com horas aberta. O login e o placar da sessão ficam (estão
+  // salvos na conta). "Otimizar sozinho" faz isso a cada X tempo, esperando se a pessoa estiver mexendo.
+  const stuckSince = new Map(), lastReopen = new Map(), lastInput = new Map(), openedAt = new Map(), travadas = new Set(), fora = new Map();
+  const optLog = new Map(); // id -> [{ t, mb, motivo }]
+  function memOf(id) {
+    const v = views.get(id);
+    if (!v || v.webContents.isDestroyed()) return null;
+    try {
+      const pid = v.webContents.getOSProcessId();
+      const m = app.getAppMetrics().find((x) => x.pid === pid);
+      return m ? Math.round(m.memory.workingSetSize / 1024) : null;
+    } catch { return null; }
+  }
+  function reopen(id, motivo) {
+    const a = account(id);
+    const old = views.get(id);
+    if (!a || !old) return false;
+    const mb = memOf(id);
+    try { if (mainWin && !mainWin.isDestroyed() && mainWin.contentView.children.includes(old)) mainWin.contentView.removeChildView(old); } catch {}
+    views.delete(id);
+    travadas.delete(id); stuckSince.delete(id); fora.delete(id);
+    try { old.webContents.close(); } catch {}
+    createView(a);
+    layout();
+    lastReopen.set(id, Date.now());
+    const log = optLog.get(id) || [];
+    log.unshift({ t: Date.now(), mb, motivo });
+    optLog.set(id, log.slice(0, 5));
+    send('status', snapshot());
+    return true;
+  }
+  const ocupada = (id) => isShown(id) && mainWin && !mainWin.isDestroyed() && mainWin.isFocused() && Date.now() - (lastInput.get(id) || 0) < 2 * 60 * 1000;
+  function autoOptimize() {
+    const every = (config.optimizeEvery || 0) * 60 * 1000;
+    if (!every) return;
+    // Uma conta por vez (por minuto), para não derrubar todas juntas.
+    for (const a of config.accounts) {
+      if (!views.has(a.id)) continue;
+      const desde = Math.max(openedAt.get(a.id) || 0, lastReopen.get(a.id) || 0);
+      if (Date.now() - desde < every) continue;
+      if (ocupada(a.id)) continue;
+      reopen(a.id, 'sozinho');
+      return;
+    }
+  }
 
   // Sugestão de hunt de cada conta (AoE, bicicleta, efetividade e as contas do jogo), a cada 2 min.
   const lastHunt = new Map();
@@ -438,8 +518,9 @@ module.exports = function createPokeIdle(ctx) {
       max: MAX_ACCOUNTS, selected: config.selected,
       mainId: account(config.mainId) ? config.mainId : (config.accounts[0] ? config.accounts[0].id : null), autoBackgroundUltra: config.autoBackgroundUltra, autoFreezeMin: config.autoFreezeMin,
       pokeCount: config.accounts.filter((a) => isPokeIdle(urlOf(a))).length, maxWindows: MAX_WINDOWS, defaultUrl: GAME,
+      optimizeEvery: config.optimizeEvery || 0,
       voteMs: VOTE_MS, marketAt: lastMarket, hunts: huntLevels, pvpAt: pvpMeta ? pvpMeta.at : 0, pvpRunning,
-      accounts: config.accounts.map((a) => ({ ...a, vote: (config.votes || {})[a.id] || null, url: urlOf(a), isPoke: isPokeIdle(urlOf(a)), host: hostOf(urlOf(a)), effectiveMode: effectiveMode(a), zoom: a.zoom || 1, info: info.get(a.id) || null, frozen: frozen.has(a.id), frozenImg: frozen.get(a.id) || null })),
+      accounts: config.accounts.map((a) => ({ ...a, memMB: memOf(a.id), optLog: optLog.get(a.id) || [], optNext: config.optimizeEvery ? Math.max(openedAt.get(a.id) || 0, lastReopen.get(a.id) || 0) + config.optimizeEvery * 60000 : null, vote: (config.votes || {})[a.id] || null, url: urlOf(a), isPoke: isPokeIdle(urlOf(a)), host: hostOf(urlOf(a)), effectiveMode: effectiveMode(a), zoom: a.zoom || 1, info: info.get(a.id) || null, frozen: frozen.has(a.id), frozenImg: frozen.get(a.id) || null })),
     };
   }
 
@@ -501,7 +582,15 @@ module.exports = function createPokeIdle(ctx) {
   ipcMain.handle('poke:autoFreezeMin', (_e, n) => { config.autoFreezeMin = Math.max(0, Math.min(120, Number(n) || 0)); saveConfig(); return snapshot(); });
   ipcMain.handle('poke:freeze', (_e, id) => freeze(id).then(snapshot));
   ipcMain.handle('poke:unfreeze', (_e, id) => { unfreeze(id); return snapshot(); });
-  ipcMain.handle('poke:reload', (_e, id) => { const v = views.get(id); if (v) v.webContents.reload(); return snapshot(); });
+  // ↻ Recarregar: sempre leva de volta à página do JOGO (recarregar a página de retorno do login do
+  // Google, já usada, deixava a tela parada). Conta travada (não responde) é reaberta num processo novo.
+  ipcMain.handle('poke:reload', (_e, id) => {
+    const v = views.get(id); const a = account(id);
+    if (!v || !a) return snapshot();
+    if (v.webContents.isDestroyed() || v.webContents.isCrashed() || travadas.has(id)) reopen(id, 'recarregar');
+    else v.webContents.loadURL(urlOf(a));
+    return snapshot();
+  });
   // A tela diz onde a conta aparece e se a página PokeIdle está aberta.
   const toRect = (r) => ({ x: Math.round(r.x), y: Math.round(r.y), width: Math.max(1, Math.round(r.width)), height: Math.max(1, Math.round(r.height)) });
   ipcMain.handle('poke:market:refresh', () => { if (Date.now() - lastMarket > 60 * 1000) askMarket(); return snapshot(); });
@@ -510,6 +599,12 @@ module.exports = function createPokeIdle(ctx) {
     if (v && ctx.openOutside) { ctx.openOutside(v.url); config.votes[id] = { ...v, at: Date.now() }; saveConfig(); }
     return snapshot();
   });
+  ipcMain.handle('poke:optimize', (_e, id) => { reopen(id, 'manual'); return snapshot(); });
+  ipcMain.handle('poke:optimizeAll', async () => {
+    for (const a of config.accounts) { if (views.has(a.id)) { reopen(a.id, 'manual'); await new Promise((r) => setTimeout(r, 1500)); } }
+    return snapshot();
+  });
+  ipcMain.handle('poke:optimizeEvery', (_e, min) => { config.optimizeEvery = [0, 30, 60, 120, 300].includes(Number(min)) ? Number(min) : 0; saveConfig(); return snapshot(); });
   ipcMain.handle('poke:pvp:get', (_e, accId) => pvpGet(accId));
   ipcMain.handle('poke:pvp:duel', async (_e, accId, a, b) => {
     const id = account(accId) ? accId : mainAccId();
@@ -567,6 +662,7 @@ module.exports = function createPokeIdle(ctx) {
     loadConfig();
     for (const a of config.accounts) createView(a);
     timers.push(setInterval(readAll, READ_MS));
+    timers.push(setInterval(autoOptimize, 60 * 1000));
     setTimeout(askMarket, 60 * 1000);
     // PvP: confere de hora em hora se o meta tem mais de um dia; a primeira, 3 min depois de abrir.
     setTimeout(() => pvpCollect().catch(() => {}), 3 * 60 * 1000);

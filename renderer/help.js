@@ -28,6 +28,17 @@ window.HELP = [
     'Em Ajustes do PokeIdle dá para ligar o "ULTRA automático no fundo": as contas que você não está olhando passam para o ULTRA sozinhas.',
     'Em todos os modos a conta continua caçando e online.',
   ]],
+  ['PokeIdle', 'O app vai pesando com o tempo. O que é "Otimizar"?', [
+    'Com horas aberta, a página do jogo vai acumulando memória e CPU, mesmo no modo Economia. "⚡ Otimizar" fecha e abre a conta num processo novo e libera tudo isso.',
+    'O login continua salvo e a contagem da sessão do jogo também. A conta fica fora só alguns segundos.',
+    'O botão mostra quanta memória a conta usa agora (fica laranja acima de 700 MB). "⚡ Otimizar todas" faz uma por vez.',
+    'Em Ajustes do PokeIdle, "Otimizar sozinho" faz isso a cada 30 min, 1 h, 2 h ou 5 h. Se você estiver mexendo na conta na hora, ele espera.',
+  ]],
+  ['PokeIdle', 'Entrei com e-mail e senha e a tela travou. E agora?', [
+    'O app agora resolve sozinho: se o login deu certo mas a tela ficou parada, ele abre a conta de novo em alguns segundos (o mesmo que fechar e abrir o app).',
+    'Se a página do jogo congelar, ele também reabre a conta sozinho depois de 15 segundos.',
+    'Se aparecer "Falha na verificação" do Cloudflare, clique em ↻ na barra da conta e tente de novo. O "Confirme que é humano" é sempre você que marca.',
+  ]],
   ['PokeIdle', 'O que é "Congelar"?', [
     'Congelar troca a tela da conta por uma foto e para de desenhar o jogo. A conta continua conectada e caçando.',
     'Clique na foto para voltar ao vivo. Ótimo para as ALTs: junto com o ULTRA, quase não gasta nada.',
@@ -40,6 +51,9 @@ window.HELP = [
     '4. Pasta: clique em "📁 Instalar pasta" e escolha a pasta que tem o arquivo manifest.json dentro.',
     '5. Pronto: a extensão aparece na lista, ligada. As contas do PokeIdle recarregam sozinhas para aplicar.',
     'Para desligar, use o botão ao lado da extensão. Para tirar de vez, clique em Remover.',
+  ]],
+  ['PokeIdle', 'Dá para ver a principal junto com as ALTs?', [
+    'Sim. Com "▦ Ver juntas" ligado, aparece o botão "★ Principal junto / ★ Principal separada". Junto: a principal entra na grade com as ALTs. Separada: ela aparece sozinha e as ALTs ficam juntas.',
   ]],
   ['PokeIdle', 'Dá para ver as ALTs todas juntas, lado a lado?', [
     'Sim. Em PokeIdle, clique em "▦ Ver ALTs juntas" (em cima, ao lado de Ajustes). Ao abrir uma ALT, todas as ALTs aparecem lado a lado, cada uma na sua coluna.',

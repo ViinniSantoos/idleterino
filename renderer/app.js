@@ -532,6 +532,7 @@ function accCard(a, onclick, active) {
 
 let pokeStageRect = null;
 let pokeGrid = (() => { try { return localStorage.getItem('pokeGrid') === '1'; } catch { return false; } })();
+let pokeGridMain = (() => { try { return localStorage.getItem('pokeGridMain') === '1'; } catch { return false; } })(); // principal junto no "Ver juntas"
 let pokeExpanded = (() => { try { return localStorage.getItem('pokeExpanded') === '1'; } catch { return false; } })();
 function renderPoke() {
   const root = $('#page-poke');
@@ -542,11 +543,19 @@ function renderPoke() {
   if (!s) { root.append(top, emptyBox('Carregando…', '')); return pokeView(false); }
   const chip = el('span', 'chip'); chip.append(el('b', null, `${s.pokeCount}/${s.max}`), 'contas do PokeIdle'); top.append(chip, el('span', 'spacer'));
   const alts = s.accounts.filter((x) => x.id !== s.mainId);
-  if (alts.length > 1) {
-    const g = button(pokeGrid ? '▢ Ver ALTs uma por vez' : '▦ Ver ALTs juntas', pokeGrid ? 'on' : null, () => { pokeGrid = !pokeGrid; try { localStorage.setItem('pokeGrid', pokeGrid ? '1' : '0'); } catch {} renderPoke(); });
-    g.title = pokeGrid ? 'Voltar a ver uma ALT por vez' : 'Ao abrir uma ALT, mostra todas as ALTs lado a lado (a principal continua sozinha)';
+  if (s.accounts.length > 1) {
+    const g = button(pokeGrid ? '▢ Ver uma por vez' : '▦ Ver juntas', pokeGrid ? 'on' : null, () => { pokeGrid = !pokeGrid; try { localStorage.setItem('pokeGrid', pokeGrid ? '1' : '0'); } catch {} renderPoke(); });
+    g.title = pokeGrid ? 'Voltar a ver uma conta por vez' : 'Mostra as contas lado a lado';
     top.append(g);
+    if (pokeGrid) {
+      const pm = button(pokeGridMain ? '★ Principal junto' : '★ Principal separada', pokeGridMain ? 'on' : null, () => { pokeGridMain = !pokeGridMain; try { localStorage.setItem('pokeGridMain', pokeGridMain ? '1' : '0'); } catch {} renderPoke(); });
+      pm.title = pokeGridMain ? 'A principal aparece junto com as ALTs. Clique para deixá-la sozinha.' : 'A principal aparece sozinha (as ALTs ficam juntas). Clique para ver a principal junto com as ALTs.';
+      top.append(pm);
+    }
   }
+  const ot = button('⚡ Otimizar todas', null, async () => { toast('Otimizando: cada conta fecha e abre de novo (uns segundos cada). O login continua salvo.'); S.poke = await call('poke:optimizeAll'); renderPoke(); });
+  ot.title = 'Fecha e abre cada conta num processo novo: libera a memória e a CPU acumuladas com horas aberto. Não perde o login nem a contagem da sessão.';
+  top.append(ot);
   const prc = button('🏷 Precificador', null, () => call('app:tool:open', 'precificador'));
   prc.title = 'Quanto pedir por um Pokémon, pelas vendas recentes do mercado (ferramenta do briaoale)';
   top.append(prc, button('⚙ Ajustes', null, openPokeDrawer));
@@ -618,21 +627,30 @@ function renderPoke() {
   zoom.append(zb('−', z - 0.1, 'Diminuir: cabe mais coisa na tela (bom para o mercado)'), zv, zb('+', z + 0.1, 'Aumentar'));
   if (!a.isPoke) zoom.hidden = true;
   bar.append(zoom);
+  if (a.isPoke) {
+    const ob = button(`⚡ Otimizar${a.memMB ? ` · ${a.memMB} MB` : ''}`, a.memMB > 700 ? 'warn' : null, async () => { toast('Otimizando: a conta fecha e abre de novo (uns segundos). O login continua salvo.'); S.poke = await call('poke:optimize', a.id); renderPoke(); });
+    const last = (a.optLog || [])[0];
+    ob.title = [`Memória desta conta agora: ${a.memMB || '—'} MB.`, 'Otimizar fecha e abre a conta num processo novo: libera a memória acumulada. Não perde o login nem a contagem da sessão.',
+      a.optNext ? `Otimizar sozinho: próxima em ${clock(Math.max(0, a.optNext - Date.now()))}.` : 'Otimizar sozinho: desligado (Ajustes do PokeIdle).',
+      last ? `Última: ${timeStr(last.t)} (${last.motivo}${last.mb ? `, estava com ${last.mb} MB` : ''}).` : ''].filter(Boolean).join('\n');
+    bar.append(ob);
+  }
   bar.append(button(a.frozen ? '☀ Descongelar' : '❄ Congelar', null, async () => { S.poke = await call(a.frozen ? 'poke:unfreeze' : 'poke:freeze', a.id); renderPoke(); }));
   bar.append(button(a.muted ? '🔇' : '🔊', 'ghost', async () => { S.poke = await call('poke:mute', a.id, !a.muted); renderPoke(); }));
   bar.append(button('↻', 'ghost', () => call('poke:reload', a.id)));
   const remove = button('✕', 'ghost', () => confirmRemove(a)); remove.title = 'Remover a conta deste app'; bar.append(remove);
   const stage = el('div'); stage.id = 'poke-stage';
-  if (pokeGrid && alts.length > 1 && a.id !== s.mainId) {
+  const juntas = pokeGridMain ? [...s.accounts.filter((x) => x.id === s.mainId), ...alts] : alts;
+  if (pokeGrid && juntas.length > 1 && (pokeGridMain || a.id !== s.mainId)) {
     // Modo juntas: uma coluna por conta (até 4 por linha), com o nome em cima. Clicar no nome escolhe
     // a conta que a barra de cima controla.
     stage.classList.add('grid');
-    stage.style.setProperty('--cols', Math.min(4, Math.ceil(alts.length / Math.ceil(alts.length / 4))));
-    for (const x of alts) {
+    stage.style.setProperty('--cols', Math.min(4, Math.ceil(juntas.length / Math.ceil(juntas.length / 4))));
+    for (const x of juntas) {
       const t = el('div', `tile${x.id === a.id ? ' on' : ''}`);
       const i = x.info || {};
       const hd = el('div', 'tile-hd');
-      hd.append(el('b', null, i.logged && i.nick && i.nick !== '—' ? i.nick : x.name), el('span', `mtag ${x.effectiveMode === 'ultra' ? 'ultra' : ''}`, (MODE_INFO[x.effectiveMode] || [x.effectiveMode])[0]));
+      hd.append(el('b', null, `${x.id === s.mainId ? '★ ' : ''}${i.logged && i.nick && i.nick !== '—' ? i.nick : x.name}`), el('span', `mtag ${x.effectiveMode === 'ultra' ? 'ultra' : ''}`, (MODE_INFO[x.effectiveMode] || [x.effectiveMode])[0]));
       if (i.logged && i.level) hd.append(el('span', 'lvl', `Nv ${i.level.replace(/\D+/g, '')}`));
       hd.title = 'Clique para controlar esta conta pela barra de cima';
       hd.onclick = async () => { S.poke = await call('poke:select', x.id); renderPoke(); };
@@ -723,6 +741,11 @@ function openPokeDrawer() {
   f.value = String(s.autoFreezeMin || 0);
   f.onchange = async () => { S.poke = await call('poke:autoFreezeMin', Number(f.value)); };
   card.append(rowOpt('Congelar ALTs sozinho', 'Contas que você não abre há algum tempo ficam congeladas: seguem caçando, e a tela só volta quando você clicar.', f));
+  const o = el('select');
+  for (const [v, l] of [[0, 'Desligado'], [30, 'A cada 30 min'], [60, 'A cada 1 h'], [120, 'A cada 2 h'], [300, 'A cada 5 h']]) { const op = el('option', null, l); op.value = v; o.append(op); }
+  o.value = String(s.optimizeEvery || 0);
+  o.onchange = async () => { S.poke = await call('poke:optimizeEvery', Number(o.value)); };
+  card.append(rowOpt('Otimizar sozinho', 'Com horas aberta, a página do jogo vai acumulando memória e CPU (mesmo no modo Economia). O app fecha e abre cada conta num processo novo de tempos em tempos, uma por vez. Não perde o login nem a contagem da sessão; se você estiver mexendo na conta, ele espera.', o, true));
   $('#drawer').hidden = false;
 }
 

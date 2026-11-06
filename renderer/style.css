@@ -598,3 +598,6 @@ button.mini.on { border-color: var(--ok); color: var(--ok); }
 .hunt-strip .hs-rot { min-width: 118px; }
 .hunt-strip .hs-sub { font-size: 11.5px; color: var(--muted); }
 .hunt-strip .hs-line .up { margin-left: auto; }
+
+/* Otimizar */
+button.warn { border-color: rgba(255, 159, 67, .6); color: #ffb36b; }
