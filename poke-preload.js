@@ -205,7 +205,9 @@ contextBridge.executeInMainWorld({
       for (const h of jogo.hunts) {
         const nivel = Number(h.nivel) || 0;
         if (nivel > L || !Array.isArray(h.especies) || !h.especies.length) continue;
-        let pontos = 0, golpes = 0, effMed = 0, effMax = 0;
+        let pontos = 0, golpes = 0, effMed = 0, effMax = 0, risco = 0;
+        const def = tiposDe(cat);
+        const nivelRel = nivel / Math.max(1, Number(act.level) || 1); // hunt acima do nível do pokémon = mob batendo mais forte
         for (const e of h.especies) {
           const c = esp.get(e.pokeId) || {};
           const t = tiposDe(c);
@@ -215,16 +217,23 @@ contextBridge.executeInMainWorld({
           const w = Number(e.pontos) || 1;
           pontos += w; effMed += eff * w; effMax = Math.max(effMax, eff);
           golpes += Math.max(1, Math.ceil(GOLPES_NEUTRO / Math.max(0.05, effH))) * w;
+          // Risco de gastar poção: o golpe do selvagem contra o SEU pokémon (tipos dele × os seus) e o nível da hunt.
+          let dano = 1;
+          try { dano = ha.melhorEfetividadeContra(t, def[0] || null, def[1] || null, jogo.tabelaTipos) || 1; } catch {}
+          risco += dano * nivelRel * w;
         }
         if (!pontos) continue;
-        golpes /= pontos; effMed /= pontos;
+        golpes /= pontos; effMed /= pontos; risco /= pontos;
         const porOnda = Math.min(ha.MAX_MOBS || 16, pontos);
         const alvos = act.aoe ? Math.min(3, porOnda) : 1;
         const msKill = (golpes * ((ha.CD_GOLPE_MS || 900) + (ha.CD_MOVIMENTO_MEDIO_MS || 2000)) + (ha.MS_DESLOC_MS || 600) / (1 + vel)) / alvos;
         const kph = (porOnda / ((porOnda * msKill + (ha.MS_ONDA || 2600)) / 1000)) * 3600;
         let xp = 0, gold = 0;
         try { const r = ha.mediaPorKill(h, esp, 0); xp = r.xp; gold = r.gold; } catch {}
-        out.push({ slug: h.slug || null, nome: String(h.nome || h.name || h.slug || '?'), nivel, kph: Math.round(kph), xpH: Math.round(kph * xp * bx), goldH: Math.round(kph * gold), eff: Math.round(effMed * 100) / 100, effMax });
+        // Ouro "de verdade": quanto mais o pokémon apanha, mais poção some do lucro (estimativa).
+        const goldH = Math.round(kph * gold);
+        const goldLiq = Math.round(goldH / (1 + Math.max(0, risco - 1) * 0.6));
+        out.push({ slug: h.slug || null, nome: String(h.nome || h.name || h.slug || '?'), nivel, kph: Math.round(kph), xpH: Math.round(kph * xp * bx), goldH, goldLiq, risco: Math.round(risco * 100) / 100, eff: Math.round(effMed * 100) / 100, effMax });
       }
       out.sort((a, b) => b.xpH - a.xpH);
       const atualSlug = jogo.eu.huntSlug || (jogo.eu.hunt && jogo.eu.hunt.slug) || null;
@@ -232,6 +241,7 @@ contextBridge.executeInMainWorld({
       return {
         pronto: true, L, pokemon: cat.name || '?', tipos: atk, aoe: act.aoe, bike: rar, vel, bonus: bx,
         top: out.slice(0, 8), atual: atualSlug, atualEst,
+        topOuro: [...out].sort((a, b) => b.goldLiq - a.goldLiq).slice(0, 8),
       };
     }
 

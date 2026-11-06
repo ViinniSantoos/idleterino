@@ -590,3 +590,11 @@ button.mini.on { border-color: var(--ok); color: var(--ok); }
 
 .lvl-warn { font-size: 11px; color: #ffcf66; }
 .pp-item.off { opacity: .55; cursor: not-allowed; }
+
+/* Melhor hunt: duas opções (XP e ouro). */
+.hunt-strip.two { align-items: flex-start; flex-wrap: nowrap; }
+.hunt-strip .hs-box { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0; }
+.hunt-strip .hs-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; }
+.hunt-strip .hs-rot { min-width: 118px; }
+.hunt-strip .hs-sub { font-size: 11.5px; color: var(--muted); }
+.hunt-strip .hs-line .up { margin-left: auto; }

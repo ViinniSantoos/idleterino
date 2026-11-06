@@ -112,8 +112,8 @@ window.HELP = [
     'Passe o mouse em cima da meta para ver quais bônus estão valendo e quando cada um acaba.',
   ]],
   ['Início', 'O que é a "Melhor hunt agora" (🧭)?', [
-    'É a hunt liberada que mais rende XP para o pokémon que está em campo agora, comparada com a hunt em que você está ("+X% de XP").',
-    'A conta usa as fórmulas do próprio jogo (abates por onda, golpe, deslocamento, XP e ouro por abate) e soma: a efetividade de tipo do seu pokémon contra cada espécie da hunt (com o tipo do Z-Move), o AoE (até 3 alvos por golpe) e a velocidade da bicicleta equipada.',
+    'São duas opções: ⚡ "Quer mais XP" (a hunt liberada que mais rende XP para o pokémon em campo) e 💰 "Quer mais ouro" (a que mais rende ouro, já descontando o risco de gastar poção). Quando é a mesma hunt, aparece "Melhor em XP e ouro". O "+X%" compara com a hunt em que você está.',
+    'A conta usa as fórmulas do próprio jogo (abates por onda, golpe, deslocamento, XP e ouro por abate) e soma: a efetividade de tipo do seu pokémon contra cada espécie da hunt (com o tipo do Z-Move), o AoE (até 3 alvos por golpe), a velocidade da bicicleta equipada e o quanto o seu pokémon apanha lá ("pouca poção", "gasta poção", "gasta muita poção").',
     'É uma estimativa: passe o mouse para ver as 5 melhores e o que entrou na conta. Trocou o pokémon em campo, a sugestão muda.',
   ]],
   ['PvP', 'O que tem na aba PvP?', [

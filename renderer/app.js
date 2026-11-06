@@ -771,23 +771,34 @@ function metaOf(a, xpH, hunts) {
     boost: bx ? Math.round((nowMult - 1) * 1000) / 10 : null, ending };
 }
 // Sugestão de hunt (vem da página do jogo: as contas do jogo + AoE, bicicleta e efetividade).
-// O "quanto a mais" é relativo à hunt em que a conta está, então não depende do valor absoluto.
+// Duas opções: a que dá MAIS XP e a que dá MAIS OURO (descontando o risco de gastar poção). O "quanto
+// a mais" é relativo à hunt em que a conta está, calibrado com o que ela rende de verdade na sessão.
 function huntSugg(hr, f) {
   if (!hr || !hr.top || !hr.top.length) return null;
-  const best = hr.top[0];
   const cur = hr.atualEst;
-  const mesma = cur && cur.slug === best.slug;
-  const ganho = cur && cur.xpH > 0 ? Math.round((best.xpH / cur.xpH - 1) * 100) : null;
-  const k = f && cur && cur.xpH > 0 ? f.xp / cur.xpH : null; // calibra com o XP/h medido na sessão
-  const est = (h) => (k ? `≈ ${(h.xpH * k / 1e6).toFixed(1).replace('.', ',')}M XP/h` : '');
+  const bestXp = hr.top[0];
+  const bestOuro = (hr.topOuro && hr.topOuro[0]) || bestXp;
+  const ganho = (a, b) => (b > 0 ? Math.round((a / b - 1) * 100) : null);
+  const kx = f && cur && cur.xpH > 0 ? f.xp / cur.xpH : null;
+  const kg = f && cur && cur.goldLiq > 0 ? f.gold / cur.goldLiq : null;
+  const est = (v, k) => (k ? `≈ ${(v * k / 1e6).toFixed(1).replace('.', ',')}M` : '');
+  const risco = (h) => (h.risco >= 2 ? 'gasta muita poção' : h.risco >= 1.3 ? 'gasta poção' : 'pouca poção');
   const tip = [
     `Pokémon em campo: ${hr.pokemon} (${(hr.tipos || []).join('/')})${hr.aoe ? ' · AoE' : ' · sem AoE'} · ${hr.bike ? `bike ${hr.bike} (+${Math.round(hr.vel * 100)}%)` : 'a pé'}`,
-    'Melhores hunts liberadas:',
-    ...hr.top.slice(0, 5).map((h, i) => `${i + 1}. ${h.nome} (Nv ${h.nivel}) · dano ${h.eff}× ${est(h)}${cur && cur.xpH > 0 ? ` · ${h.xpH >= cur.xpH ? '+' : ''}${Math.round((h.xpH / cur.xpH - 1) * 100)}%` : ''}`),
-    cur ? `Hunt atual: ${cur.nome} (dano ${cur.eff}×)` : '',
-    'Estimativa: contas do jogo + efetividade de tipo (com Z-Move), AoE e bicicleta. Muda quando você troca o pokémon em campo.',
+    '⚡ Mais XP:',
+    ...hr.top.slice(0, 4).map((h, i) => `${i + 1}. ${h.nome} (Nv ${h.nivel}) · dano ${h.eff}× ${est(h.xpH, kx)} XP/h${cur ? ` · ${ganho(h.xpH, cur.xpH) >= 0 ? '+' : ''}${ganho(h.xpH, cur.xpH)}%` : ''} · ${risco(h)}`),
+    '💰 Mais ouro (já descontando poção):',
+    ...(hr.topOuro || []).slice(0, 4).map((h, i) => `${i + 1}. ${h.nome} (Nv ${h.nivel}) ${est(h.goldLiq, kg)} ouro/h${cur ? ` · ${ganho(h.goldLiq, cur.goldLiq) >= 0 ? '+' : ''}${ganho(h.goldLiq, cur.goldLiq)}%` : ''} · ${risco(h)}`),
+    cur ? `Hunt atual: ${cur.nome} (dano ${cur.eff}×, ${risco(cur)})` : '',
+    'Estimativa: contas do jogo + efetividade de tipo (com Z-Move), AoE, bicicleta e o quanto o seu pokémon apanha. Muda quando você troca o pokémon em campo.',
   ].filter(Boolean).join('\n');
-  return { best, mesma, ganho: ganho != null && ganho > 0 ? ganho : null, tip };
+  const opt = (h, campo) => {
+    const g = cur ? ganho(h[campo], cur[campo]) : null;
+    return { h, mesma: cur && cur.slug === h.slug, ganho: g != null && g > 0 ? g : null, risco: risco(h) };
+  };
+  return { xp: opt(bestXp, 'xpH'), ouro: opt(bestOuro, 'goldLiq'), igual: bestXp.slug === bestOuro.slug, tip,
+    // compatível com o resto da tela
+    best: bestXp, mesma: cur && cur.slug === bestXp.slug, ganho: (() => { const g = cur ? ganho(bestXp.xpH, cur.xpH) : null; return g != null && g > 0 ? g : null; })() };
 }
 function renderHomePoke() {
   const box = $('#home-poke');
@@ -859,10 +870,19 @@ function renderHomePoke() {
   const hr = main.info && main.info.huntRank;
   const hs = huntSugg(hr, mf);
   if (hs) {
-    const g = el('div', 'hunt-strip');
-    g.append(el('span', 'ico', '🧭'), el('span', null, hs.mesma ? 'Você já está na melhor hunt liberada para' : 'Melhor hunt agora:'));
-    if (hs.mesma) g.append(el('b', null, hr.pokemon));
-    else g.append(el('b', 'hn', hs.best.nome), el('span', null, `(Nv ${fmt(hs.best.nivel)}) · dano ${hs.best.eff}×`), el('b', 'up', hs.ganho != null ? `+${hs.ganho}% de XP` : ''));
+    const g = el('div', 'hunt-strip two');
+    g.append(el('span', 'ico', '🧭'));
+    const linha = (ico, rot, o, campo) => {
+      const r = el('div', 'hs-line');
+      r.append(el('span', 'hs-rot', `${ico} ${rot}`));
+      if (o.mesma) r.append(el('b', null, 'você já está nela'), el('span', 'hs-sub', `(${o.h.nome})`));
+      else r.append(el('b', 'hn', o.h.nome), el('span', 'hs-sub', `Nv ${fmt(o.h.nivel)} · ${o.risco}`), el('b', 'up', o.ganho ? `+${o.ganho}% ${campo}` : ''));
+      return r;
+    };
+    const box = el('div', 'hs-box');
+    if (hs.igual) box.append(linha('⭐', 'Melhor em XP e ouro:', hs.xp, 'XP'));
+    else box.append(linha('⚡', 'Quer mais XP:', hs.xp, 'XP'), linha('💰', 'Quer mais ouro:', hs.ouro, 'ouro'));
+    g.append(box);
     g.title = hs.tip;
     mc.append(g);
   }
@@ -895,7 +915,10 @@ function renderHomePoke() {
       const n = el('span', 'n'); n.append(el('b', null, nickOf(a)), el('i', null, `${lvl(a)} · ${(MODE_INFO[a.effectiveMode] || [a.effectiveMode])[0]}`));
       const am = f && metaOf(a, f.xp, s.hunts);
       const ah = huntSugg(a.info && a.info.huntRank, f);
-      if (ah && !ah.mesma) { const t2 = el('i', 'hsug', `🧭 ${ah.best.nome}${ah.ganho ? ` +${ah.ganho}% XP` : ''}`); t2.title = ah.tip; n.append(t2); }
+      if (ah) {
+        const txt = ah.igual ? `🧭 ${ah.xp.mesma ? 'já na melhor hunt' : ah.xp.h.nome}` : `⚡ ${ah.xp.mesma ? 'atual' : ah.xp.h.nome} · 💰 ${ah.ouro.mesma ? 'atual' : ah.ouro.h.nome}`;
+        if (!(ah.xp.mesma && ah.ouro.mesma)) { const t2 = el('i', 'hsug', txt); t2.title = ah.tip; n.append(t2); }
+      }
       if (am) { const t = el('i', 'meta', am.hunt ? `🎯 ${am.hunt.nome} (Nv ${fmt(am.hunt.nivel)}) em ${longDur(am.hunt.ms)}` : `🎯 Nv ${am.L + 1} em ${longDur(am.nextMs)}`); t.title = [`Próximo nível (Nv ${am.L + 1}) em ${longDur(am.nextMs)}`, am.boost != null ? (am.boost > 0 ? `Bônus de XP agora: +${am.boost}%` : 'Sem bônus de XP agora') : '', ...am.ending, 'Já conta quando cada bônus acaba.'].filter(Boolean).join('\n'); n.append(t); }
       r.append(n, el('span', null, f ? big(f.xp) : '—'), el('span', 'gold', f ? big(f.gold) : '—'), el('span', null, f ? big(f.ab) : '—'), el('span', null, f ? fmt(f.cap) : '—'), el('span', f && (f.shV || f.shC) ? 'shiny' : null, f ? `${fmt(f.shV)} / ${fmt(f.shC)}` : '—'));
       r.onclick = () => openAcc(a);
