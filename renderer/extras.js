@@ -357,7 +357,7 @@ async function settingsExtras(box) {
   box.append(sg);
 }
 window.idle.on('app:seg:progress', (p) => { const b = [...document.querySelectorAll('#sec-seguranca button')].find((x) => x.textContent.startsWith('Baixando')); if (b) b.textContent = `Baixando… ${p}%`; });
-window.idle.on('app:goto', (where) => { go('settings'); setTimeout(() => { const t = $(`#sec-${where}`); if (t) t.scrollIntoView({ behavior: 'smooth' }); }, 400); });
+window.idle.on('app:goto', (where) => { go('settings'); setTimeout(() => { const t = $(`#sec-${where}`); if (t) t.scrollIntoView({ behavior: 'smooth' }); }, 800); });
 
 // ---------- Extensões: pelo link da loja e "trazer do meu navegador" ----------
 function permsBox(p) {
@@ -560,8 +560,13 @@ function comercioSection(c) {
   else if (c.info) sec.append(el('p', c.info.tag ? 'ok-line' : 'warn-google', c.info.tag ? `✓ Canal "${c.info.nome}" · só contas da guild [${c.info.tag}] postam.` : `⚠ O webhook "${c.info.nome}" não tem a tag da guild. Peça ao líder para renomear com a tag entre colchetes, ex.: "Comércio [TFT]".`));
   // Discord do vendedor
   const dc = el('input'); dc.type = 'text'; dc.placeholder = 'Seu Discord (ex.: vini.santos.) ou seu ID'; dc.value = c.discord || ''; dc.style.width = '260px';
-  const r2 = el('div', 'inline'); r2.append(dc, button('Salvar', null, () => setC({ discord: dc.value })));
+  const r2 = el('div', 'inline'); r2.append(dc, button('Salvar', null, async () => { await setC({ discord: dc.value }); toast(dc.value.trim() ? '✓ Discord salvo. Vale para os próximos anúncios.' : 'Discord tirado dos anúncios.'); }));
   sec.append(rowOpt('Seu Discord', 'Aparece no anúncio para o comprador saber com quem falar. Com o seu ID (Discord > Configurações > Avançado > Modo desenvolvedor > botão direito no seu nome > Copiar ID), vira um link clicável que não te notifica.', r2));
+  const dcv = String(c.discord || '').trim();
+  if (dcv) sec.append(el('p', 'ok-line', /^\d{15,22}$/.test(dcv)
+    ? `✓ Discord conectado pelo ID (${dcv}): nos anúncios vira um link para o seu perfil, sem te notificar.`
+    : `✓ Discord salvo: "${dcv}" aparece nos anúncios. Para virar link clicável, use o seu ID.`));
+  else sec.append(el('p', 'warn-google', '⚠ Sem Discord: o comprador só vai ver o nick do jogo.'));
   // O que postar
   const so = el('select'); for (const [v, l] of [['pokemon', 'Só pokémon'], ['tudo', 'Tudo (pokémon e itens)']]) { const o = el('option', null, l); o.value = v; so.append(o); } so.value = c.so; so.onchange = () => setC({ so: so.value });
   sec.append(rowOpt('O que postar', 'Os anúncios que você colocar no Market depois de ligar (e os que já estão lá).', so));

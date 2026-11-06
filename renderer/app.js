@@ -464,10 +464,16 @@ $('#modal').onclick = (e) => { if (e.target.id === 'modal') closeModal(); };
 window.addEventListener('resize', () => { if (page === 'poke') pokeView($('#drawer').hidden && $('#modal').hidden); });
 
 // ---------- Ajustes do app ----------
-function renderSettings() {
-  const box = $('#settings-app');
+// Ajustes: monta a tela nova fora da página e troca de uma vez só, no mesmo lugar do scroll.
+// (Antes apagava tudo e esperava as seções: a página encolhia e o scroll voltava ao topo.)
+let settingsPintura = 0;
+let settingsUltima = 0;
+async function renderSettings() {
+  const tela = $('#settings-app');
   const a = S.app; if (!a) return;
-  box.replaceChildren();
+  const my = ++settingsPintura;
+  settingsUltima = Date.now();
+  const box = document.createElement('div');
   box.append(rowOpt('Twitch', 'Lives, pontos, baú e chat da Twitch.', sw(a.platforms.twitch, (v) => setPlatform('twitch', v))));
   box.append(rowOpt('Kick', 'Lives, pontos e chat da Kick.', sw(a.platforms.kick, (v) => setPlatform('kick', v))));
   box.append(rowOpt(a.platform === 'linux' ? 'Iniciar com o sistema' : 'Iniciar com o Windows', 'Abre direto na bandeja, perto do relógio.', sw(a.openAtLogin, async (v) => { S.app = await call('app:autostart', v); renderSettings(); })));
@@ -486,7 +492,21 @@ function renderSettings() {
   ]) ul.append(el('li', null, t));
   sec.append(ul, button('Apagar todos os logins deste PC', null, async () => { if (await call('app:wipeLogins')) toast('Logins apagados. Entre de novo quando quiser.'); }));
   box.append(sec);
-  if (typeof settingsExtras === 'function') settingsExtras(box);
+  if (typeof settingsExtras === 'function') await settingsExtras(box);
+  if (my !== settingsPintura) return; // outra pintura mais nova é que vale
+  const pg = $('#page-settings'); const y = pg.scrollTop;
+  tela.replaceChildren(...box.childNodes);
+  pg.scrollTop = y;
+}
+// Pintura "de fundo" (Twitch, Kick e PokeIdle mandam status o tempo todo): no máximo a cada 15 s,
+// e nunca com a pessoa mexendo num campo ou com o mouse em cima dos Ajustes há menos de 3 s.
+let settingsMexeu = 0;
+for (const ev of ['pointerdown', 'wheel', 'keydown']) document.addEventListener(ev, (e) => { if (e.target && e.target.closest && e.target.closest('#page-settings')) settingsMexeu = Date.now(); }, { passive: true, capture: true });
+function settingsDeFundo() {
+  const f = document.activeElement;
+  if (f && /^(INPUT|SELECT|TEXTAREA)$/.test(f.tagName) && $('#page-settings').contains(f)) return;
+  if (Date.now() - settingsMexeu < 3000 || Date.now() - settingsUltima < 15000) return;
+  renderSettings();
 }
 async function setPlatform(ns, on) { S.app = await call('app:platform', ns, on); refreshAll(); }
 
@@ -1129,7 +1149,7 @@ function refreshAll() {
   refreshDots();
   if (page === 'home') renderHome();
   // Ajustes: não redesenhar enquanto a pessoa digita (ex.: o link do webhook).
-  if (page === 'settings' && !(document.activeElement && document.activeElement.tagName === 'INPUT' && $('#page-settings').contains(document.activeElement)) && $('#modal').hidden) renderSettings();
+  if (page === 'settings' && $('#modal').hidden) settingsDeFundo();
   if (page === 'poke' && $('#drawer').hidden && $('#modal').hidden) renderPoke();
   if (P[page]) {
     // Não redesenhar enquanto a pessoa digita no chat ou na busca.
