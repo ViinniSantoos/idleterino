@@ -117,10 +117,20 @@ window.HELP = [
     'É uma estimativa: passe o mouse para ver as 5 melhores e o que entrou na conta. Trocou o pokémon em campo, a sugestão muda.',
   ]],
   ['PvP', 'O que tem na aba PvP?', [
-    'O meta do top 50 do Ranqueado: os pokémon mais usados, os tipos, o Z-Move de cada um, o nível médio e quem usa AoE.',
-    'Time sugerido com os SEUS pokémon, pesando tipo (forte e fraco contra quem), Z-Move, status base, nível e AoE, com o porquê de cada escolha.',
-    'Planejador: escolha até 5 dos seus, veja a posição sugerida no tabuleiro (corpo a corpo na frente, quem atira mais longe atrás) e como o time vai contra os 10 mais usados. Depois é só montar igual no "Editar tabuleiro" do jogo.',
-    'E os times do topo que você está mais perto de montar.',
+    'Meta: a tier list dos arquétipos do top 50 (times que dividem 3 ou mais pokémon), com quantos usam, PR médio, taxa de vitória e se subiu ou caiu nos últimos dias; os pokémon e tipos mais usados; e o top 50 com as equipes.',
+    'Meu time: o seu time contra cada arquétipo do topo (simulado), o melhor time com o que você tem, o Upgrade (quem trocar e por quem), o time anti-meta sem limite de pokémon com o preço no Market, o orçamento em gemas e quem mais vence cada arquétipo.',
+    'Planejador: escolha até 5, escolha o adversário (um arquétipo) e veja os dois lados do tabuleiro: o time dele como costuma ficar e o seu posicionamento contra ele, com a chance de vencer e dicas.',
+    'Histórico: tier, PR, pico, vitórias e derrotas, sequência, quando o PR começa a cair e o gráfico do PR dos últimos 30 dias.',
+  ]],
+  ['PvP', 'Como o app calcula quem vence?', [
+    'Com o duelo 1×1 do próprio jogo (o mesmo do "Comparar" e do ginásio): status no nível, IV, qualidade, potência, refino, shiny, golpe, STAB, tipos e Z-Move.',
+    'O seu time contra um time do topo = cada um seu contra cada um dele. A "força" junta o melhor seu contra cada adversário e a média de todos os duelos.',
+    'O time anti-meta usa um pokémon "do tamanho do topo" (nível, IV, refino, qualidade, potência e shiny medianos do top 50) de cada espécie forte do jogo, inclusive Mega.',
+    'É estimativa: a luta de verdade tem posicionamento, alcance e AoE, que o planejador mostra à parte.',
+  ]],
+  ['PvP', 'O app compra no Market?', [
+    'Não. Ele só consulta o preço "a partir de" (o mais barato à venda) e quantas ofertas existem, na atualização do meta.',
+    'Em "🔔 Avisar quando baratear", o app confere a cada 30 min e manda um aviso quando aparecer bem abaixo do preço de costume. A compra é sempre sua, no Market do jogo.',
   ]],
   ['PvP', 'De onde vem o meta e de quanto em quanto tempo atualiza?', [
     'Do próprio jogo: a tabela do Ranqueado e a equipe pública de cada jogador do top 50 (a mesma que aparece ao clicar no nome dele).',

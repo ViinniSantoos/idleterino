@@ -28,7 +28,9 @@ contextBridge.executeInMainWorld({
     // ---- estado leve do jogador: o que a sugestão de hunt e o PvP precisam ----
     const jogo = { hunts: null, tabelaTipos: null, amp: 1.5, eu: {}, pks: new Map(), keys: [] };
     const CAMPOS_EU = ['nick', 'level', 'activeId', 'bicicleta', 'pvp', 'pvpRank', 'pvpPosicao', 'pvpHistorico', 'pvpTime', 'huntSlug', 'hunt', 'huntAtual', 'area'];
+    const DUELO = (k) => ({ ivs: k.ivs || null, quality: k.quality ?? k.qualidade ?? null, potencia: k.potencia ?? null, refino: k.refino || null, tmElemental: k.tmElemental || null, tmFisico: !!k.tmFisico });
     const slimPk = (k) => ({
+      ...DUELO(k),
       id: k.id, speciesId: k.speciesId, level: Number(k.level) || 0, shiny: !!k.shiny,
       aoe: k.tmAoe === true || k.tmAoe === 1 || k.tmAoe === 'true' || k.tm_aoe === true,
       el: k.tmElemental || k.tm_elemental || null, apelido: k.apelido || null, poder: Number(k.poder || k.power) || 0,
@@ -44,11 +46,14 @@ contextBridge.executeInMainWorld({
     }
 
     // ---- consultas do app que o jogo NÃO deve desenhar (o perfil de outro jogador abriria na tela) ----
-    const nossos = { tabela: 0, perfis: new Map() };
+    const nossos = { tabela: 0, perfis: new Map(), especies: 0 };
+    const precos = {}; // nome em minúsculas -> { em, linhas }
+    let ultimaEspecies = null;
     const recente = (t) => t && Date.now() - t < 30000;
     function ehNosso(d) {
       if (typeof d !== 'string') return false;
       if (d.indexOf('"pvpTabela"') >= 0 && recente(nossos.tabela)) return true;
+      if (d.indexOf('"especies"') >= 0 && d.indexOf('"market"') >= 0 && Date.now() - nossos.especies < 8000) return true;
       if (d.indexOf('"perfil"') >= 0 && nossos.perfis.size) {
         try { const m = JSON.parse(d); if (m.t === 'perfil' && m.perfil && recente(nossos.perfis.get(String(m.perfil.nick || '').toLowerCase()))) return true; } catch {}
       }
@@ -58,6 +63,7 @@ contextBridge.executeInMainWorld({
     // ---- PvP: tabela e equipes do topo ----
     const pvp = { tabela: null, tabelaEm: 0, perfis: {}, coletando: false, feitos: 0, total: 0, at: 0, erro: null };
     const slimTime = (lista) => (Array.isArray(lista) ? lista : []).slice(0, 5).map((k) => ({
+      ...DUELO(k),
       speciesId: k.speciesId ?? k.especieId ?? k.pokeId ?? null, nome: k.nome || k.name || null, level: Number(k.level) || 0,
       shiny: !!k.shiny, aoe: k.tmAoe === true || k.tmAoe === 1, el: k.tmElemental || null, casa: k.casa ?? k.posicao ?? null,
       poder: Number(k.poder || k.power) || 0, potencia: k.potencia ?? null,
@@ -135,6 +141,7 @@ contextBridge.executeInMainWorld({
             if (d.indexOf('"market"') < 0) return;
             try {
               const m = JSON.parse(d);
+              if (m && m.t === 'market' && m.aba === 'especies' && Date.now() - nossos.especies < 8000) { ultimaEspecies = { em: Date.now(), m }; return; }
               if (!m || m.t !== 'market' || !ABAS[m.aba]) return;
               if (m.aba !== 'meus' && m.seq != null && m.seq !== SEQ) return;
               const key = m.aba === 'historicoGlobal' ? `historicoGlobal:${m.pagina || 0}` : m.aba;
@@ -275,9 +282,93 @@ contextBridge.executeInMainWorld({
       for (const p of Object.values(pvp.perfis)) for (const k of p.time) anota(k.speciesId);
       for (const id of Array.isArray(extraIds) ? extraIds.slice(0, 400) : []) anota(id);
       const meus = {};
-      for (const k of jogo.pks.values()) { anota(k.speciesId); const cur = meus[k.speciesId]; if (!cur || k.level > cur.level) meus[k.speciesId] = { id: k.id, level: k.level, aoe: k.aoe, el: k.el }; }
+      for (const k of jogo.pks.values()) { anota(k.speciesId); const cur = meus[k.speciesId]; if (!cur || k.level > cur.level) meus[k.speciesId] = { ...k }; }
       const eu = pvp.eu ? pvp.eu.dados : null;
       return { euPvp: jogo.eu.pvp ? JSON.parse(JSON.stringify(jogo.eu.pvp)) : null, nivel: Number(jogo.eu.level) || 0, at: pvp.at, coletando: pvp.coletando, feitos: pvp.feitos, total: pvp.total, erro: pvp.erro, linhas, perfis: pvp.perfis, info, meus, tabelaTipos: jogo.tabelaTipos, eu, nick: jogo.eu.nick || null, euKeys: jogo.keys.slice(0, 80) };
+    }
+
+    // ---- duelo 1×1 com as contas do jogo ----
+    let modGin = null;
+    const gin = () => (modGin || (modGin = import('/shared/ginasios.mjs').catch(() => null)));
+    async function duelos(a, b) {
+      const g = await gin();
+      if (!g || !g.compararDuelo1v1) return { erro: 'comparador indisponível' };
+      const esp = await especies();
+      const tab = jogo.tabelaTipos || {};
+      const m = [];
+      for (const x of a || []) {
+        const ea = esp.get(x.speciesId);
+        m.push((b || []).map((y) => {
+          const eb = esp.get(y.speciesId);
+          if (!ea || !eb) return null;
+          try { const r = g.compararDuelo1v1({ ...x, id: x.id ?? 1 }, ea, { ...y, id: y.id ?? 2 }, eb, { amostras: 80, tabelaTipos: tab }); return r ? Math.round(r.pctA * 1000) / 1000 : null; } catch { return null; }
+        }));
+      }
+      return { m };
+    }
+    // Melhores espécies contra o meta, se a pessoa pudesse ter qualquer uma (a "baleia"): cada espécie
+    // forte do jogo (inclusive Mega), num pokémon de referência do nível/qualidade típicos do top,
+    // em duelo contra cada pokémon dos times do top.
+    async function candidatos(meta, opts = {}) {
+      const g = await gin();
+      if (!g || !g.compararDuelo1v1) return { erro: 'comparador indisponível' };
+      const esp = await especies();
+      const tab = jogo.tabelaTipos || {};
+      const alvo = (meta || []).slice(0, 250);
+      const ref = opts.ref || {};
+      const lista = [...esp.values()].filter((c) => {
+        const soma = (Number(c.baseHp) || 0) + (Number(c.baseAtk) || 0) + (Number(c.baseDef) || 0) + (Number(c.baseSpAtk) || 0) + (Number(c.baseSpDef) || 0) + (Number(c.baseSpeed) || 0);
+        return soma >= (opts.minSoma || 520);
+      });
+      let mis = null;
+      try { mis = await import('/shared/mistico.mjs'); } catch {}
+      const out = [];
+      let n = 0, erro1 = null;
+      for (const c of lista) {
+        const tipos = tiposDe(c);
+        const pk = { id: 1, speciesId: c.pokeId, level: ref.level || 3000, ivs: ref.ivs || { hp: 22, atk: 22, def: 22, spAtk: 22, spDef: 22, speed: 22 }, quality: ref.quality ?? 1.25, potencia: ref.potencia ?? 2, refino: ref.refino || { hp: 0, atk: 0, def: 0, spAtk: 0, spDef: 0 }, tmElemental: tipos[0] || null, tmFisico: false, shiny: !!ref.shiny };
+        let soma = 0, peso = 0;
+        const arq = {};
+        for (const e of alvo) {
+          const eb = esp.get(e.speciesId);
+          if (!eb) continue;
+          let p = 0.5;
+          try { const r = g.compararDuelo1v1(pk, c, { ...e, id: 2 }, eb, { amostras: 24, tabelaTipos: tab }); if (r) p = r.pctA; else if (!erro1) erro1 = 'nulo'; } catch (x) { if (!erro1) erro1 = String(x && x.message || x); }
+          soma += p * (e.w || 1); peso += e.w || 1;
+          if (e.arq != null) { const a = arq[e.arq] || (arq[e.arq] = [0, 0]); a[0] += p; a[1]++; }
+        }
+        let lend = false;
+        try { lend = !!(mis && mis.ehLendarioOuMitico && mis.ehLendarioOuMitico(c.pokeId)); } catch {}
+        const porArq = {};
+        for (const [k, v] of Object.entries(arq)) porArq[k] = Math.round((v[0] / v[1]) * 100) / 100;
+        if (peso) out.push({ speciesId: c.pokeId, nome: c.name, tipos, win: Math.round((soma / peso) * 1000) / 1000, z: pk.tmElemental, lend, porArq });
+        if (++n % 40 === 0) await new Promise((r) => setTimeout(r, 0)); // não trava a página do jogo
+      }
+      out.sort((x, y) => y.win - x.win);
+      // Os melhores que dá para conseguir (sem lendário/mítico) e, à parte, os lendários.
+      return { lista: [...out.filter((x) => !x.lend).slice(0, opts.top || 40), ...out.filter((x) => x.lend).slice(0, 15)], erro1 };
+    }
+    // Preço no Market agora (ofertas por espécie, "a partir de"), uma consulta a cada 2,5 s.
+    async function precosDe(nomes) {
+      const res = {};
+      for (const nome of (nomes || []).slice(0, 15)) {
+        if (!sock || sock.readyState !== 1) break;
+        const k = String(nome).toLowerCase();
+        if (precos[k] && Date.now() - precos[k].em < 20 * 60 * 1000) { res[nome] = precos[k].linhas; continue; }
+        // Com o Mercado aberto na tela, não consulta (a resposta poderia aparecer para a pessoa).
+        if (document.querySelector('#community:not(.hidden)')) break;
+        const antes = ultimaEspecies && ultimaEspecies.em;
+        nossos.especies = Date.now();
+        sock.send(JSON.stringify({ t: 'market.especies', tipo: 'pokemon', busca: String(nome), pagina: 0 }));
+        for (let i = 0; i < 12 && (ultimaEspecies && ultimaEspecies.em) === antes; i++) await espera(400);
+        if (ultimaEspecies && ultimaEspecies.em !== antes) {
+          const linhas = (ultimaEspecies.m.linhas || []).slice(0, 6).map((e) => JSON.parse(JSON.stringify(e)));
+          precos[k] = { em: Date.now(), linhas };
+          res[nome] = linhas;
+        }
+        await espera(2500);
+      }
+      return res;
     }
 
     const PEDIDOS = { 'market.meus': 1, 'market.historico': 1, 'market.historicoGlobal': 1 };
@@ -296,7 +387,12 @@ contextBridge.executeInMainWorld({
         bonusXp() { return bonusXp ? JSON.parse(JSON.stringify(bonusXp)) : null; },
         huntRank() { return huntRank().then((r) => JSON.parse(JSON.stringify(r))).catch((e) => ({ pronto: false, erro: String(e) })); },
         pvpColetar(n, passo) { return pvpColetar(n, passo).catch((e) => ({ ok: false, motivo: String(e) })); },
+        pvpEu() { return jogo.eu.pvp ? { ...JSON.parse(JSON.stringify(jogo.eu.pvp)), nick: jogo.eu.nick || null } : null; },
         pvpEstado() { return { coletando: pvp.coletando, feitos: pvp.feitos, total: pvp.total, at: pvp.at }; },
+        // Duelo 1×1 do próprio jogo (o "Comparar" e o ginásio): matriz de chance de vitória de A contra B.
+        duelos(a, b) { return duelos(a, b).then((r) => JSON.parse(JSON.stringify(r))).catch((e) => ({ erro: String(e) })); },
+        candidatos(meta, opts) { return candidatos(meta, opts).then((r) => JSON.parse(JSON.stringify(r))).catch((e) => ({ erro: String(e) })); },
+        precos(nomes) { return precosDe(nomes).then((r) => JSON.parse(JSON.stringify(r))).catch((e) => ({ erro: String(e) })); },
         pvpLer(ids) { return pvpLer(ids).then((r) => JSON.parse(JSON.stringify(r))).catch((e) => ({ erro: String(e) })); },
       }),
     });

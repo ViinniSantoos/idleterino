@@ -248,6 +248,39 @@ module.exports = function createPokeIdle(ctx) {
   try { pvpMeta = JSON.parse(fs.readFileSync(pvpPath(), 'utf8')); } catch {}
   let pvpRunning = false;
   const mainAccId = () => (account(config.mainId) ? config.mainId : (config.accounts.find((a) => isPokeIdle(urlOf(a))) || {}).id);
+  // Arquétipos: times do top que dividem 3 ou mais pokémon formam um grupo. Cada grupo ganha uma
+  // nota (quantos usam, PR médio e taxa de vitória média) e uma tier: S, A, B ou C.
+  function buildArchetypes(linhas, perfis) {
+    const teams = linhas.filter((l) => perfis[l.nick] && perfis[l.nick].time && perfis[l.nick].time.length)
+      .map((l) => ({ ...l, sp: perfis[l.nick].time.map((k) => k.speciesId), wr: l.v / Math.max(1, l.v + l.d) }));
+    const groups = [];
+    for (const t of teams) {
+      const g = groups.find((x) => t.sp.filter((id) => x.seed.includes(id)).length >= 3);
+      if (g) g.teams.push(t); else groups.push({ seed: t.sp, teams: [t] });
+    }
+    const maxN = Math.max(1, ...groups.map((g) => g.teams.length));
+    const prs = teams.map((t) => t.pr);
+    const minPr = Math.min(...prs), maxPr = Math.max(...prs);
+    const out = groups.map((g, i) => {
+      const freq = {};
+      for (const t of g.teams) for (const id of t.sp) freq[id] = (freq[id] || 0) + 1;
+      const core = Object.entries(freq).sort((a, b) => b[1] - a[1]).map(([id]) => Number(id));
+      const n = g.teams.length;
+      const pr = g.teams.reduce((s2, t) => s2 + t.pr, 0) / n;
+      const wr = g.teams.reduce((s2, t) => s2 + t.wr, 0) / n;
+      const score = 0.45 * (n / maxN) + 0.35 * ((pr - minPr) / Math.max(1, maxPr - minPr)) + 0.2 * wr;
+      return { id: i, key: core.slice(0, 3).sort((a, b) => a - b).join('-'), core: core.slice(0, 5), n, pr: Math.round(pr), wr: Math.round(wr * 1000) / 1000, best: Math.min(...g.teams.map((t) => t.pos)), nicks: g.teams.map((t) => t.nick), rep: g.teams[0].nick, score };
+    }).sort((a, b) => b.score - a.score);
+    const ranked = out.filter((a) => a.n >= 2);
+    ranked.forEach((a, i) => { const q = i / Math.max(1, ranked.length); a.tier = q < 0.2 ? 'S' : q < 0.5 ? 'A' : q < 0.8 ? 'B' : 'C'; });
+    for (const a of out) if (!a.tier) a.tier = 'U'; // time único (ninguém mais no top usa parecido)
+    const porNick = {};
+    for (const a of out) for (const nk of a.nicks) porNick[nk] = a.id;
+    return { arqs: out, porNick };
+  }
+  // Histórico do meta (14 leituras) para a tendência: uso de cada espécie e de cada arquétipo.
+  const histPath = () => path.join(app.getPath('userData'), 'pvp-historico.json');
+  const readJson = (f, d) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
   async function pvpCollect(force = false) {
     if (pvpRunning) return false;
     if (!force && pvpMeta && Date.now() - pvpMeta.at < PVP_EVERY) return false;
@@ -261,10 +294,78 @@ module.exports = function createPokeIdle(ctx) {
       if (!r || !r.ok) return false;
       const d = await v.webContents.executeJavaScript('window.__idleterinoMercado.pvpLer()').catch(() => null);
       if (!d || !d.linhas || !d.linhas.length) return false;
-      pvpMeta = { at: Date.now(), linhas: d.linhas.slice(0, PVP_N), perfis: d.perfis, info: d.info, tabelaTipos: d.tabelaTipos };
+      const linhas = d.linhas.slice(0, PVP_N);
+      const { arqs, porNick } = buildArchetypes(linhas, d.perfis);
+      // Melhores espécies contra o meta (qualquer uma, inclusive Mega), num pokémon de referência do
+      // nível/potência típicos do top, em duelo 1×1 do jogo contra cada pokémon do top.
+      const entries = [];
+      for (const l of linhas) { const p = d.perfis[l.nick]; if (!p) continue; const w = 1 + (51 - Math.min(50, l.pos)) / 50; for (const k of p.time) entries.push({ ...k, w, arq: porNick[l.nick] }); }
+      const lv = entries.map((e) => e.level).sort((a, b) => a - b);
+      const med = (arr) => arr.length ? arr[Math.floor(arr.length / 2)] : null;
+      const num = (arr) => arr.filter((x) => Number.isFinite(x)).sort((a, b) => a - b);
+      const medObj = (campo, chaves) => Object.fromEntries(chaves.map((k) => [k, med(num(entries.map((e) => Number((e[campo] || {})[k])))) || 0]));
+      // Pokémon de referência = a mediana do top: nível, potência, qualidade, IV e refino (o mesmo investimento).
+      const ref = { level: med(lv) || 3000, potencia: med(num(entries.map((e) => Number(e.potencia)))) || 2, quality: med(num(entries.map((e) => Number(e.quality)))) || 1.25,
+        ivs: medObj('ivs', ['hp', 'atk', 'def', 'spAtk', 'spDef', 'speed']), refino: medObj('refino', ['hp', 'atk', 'def', 'spAtk', 'spDef']),
+        shiny: entries.filter((e) => e.shiny).length > entries.length / 2 }; // o shiny dá ×3 nos status no jogo
+      const cand = await v.webContents.executeJavaScript(`window.__idleterinoMercado.candidatos(${JSON.stringify(entries)}, ${JSON.stringify({ ref, top: 40 })})`).catch(() => null);
+      const candidatos = cand && Array.isArray(cand.lista) ? cand.lista : [];
+      // Preço no Market agora: os melhores candidatos e os mais usados do top.
+      const usados = {};
+      for (const e of entries) usados[e.nome || e.speciesId] = (usados[e.nome || e.speciesId] || 0) + 1;
+      const nomes = [...new Set([...candidatos.filter((x) => !x.lend).slice(0, 20).map((x) => x.nome), ...Object.entries(usados).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([n]) => n)])].filter((n) => typeof n === 'string');
+      const precos = await v.webContents.executeJavaScript(`window.__idleterinoMercado.precos(${JSON.stringify(nomes)})`).catch(() => null);
+      pvpMeta = { at: Date.now(), linhas, perfis: d.perfis, info: d.info, tabelaTipos: d.tabelaTipos, arqs, porNick, ref, candidatos, precos: precos && !precos.erro ? precos : {} };
       fs.writeFileSync(pvpPath(), JSON.stringify(pvpMeta));
+      // tendência
+      const hist = readJson(histPath(), []);
+      const uso = {};
+      for (const e of entries) uso[e.speciesId] = (uso[e.speciesId] || 0) + 1;
+      hist.push({ at: pvpMeta.at, uso, arqs: Object.fromEntries(arqs.map((a) => [a.key, a.n])) });
+      fs.writeFileSync(histPath(), JSON.stringify(hist.slice(-14)));
       return true;
     } finally { pvpRunning = false; send('status', snapshot()); }
+  }
+  const mePath = () => path.join(app.getPath('userData'), 'pvp-eu.json');
+  async function pvpSnapshotMe() {
+    const all = readJson(mePath(), {});
+    for (const a of config.accounts) {
+      const v = views.get(a.id);
+      if (!v || v.webContents.isDestroyed() || !isPokeIdle(urlOf(a))) continue;
+      const p = await v.webContents.executeJavaScript('window.__idleterinoMercado ? window.__idleterinoMercado.pvpEu() : null').catch(() => null);
+      if (!p || p.pontos == null) continue;
+      const list = all[a.id] || (all[a.id] = []);
+      const last = list[list.length - 1];
+      const row = { t: Date.now(), pr: p.pontos, pico: p.pico, v: p.vitorias, d: p.derrotas, seq: p.sequencia, tier: p.tierId, div: p.divisaoNum, pos: p.posicao, decai: p.decaiEm };
+      if (!last || last.pr !== row.pr || last.v !== row.v || last.d !== row.d || Date.now() - last.t > 6 * 3600 * 1000) list.push(row);
+      all[a.id] = list.filter((r) => Date.now() - r.t < 30 * 86400000).slice(-500);
+    }
+    fs.writeFileSync(mePath(), JSON.stringify(all));
+  }
+  // Alerta de Market: as espécies que a pessoa marcou ("avise quando baratear"), a cada 30 min.
+  async function pvpWatch() {
+    const names = (config.pvpWatch || []).slice(0, 8);
+    if (!names.length) return;
+    const v = views.get(mainAccId());
+    if (!v || v.webContents.isDestroyed()) return;
+    const r = await v.webContents.executeJavaScript(`window.__idleterinoMercado.precos(${JSON.stringify(names)})`).catch(() => null);
+    if (!r || r.erro) return;
+    config.pvpWatchHist = config.pvpWatchHist || {};
+    for (const n of names) {
+      const row = (r[n] || []).find((x) => String(x.nome).toLowerCase() === String(n).toLowerCase()) || (r[n] || [])[0];
+      if (!row) continue;
+      const h = config.pvpWatchHist[n] || (config.pvpWatchHist[n] = []);
+      for (const [moeda, campo, nome] of [['orb', 'minOrb', 'gemas'], ['gold', 'minGold', 'coins']]) {
+        const val = Number(row[campo]);
+        if (!(val > 0)) continue;
+        const prev = h.map((x) => x[moeda]).filter((x) => x > 0).sort((a, b) => a - b);
+        const mediana = prev.length >= 3 ? prev[Math.floor(prev.length / 2)] : null;
+        if (mediana && val <= mediana * 0.85 && ctx.notify) ctx.notify(`${row.nome} mais barato no Market`, `A partir de ${val.toLocaleString('pt-BR')} ${nome} (antes ~${mediana.toLocaleString('pt-BR')}). ${row.anuncios} ofertas. Abra o Market no jogo para ver.`);
+      }
+      h.push({ t: Date.now(), orb: Number(row.minOrb) || 0, gold: Number(row.minGold) || 0 });
+      config.pvpWatchHist[n] = h.slice(-12);
+    }
+    saveConfig();
   }
   // Dados ao vivo da conta (os pokémon dela, o PvP dela) + o meta salvo.
   async function pvpGet(accId) {
@@ -277,7 +378,7 @@ module.exports = function createPokeIdle(ctx) {
       const mv = views.get(mainAccId());
       if (pvpRunning && mv && !mv.webContents.isDestroyed()) prog = await mv.webContents.executeJavaScript('window.__idleterinoMercado.pvpEstado()').catch(() => null);
     }
-    return { meta: pvpMeta, running: pvpRunning, prog, accountId: id, live: live && !live.erro ? { meus: live.meus, info: live.info, euPvp: live.euPvp, nick: live.nick, nivel: live.nivel, tabelaTipos: live.tabelaTipos } : null };
+    return { meta: pvpMeta, hist: readJson(histPath(), []), me: (readJson(mePath(), {})[id] || []), watch: config.pvpWatch || [], watchHist: config.pvpWatchHist || {}, running: pvpRunning, prog, accountId: id, live: live && !live.erro ? { meus: live.meus, info: live.info, euPvp: live.euPvp, nick: live.nick, nivel: live.nivel, tabelaTipos: live.tabelaTipos } : null };
   }
 
   // Mercado no Início: as mesmas consultas dos botões do mercado do jogo, pela conexão da própria
@@ -410,6 +511,18 @@ module.exports = function createPokeIdle(ctx) {
     return snapshot();
   });
   ipcMain.handle('poke:pvp:get', (_e, accId) => pvpGet(accId));
+  ipcMain.handle('poke:pvp:duel', async (_e, accId, a, b) => {
+    const id = account(accId) ? accId : mainAccId();
+    const v = id && views.get(id);
+    if (!v || v.webContents.isDestroyed()) return null;
+    return v.webContents.executeJavaScript(`window.__idleterinoMercado.duelos(${JSON.stringify(a || [])}, ${JSON.stringify(b || [])})`).catch(() => null);
+  });
+  ipcMain.handle('poke:pvp:watch', (_e, names) => {
+    config.pvpWatch = [...new Set((Array.isArray(names) ? names : []).map((n) => String(n).slice(0, 40)))].slice(0, 8);
+    saveConfig();
+    setTimeout(() => pvpWatch().catch(() => {}), 2000);
+    return config.pvpWatch;
+  });
   ipcMain.handle('poke:pvp:refresh', () => {
     if (pvpRunning) return { ok: true, running: true };
     if (pvpMeta && Date.now() - pvpMeta.at < 30 * 60 * 1000) return { ok: false, error: 'O meta foi atualizado há pouco. Dá para pedir de novo 30 min depois da última leitura.' };
@@ -440,6 +553,9 @@ module.exports = function createPokeIdle(ctx) {
     // PvP: confere de hora em hora se o meta tem mais de um dia; a primeira, 3 min depois de abrir.
     setTimeout(() => pvpCollect().catch(() => {}), 3 * 60 * 1000);
     timers.push(setInterval(() => pvpCollect().catch(() => {}), 60 * 60 * 1000));
+    setTimeout(() => pvpSnapshotMe().catch(() => {}), 2 * 60 * 1000);
+    timers.push(setInterval(() => pvpSnapshotMe().catch(() => {}), 60 * 60 * 1000));
+    timers.push(setInterval(() => pvpWatch().catch(() => {}), 30 * 60 * 1000));
     timers.push(setInterval(askMarket, MARKET_MS));
   }
   return {
