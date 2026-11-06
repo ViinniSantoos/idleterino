@@ -32,7 +32,7 @@ window.HELP = [
     'Com horas aberta, a página do jogo vai acumulando memória e CPU, mesmo no modo Economia. "⚡ Otimizar" fecha e abre a conta num processo novo e libera tudo isso.',
     'O login continua salvo e a contagem da sessão do jogo também. A conta fica fora só alguns segundos.',
     'O botão mostra quanta memória a conta usa agora (fica laranja acima de 700 MB). "⚡ Otimizar todas" faz uma por vez.',
-    'Em Ajustes do PokeIdle, "Otimizar sozinho" faz isso a cada 30 min, 1 h, 2 h ou 5 h. Se você estiver mexendo na conta na hora, ele espera.',
+    'Em Ajustes do PokeIdle, "Otimizar sozinho" faz isso a cada 30 min, 1 h, 2 h ou 5 h, sempre no tempo escolhido (uma conta por vez).',
   ]],
   ['PokeIdle', 'Entrei com e-mail e senha e a tela travou. E agora?', [
     'O app agora resolve sozinho: se o login deu certo mas a tela ficou parada, ele abre a conta de novo em alguns segundos (o mesmo que fechar e abrir o app).',

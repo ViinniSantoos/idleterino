@@ -261,7 +261,7 @@ module.exports = function createPokeIdle(ctx) {
 
   // ---------- Otimizar: fecha e abre a conta num processo novo ----------
   // Libera a memória que a página acumula com horas aberta. O login e o placar da sessão ficam (estão
-  // salvos na conta). "Otimizar sozinho" faz isso a cada X tempo, esperando se a pessoa estiver mexendo.
+  // salvos na conta). "Otimizar sozinho" faz isso no tempo escolhido, sempre (a tela fica aberta e "mexendo" o tempo todo).
   const stuckSince = new Map(), lastReopen = new Map(), lastInput = new Map(), openedAt = new Map(), travadas = new Set(), fora = new Map();
   const optLog = new Map(); // id -> [{ t, mb, motivo }]
   function memOf(id) {
@@ -300,7 +300,6 @@ module.exports = function createPokeIdle(ctx) {
       if (!views.has(a.id)) continue;
       const desde = Math.max(openedAt.get(a.id) || 0, lastReopen.get(a.id) || 0);
       if (Date.now() - desde < every) continue;
-      if (ocupada(a.id)) continue;
       reopen(a.id, 'sozinho');
       return;
     }

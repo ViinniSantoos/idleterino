@@ -745,7 +745,7 @@ function openPokeDrawer() {
   for (const [v, l] of [[0, 'Desligado'], [30, 'A cada 30 min'], [60, 'A cada 1 h'], [120, 'A cada 2 h'], [300, 'A cada 5 h']]) { const op = el('option', null, l); op.value = v; o.append(op); }
   o.value = String(s.optimizeEvery || 0);
   o.onchange = async () => { S.poke = await call('poke:optimizeEvery', Number(o.value)); };
-  card.append(rowOpt('Otimizar sozinho', 'Com horas aberta, a página do jogo vai acumulando memória e CPU (mesmo no modo Economia). O app fecha e abre cada conta num processo novo de tempos em tempos, uma por vez. Não perde o login nem a contagem da sessão; se você estiver mexendo na conta, ele espera.', o, true));
+  card.append(rowOpt('Otimizar sozinho', 'Com horas aberta, a página do jogo vai acumulando memória e CPU (mesmo no modo Economia). O app fecha e abre cada conta num processo novo de tempos em tempos, uma por vez. Não perde o login nem a contagem da sessão. Acontece sempre no tempo escolhido.', o, true));
   $('#drawer').hidden = false;
 }
 
