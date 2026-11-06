@@ -228,4 +228,17 @@ window.HELP = [
     'Se a mesma versão fechar sozinha 3 vezes seguidas ao abrir, o próprio app oferece essas saídas.',
     'No portátil e no Linux, baixe a versão anterior em github.com/ViinniSantoos/idleterino/releases.',
   ]],
+  ['Noite e recap', 'Como funciona o Laboratório de hunts?', [
+    '1. No Início, clique em "🧪 Laboratório", escolha a conta e clique em "Começar".',
+    '2. Cace na primeira hunt. Quando quiser, troque de hunt no jogo: o app percebe a troca e mede cada uma separado.',
+    '3. Com pelo menos 2 hunts de 10 min cada, clique em "Ver o veredito": a que dá mais XP e a que dá mais ouro, com a imagem para postar.',
+    'O app só mede (com o placar do próprio jogo): quem troca de hunt é você. Não troque o pokémon em campo no meio do teste.',
+  ]],
+  ['Noite e recap', 'Como coloco o Idleterino na minha live (OBS)?', [
+    '1. Ajustes > Modo Streamer: ligue o overlay e escolha o estilo (Cartão ou Barra) e as contas.',
+    '2. Clique em "Copiar link".',
+    '3. No OBS: Fontes > + > Navegador (Browser) > cole o link em URL. Cartão: 900 × 400. Barra: 1400 × 120. O fundo já é transparente.',
+    'Mostra o XP e o ouro ganhos na live, XP/h, nível e shinys, com animação quando aparece shiny ou sobe de nível. Zere a contagem no começo de cada live.',
+    'O overlay só funciona neste PC (o OBS precisa estar no mesmo computador). Ninguém da internet acessa.',
+  ]],
 ];

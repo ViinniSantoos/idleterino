@@ -315,6 +315,19 @@ ipcMain.handle('app:image:save', async (_e, dataUrl, name) => {
   fs.writeFileSync(r.filePath, buf);
   return true;
 });
+// Modo Streamer: prévia do overlay numa janela do app (só o endereço local do overlay).
+let overlayWin = null;
+ipcMain.handle('app:stream:preview', (_e, url) => {
+  let u; try { u = new URL(String(url)); } catch { return false; }
+  if (u.protocol !== 'http:' || u.hostname !== '127.0.0.1' || u.pathname !== '/overlay') return false;
+  if (overlayWin && !overlayWin.isDestroyed()) { overlayWin.loadURL(u.href); overlayWin.show(); overlayWin.focus(); return true; }
+  overlayWin = new BrowserWindow({ width: 960, height: 460, autoHideMenuBar: true, backgroundColor: '#3a3f4b', title: 'Prévia do overlay (no OBS o fundo fica transparente)', icon: ICON, webPreferences: { partition: 'overlay-previa', sandbox: true, contextIsolation: true } });
+  overlayWin.on('page-title-updated', (ev) => ev.preventDefault());
+  overlayWin.on('closed', () => { overlayWin = null; });
+  overlayWin.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  overlayWin.loadURL(u.href);
+  return true;
+});
 ipcMain.handle('app:image:copy', (_e, dataUrl) => { const buf = pngOf(dataUrl); if (!buf) return false; clipboard.writeImage(nativeImage.createFromBuffer(buf)); return true; });
 // Ferramentas da comunidade numa janela do app, com sessão própria (sem acesso às contas).
 // Precificador de Pokémon, do briaoale (liberado por ele no Discord do PokeIdle).

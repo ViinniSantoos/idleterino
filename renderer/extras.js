@@ -40,7 +40,10 @@ function homeExtras() {
   const r = el('div', 'card recap');
   const t2 = el('div', 'nt'); t2.append(el('b', null, '🎬 Seu PokeIdle em números'), el('span', null, 'Retrospectiva e cartão para postar.'));
   r.append(t2, button('Wrapped da semana', null, () => abrirWrapped(7)), button('do mês', null, () => abrirWrapped(30)), button('📇 Cartão', null, abrirCartao));
+  const lb = button('🧪 Laboratório', null, abrirLab); lb.title = 'Compare hunts medindo de verdade: você troca no jogo, o app mede e dá o veredito.';
+  r.append(lb);
   box.append(r);
+  const lc = labCard(); if (lc) box.append(lc);
   return box;
 }
 
@@ -303,6 +306,7 @@ async function settingsExtras(box) {
   av.append(el('b', 'tipos-hd', 'O que avisar'), tp, el('p', 'small', 'O mesmo aviso da mesma conta não se repete por 15 min.'));
   box.append(av);
 
+  box.append(streamSection(d));
   // Painel Wi-Fi
   const pn = el('div', 'card list xsec');
   pn.append(el('h3', null, '📶 Painel no celular (Wi-Fi de casa)'), el('p', 'sub', 'Veja as contas ao vivo no navegador do celular: nível, XP/h, ouro/h, horas e se alguma está parada. Só leitura, com código de acesso, e só no mesmo Wi-Fi.'));
@@ -409,4 +413,127 @@ async function atualizarExt(e) {
   const p = await call('poke:ext:previewUpdate', e.id);
   if (!p.ok) { toast(`⚠ ${p.error}`); return; }
   confirmarExt(p, `Atualizar ${e.name}`);
+}
+
+// ---------- 🧪 Laboratório de hunts ----------
+// A pessoa troca de hunt no jogo quando quiser; o app mede cada uma com o placar do próprio jogo.
+let labTimer = null;
+function labCard() {
+  const L = S.diario && S.diario.lab;
+  if (!L || L.fim) return null;
+  const c = el('div', 'card night lab on');
+  const t = el('div', 'nt');
+  t.append(el('b', null, `🧪 Laboratório medindo ${L.nick}`), el('span', null, `${L.atual ? `Agora: ${L.atual}` : 'Esperando a hunt'} · ${L.lista.length} hunt(s) medida(s) · desde ${hhmmOf(L.inicio)}`));
+  c.append(t, button('Ver resultados', 'primary', abrirLab));
+  return c;
+}
+async function abrirLab() {
+  await refreshDiario();
+  const L = S.diario && S.diario.lab;
+  clearInterval(labTimer);
+  if (!L) return labNovo();
+  if (L.fim) return labVeredito(L);
+  labAoVivo();
+  labTimer = setInterval(async () => { if ($('#modal').hidden || !$('#lab-live')) { clearInterval(labTimer); return; } await refreshDiario(); const x = S.diario.lab; if (x && !x.fim) labAoVivo(); }, 10000);
+}
+function labNovo() {
+  const accs = (S.poke ? S.poke.accounts : []).filter((a) => a.isPoke && a.info && a.info.logged);
+  const sel = el('select');
+  for (const a of accs) { const o = el('option', null, a.info.nick && a.info.nick !== '—' ? a.info.nick : a.name); o.value = a.id; sel.append(o); }
+  const err = el('p', 'warn-google'); err.hidden = true;
+  const passos = el('ol', 'steps');
+  for (const s of ['Escolha a conta e clique em "Começar".', 'No jogo, cace na primeira hunt que quer testar.', 'Quando quiser, troque para a próxima hunt (pode ser mais de duas). O app percebe a troca sozinho.', '10 min em cada hunt já dá um resultado confiável. Depois clique em "Ver o veredito".']) passos.append(el('li', null, s));
+  openModal(el('h3', null, '🧪 Laboratório de hunts'), el('p', null, 'Compare hunts medindo de verdade: XP/h, ouro/h, abates, capturas e shinys, com o placar do próprio jogo.'), passos,
+    accs.length ? sel : el('p', 'warn-google', 'Nenhuma conta logada agora.'), err,
+    el('p', 'small', 'O app só mede: quem troca de hunt é você. Não mexa no pokémon em campo durante o teste, senão a comparação fica injusta.'),
+    actionsRow(button('Cancelar', null, closeModal), accs.length ? button('Começar', 'primary', async () => {
+      const r = await call('app:diario:lab:start', sel.value);
+      if (r.error) { err.textContent = r.error; err.hidden = false; return; }
+      S.diario = r; toast('Laboratório ligado. Troque de hunt no jogo quando quiser.'); abrirLab();
+    }) : el('span')));
+}
+function labTabela(L) {
+  const t = el('div', 'lab-tab');
+  const hd = el('div', 'lab-row hd'); for (const h of ['Hunt', 'Medido', 'XP/h', 'Ouro/h', 'Abates/h', '✨']) hd.append(el('span', null, h)); t.append(hd);
+  for (const x of L.lista) {
+    const r = el('div', `lab-row${x.nome === L.atual && !L.fim ? ' medindo' : ''}`);
+    const n = el('span', 'n'); n.append(el('b', null, x.nome), el('i', null, [x.nome === L.atual && !L.fim ? '● medindo agora' : null, x.risco, x.pronto ? null : 'precisa de 10 min'].filter(Boolean).join(' · ')));
+    r.append(n, el('span', null, hm(x.ms)), el('span', null, bigN(x.xpH)), el('span', 'gold', bigN(x.goldH)), el('span', null, fmt(Math.round(x.abH))), el('span', null, `${x.shV}/${x.shC}`));
+    t.append(r);
+  }
+  if (!L.lista.length) t.append(el('div', 'mempty', 'Esperando o placar da primeira hunt (uns 30 s).'));
+  return t;
+}
+function labAoVivo() {
+  const L = S.diario.lab;
+  const box = el('div'); box.id = 'lab-live';
+  box.append(labTabela(L));
+  openModal(el('h3', null, `🧪 Laboratório · ${L.nick}`), el('p', null, `Medindo desde ${hhmmOf(L.inicio)}. Troque de hunt no jogo quando quiser: o app separa sozinho.`), box,
+    actionsRow(button('Cancelar teste', 'ghost', async () => { S.diario = await call('app:diario:lab:clear'); closeModal(); renderHome(); }), button('Fechar (continua medindo)', null, closeModal),
+      button('Ver o veredito', 'primary', async () => { S.diario = await call('app:diario:lab:end'); labVeredito(S.diario.lab); })));
+}
+function labVeredito(L) {
+  clearInterval(labTimer);
+  const v = L.veredito;
+  const nodes = [el('h3', null, `🧪 Veredito · ${L.nick}`)];
+  if (v) {
+    const g = el('div', 'rel-grid two');
+    const st = (ico, rot, nome, val, mais, cls) => { const d = el('div', `rs ${cls || ''}`); d.append(el('span', null, `${ico} ${rot}`), el('b', null, nome), el('span', null, `${val}${mais ? ` · +${mais}% que a pior` : ''}`)); return d; };
+    g.append(st('⚡', 'Quer mais XP', v.xp.nome, `${bigN(v.xp.xpH)} XP/h`, v.xp.mais), st('💰', 'Quer mais ouro', v.ouro.nome, `${bigN(v.ouro.goldH)} ouro/h`, v.ouro.mais, 'gold'));
+    nodes.push(g);
+  } else nodes.push(el('p', 'warn-google', 'Para o veredito, meça pelo menos 2 hunts com 10 min cada. A tabela abaixo mostra o que deu até agora.'));
+  nodes.push(labTabela(L), el('p', 'small', 'Ouro bruto, sem descontar as poções. A marca de poção vem da mesma conta da sugestão de hunt.'));
+  const img = () => desenharLab(L);
+  nodes.push(actionsRow(button('Novo teste', 'ghost', async () => { S.diario = await call('app:diario:lab:clear'); labNovo(); }),
+    button('📋 Copiar imagem', null, async () => { if (await call('app:image:copy', img())) toast('Imagem copiada. Cole no Discord (Ctrl+V).'); }), button('💾 Salvar', null, () => call('app:image:save', img(), `laboratorio-${L.nick}`)), button('Fechar', 'primary', () => { closeModal(); renderHome(); })));
+  openModal(...nodes);
+}
+function desenharLab(L) {
+  const T = tela(1080, 1080);
+  const v = L.veredito;
+  T.txt('🧪 Laboratório de hunts', 70, 130, 60, '#eef0f7', 800);
+  T.txt(`${L.nick} · medido de verdade com o Idleterino`, 72, 185, 30, '#a970ff', 700);
+  if (v) {
+    T.caixa(70, 240, 455, 210, v.xp.nome.slice(0, 18), `⚡ mais XP · ${bigN(v.xp.xpH)}/h`);
+    T.caixa(555, 240, 455, 210, v.ouro.nome.slice(0, 18), `💰 mais ouro · ${bigN(v.ouro.goldH)}/h`, '#ffcf4a');
+  }
+  let y = v ? 540 : 260;
+  T.txt('Hunt', 72, y, 26, '#8a90a6', 700); T.txt('tempo', 560, y, 26, '#8a90a6', 700, 'right'); T.txt('XP/h', 770, y, 26, '#8a90a6', 700, 'right'); T.txt('ouro/h', 1010, y, 26, '#8a90a6', 700, 'right');
+  y += 52;
+  for (const x of L.lista.slice(0, 7)) {
+    T.txt(x.nome.slice(0, 22), 72, y, 30, '#eef0f7', 700); T.txt(hm(x.ms), 560, y, 28, '#8a90a6', 600, 'right'); T.txt(bigN(x.xpH), 770, y, 30, '#eef0f7', 800, 'right'); T.txt(bigN(x.goldH), 1010, y, 30, '#ffcf4a', 800, 'right');
+    y += 54;
+  }
+  T.rodape('Idleterino · PokeIdle, Twitch e Kick num app só');
+  return T.c.toDataURL('image/png');
+}
+
+// ---------- 📺 Modo Streamer (Ajustes) ----------
+function streamSection(d) {
+  const sec = el('div', 'card list xsec'); sec.id = 'sec-stream';
+  sec.append(el('h3', null, '📺 Modo Streamer (overlay para o OBS)'), el('p', 'sub', 'Mostre na live o XP e o ouro subindo, o nível e os shinys, com animação quando aparece shiny ou sobe de nível. Funciona só neste PC.'));
+  const s = d.stream;
+  sec.append(rowOpt('Overlay ligado', 'Liga uma página local que o OBS lê. Ninguém de fora acessa.', sw(s.on, async (v) => { S.diario = await call('app:diario:stream', { on: v }); renderSettings(); })));
+  if (s.on && s.base) {
+    if (s.erro) sec.append(el('p', 'warn-google', `⚠ ${s.erro}`));
+    let estilo = 'card', contas = 'principal';
+    try { estilo = localStorage.getItem('streamEstilo') || 'card'; contas = localStorage.getItem('streamContas') || 'principal'; } catch {}
+    const url = () => `${s.base}&estilo=${estilo}&contas=${contas}`;
+    const e1 = el('select'); for (const [v, l] of [['card', 'Cartão'], ['barra', 'Barra fina']]) { const o = el('option', null, l); o.value = v; e1.append(o); } e1.value = estilo;
+    const e2 = el('select'); for (const [v, l] of [['principal', 'Só a principal'], ['todas', 'Todas as contas']]) { const o = el('option', null, l); o.value = v; e2.append(o); } e2.value = contas;
+    const code = el('code', 'url', url());
+    e1.onchange = () => { estilo = e1.value; try { localStorage.setItem('streamEstilo', estilo); } catch {} code.textContent = url(); };
+    e2.onchange = () => { contas = e2.value; try { localStorage.setItem('streamContas', contas); } catch {} code.textContent = url(); };
+    const opts = el('div', 'inline wide'); opts.append(el('span', 'sub', 'Estilo'), e1, el('span', 'sub', 'Contas'), e2);
+    sec.append(opts, code);
+    const passos = el('ol', 'steps');
+    for (const p of ['Copie o link.', 'No OBS: Fontes > + > Navegador (Browser) > cole o link em URL.', 'Largura 900 e altura 400 (Cartão) ou 1400 e 120 (Barra). O fundo já é transparente.']) passos.append(el('li', null, p));
+    sec.append(passos);
+    sec.append(actionsRow(button('📋 Copiar link', 'primary', () => { navigator.clipboard.writeText(url()); toast('Link do overlay copiado. Cole no OBS.'); }),
+      button('Ver como fica', null, () => call('app:stream:preview', url())),
+      button('↺ Zerar contagem da live', null, async () => { S.diario = await call('app:diario:stream', { zerar: true }); toast('Contagem da live zerada.'); renderSettings(); }),
+      button('Trocar o código', 'ghost', async () => { S.diario = await call('app:diario:stream', { novoCodigo: true }); toast('Código trocado: atualize o link no OBS.'); renderSettings(); })));
+    if (s.liveInicio) sec.append(el('p', 'small', `Contando a live desde ${new Date(s.liveInicio).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}. Zere no começo de cada live.`));
+  }
+  return sec;
 }

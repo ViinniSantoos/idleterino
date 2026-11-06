@@ -100,11 +100,46 @@ function isHiddenWatcher(webContents) {
 
 const ALLOWED_PERMISSIONS = new Set(['fullscreen', 'clipboard-sanitized-write']);
 
+// Páginas de login do Google (inclusive o domínio do país, ex.: accounts.google.com.br).
+const GOOGLE_LOGIN = /(^|\.)(google\.com|google\.[a-z.]{2,6}|youtube\.com|gstatic\.com|googleusercontent\.com)$/;
+const isGoogleLogin = (url) => { try { return GOOGLE_LOGIN.test(new URL(url).hostname); } catch { return false; } };
+// A janela (ou o pop-up de login) troca de identificação ao entrar e ao sair do Google. Trocar no meio
+// de uma navegação cancela: então segura, troca e abre o mesmo endereço já com a identificação certa.
+function followGoogleUA(wc, plain) {
+  if (wc.__idleGoogleUA) return;
+  wc.__idleGoogleUA = true;
+  const fix = (url) => {
+    if (wc.isDestroyed() || !isGoogleLogin(url) || wc.getUserAgent() === ctx.originalUA) return false;
+    wc.setUserAgent(ctx.originalUA);
+    setImmediate(() => { if (!wc.isDestroyed()) wc.loadURL(url); });
+    return true;
+  };
+  wc.on('will-navigate', (e, url) => { if (isGoogleLogin(url) && wc.getUserAgent() !== ctx.originalUA) { e.preventDefault(); fix(url); } });
+  // Pop-up aberto direto no Google, ou redirecionado da Twitch para o Google.
+  wc.on('did-start-navigation', (d) => { if (d.isMainFrame && !d.isSameDocument) fix(d.url); });
+  wc.on('did-redirect-navigation', (d) => { if (d.isMainFrame) fix(d.url); });
+  // Voltou do Google para a Twitch: as próximas cargas vão como Chrome comum de novo.
+  wc.on('did-navigate', (_e, url) => { if (!isGoogleLogin(url) && !wc.isDestroyed() && wc.getUserAgent() !== plain) wc.setUserAgent(plain); });
+}
+
 function setupSession() {
   const ses = session.fromPartition(PARTITION);
   ses.setSpellCheckerEnabled(false);
   ses.setUserAgent(app.userAgentFallback);
   ses.setPermissionRequestHandler((_wc, permission, cb) => cb(ALLOWED_PERMISSIONS.has(permission)));
+  // Login com Google (Gmail): o Google recusa ("Esse navegador ou app pode não ser seguro") a
+  // identificação de Chrome comum que a Twitch usa aqui, e aceita a original do app — a mesma solução
+  // das contas do PokeIdle e da Kick. Só as páginas do Google vão com ela; a Twitch continua igual.
+  if (ctx.originalUA) {
+    const plain = app.userAgentFallback;
+    ses.webRequest.onBeforeSendHeaders((d, cb) => {
+      const h = d.requestHeaders;
+      const key = Object.keys(h).find((k) => k.toLowerCase() === 'user-agent') || 'User-Agent';
+      h[key] = isGoogleLogin(d.url) ? ctx.originalUA : plain;
+      cb({ requestHeaders: h });
+    });
+    app.on('web-contents-created', (_e, wc) => { if (wc.session === ses) followGoogleUA(wc, plain); });
+  }
   ses.webRequest.onBeforeRequest({ urls: ['*://*/*'] }, (details, cb) => {
     const hidden = isHiddenWatcher(details.webContents);
     cb({ cancel: BLOCKED_HOSTS.some((h) => details.url.includes(h)) || (hidden && (HIDDEN_SKIP.has(details.resourceType) || (WATCH_MODE !== 'page' && HIDDEN_BLOCK.some((h) => details.url.startsWith(h))))) });

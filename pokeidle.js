@@ -694,6 +694,7 @@ module.exports = function createPokeIdle(ctx) {
     infoOf: (id) => info.get(id) || null,
     setModes: (map) => { for (const [id, m] of Object.entries(map || {})) { const a = account(id); if (a && MODES[m] && a.mode !== m) { a.mode = m; applyMode(id); } } saveConfig(); send('status', snapshot()); },
     getOptimizeEvery: () => config.optimizeEvery || 0,
+    mainId: () => mainAccId(),
     setOptimizeEvery: (min) => { config.optimizeEvery = [0, 30, 60, 120, 300].includes(Number(min)) ? Number(min) : 0; saveConfig(); send('status', snapshot()); },
   };
 };

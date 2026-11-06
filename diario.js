@@ -9,6 +9,10 @@
 // - Modo noite ("Vou dormir"): ULTRA em todas e Otimizar a cada 1 h; de manhã, o relatório da noite.
 //   Ao acordar, volta tudo como estava. O app não troca hunt nem joga: só sugere.
 // - Painel no celular (Wi-Fi de casa): página só de leitura, com código de acesso. Desligado de fábrica.
+// - Laboratório: a pessoa troca de hunt no jogo quando quiser e o app mede cada uma (XP/h, ouro/h,
+//   abates, capturas, shinys) com o placar do próprio jogo. No fim, o veredito. O app não troca nada.
+// - Modo Streamer: uma página para a "Fonte de navegador" do OBS, só neste PC (127.0.0.1), com o XP e
+//   o ouro da live subindo, nível, shinys e animação de shiny e de nível novo.
 const { app, ipcMain, net } = require('electron');
 const path = require('path');
 const fs = require('fs');
@@ -42,12 +46,14 @@ module.exports = function createDiario(ctx, poke) {
     avisos: { desktop: true, ntfyOn: false, ntfyTopic: null, discordOn: false, discordUrl: '', tipos: { parada: true, caiu: true, travou: true, shiny: true, mercado: true, bomdia: true } },
     vigia: { on: true, paradaMin: 5 },
     painel: { on: false, port: 47800, key: null },
+    lab: null,
+    stream: { on: false, port: 47801, key: null, live: null },
   };
   let D = JSON.parse(JSON.stringify(DEF));
   function load() {
     try {
       const j = JSON.parse(fs.readFileSync(file(), 'utf8'));
-      D = { ...DEF, ...j, avisos: { ...DEF.avisos, ...(j.avisos || {}), tipos: { ...DEF.avisos.tipos, ...((j.avisos || {}).tipos || {}) } }, vigia: { ...DEF.vigia, ...(j.vigia || {}) }, painel: { ...DEF.painel, ...(j.painel || {}) } };
+      D = { ...DEF, ...j, avisos: { ...DEF.avisos, ...(j.avisos || {}), tipos: { ...DEF.avisos.tipos, ...((j.avisos || {}).tipos || {}) } }, vigia: { ...DEF.vigia, ...(j.vigia || {}) }, painel: { ...DEF.painel, ...(j.painel || {}) }, stream: { ...DEF.stream, ...(j.stream || {}) } };
     } catch {}
   }
   let dirty = false;
@@ -123,12 +129,14 @@ module.exports = function createDiario(ctx, poke) {
       if (na) { if (!na.lvl0) na.lvl0 = lv; na.lvl1 = Math.max(na.lvl1 || 0, lv); }
     }
     // Tempo logada
+    // Só o nome da hunt ("Brute Rhydon · nível 150" e "Brute Rhydon" são a mesma).
+    const hunt = r.where && r.where !== '—' ? String(r.where).split(' · ')[0].trim() : null;
+    let dtLogada = 0;
     if (logged) {
       if (st.logged && st.at && now - st.at < READ_GAP) {
         const dt = now - st.at;
+        dtLogada = dt;
         day.ms += dt; if (na) na.ms += dt;
-        // Só o nome da hunt ("Brute Rhydon · nível 150" e "Brute Rhydon" são a mesma).
-        const hunt = r.where && r.where !== '—' ? String(r.where).split(' · ')[0].trim() : null;
         if (hunt) day.hunts[hunt] = (day.hunts[hunt] || 0) + dt;
       }
       if (!st.loggedSince || !st.logged) st.loggedSince = now;
@@ -143,9 +151,12 @@ module.exports = function createDiario(ctx, poke) {
         d[k] = v > 0 ? v : 0;
       }
       addTo(day, d); addTo(na, d);
+      labAdd(id, hunt, dtLogada, d);
+      liveAdd(id, nick, lv, dtLogada, d);
       if (d.shC > 0) alerta('shiny', `${nick} capturou ${d.shC > 1 ? `${d.shC} shinys` : 'um shiny'}!`, 'Abra o jogo para ver qual foi.', id);
       else if (d.shV > 0) alerta('shiny', `${nick} viu um shiny!`, 'Um shiny apareceu na hunt.', id);
     }
+    else if (dtLogada) { labAdd(id, hunt, dtLogada, null); liveAdd(id, nick, lv, dtLogada, null); }
     if (s) st.sess = s;
     // Vigia: progresso = nível + XP + placar. Sem mudar há X min estando logada = conta parada.
     const prog = `${r.level}|${r.xp}|${s ? s.xpTreinador : ''}`;
@@ -177,6 +188,116 @@ module.exports = function createDiario(ctx, poke) {
       if (D.vigia.on) alerta('travou', `${nick} ${motivo === 'travou' ? 'travou' : 'ficou presa no login'}`, 'O app reabriu a conta sozinho. Já deve estar caçando de novo.', id);
     }
   }
+
+  // ---------- Laboratório de hunts ----------
+  const VAZIO = () => ({ ms: 0, xp: 0, gold: 0, ab: 0, cap: 0, shV: 0, shC: 0 });
+  function labAdd(id, hunt, dt, d) {
+    const L = D.lab;
+    if (!L || L.accId !== id || L.fim) return;
+    if (hunt) L.atual = hunt;
+    const h = hunt || L.atual;
+    // Só conta o que tem tempo junto: leitura depois de um buraco (conta reaberta, app fechado)
+    // traria o XP sem o tempo e inflaria o XP/h.
+    if (!h || !(dt > 0)) return;
+    const seg = L.hunts[h] || (L.hunts[h] = VAZIO());
+    seg.ms += dt || 0;
+    if (d) addTo(seg, { ...d, ms: 0 });
+    touch();
+  }
+  // Risco de poção de cada hunt (a mesma conta da sugestão de hunt), quando o jogo já mandou.
+  function riscoDe(info, nome) {
+    const hr = info && info.huntRank; if (!hr) return null;
+    const all = [...(hr.top || []), ...(hr.topOuro || []), ...(hr.atualEst ? [hr.atualEst] : [])];
+    const h = all.find((x) => x && x.nome === nome);
+    return h && h.risco != null ? (h.risco >= 2 ? 'gasta muita poção' : h.risco >= 1.3 ? 'gasta poção' : 'pouca poção') : null;
+  }
+  function labState() {
+    const L = D.lab; if (!L) return null;
+    const info = poke.infoOf(L.accId) || {};
+    const lista = Object.entries(L.hunts).map(([nome, s]) => {
+      const h = s.ms / 3600000;
+      return { nome, ms: s.ms, xpH: h > 0 ? s.xp / h : 0, goldH: h > 0 ? s.gold / h : 0, abH: h > 0 ? s.ab / h : 0, cap: s.cap, shV: s.shV, shC: s.shC, pronto: s.ms >= 10 * 60 * 1000, risco: riscoDe(info, nome) };
+    }).sort((a, b) => b.xpH - a.xpH);
+    const prontas = lista.filter((x) => x.pronto);
+    const melhorXp = prontas.length >= 2 ? [...prontas].sort((a, b) => b.xpH - a.xpH)[0] : null;
+    const melhorOuro = prontas.length >= 2 ? [...prontas].sort((a, b) => b.goldH - a.goldH)[0] : null;
+    const pior = (campo, m) => (m ? Math.min(...prontas.filter((x) => x !== m).map((x) => x[campo])) : 0);
+    return { accId: L.accId, nick: L.nick, inicio: L.inicio, fim: L.fim || null, atual: L.atual || null, lista,
+      veredito: melhorXp ? { xp: { nome: melhorXp.nome, xpH: melhorXp.xpH, mais: pior('xpH', melhorXp) > 0 ? Math.round((melhorXp.xpH / pior('xpH', melhorXp) - 1) * 100) : null },
+        ouro: { nome: melhorOuro.nome, goldH: melhorOuro.goldH, mais: pior('goldH', melhorOuro) > 0 ? Math.round((melhorOuro.goldH / pior('goldH', melhorOuro) - 1) * 100) : null } } : null };
+  }
+
+  // ---------- Modo Streamer: a "live" soma desde que a pessoa liga ou zera ----------
+  function liveAdd(id, nick, lv, dt, d) {
+    const L = D.stream.live;
+    if (!D.stream.on || !L) return;
+    const c = L.contas[id] || (L.contas[id] = { nick, lvl0: lv || 0, lvl: lv || 0, ...VAZIO() });
+    c.nick = nick;
+    c.ms += dt || 0;
+    if (d) addTo(c, { ...d, ms: 0 });
+    if (lv && c.lvl && lv > c.lvl) L.eventos.unshift({ id: ++L.seq, t: Date.now(), tipo: 'nivel', nick, texto: `NÍVEL ${lv}!` });
+    if (lv) { if (!c.lvl0) c.lvl0 = lv; c.lvl = Math.max(c.lvl || 0, lv); }
+    if (d && d.shC > 0) L.eventos.unshift({ id: ++L.seq, t: Date.now(), tipo: 'shiny', nick, texto: 'SHINY CAPTURADO!' });
+    else if (d && d.shV > 0) L.eventos.unshift({ id: ++L.seq, t: Date.now(), tipo: 'shiny', nick, texto: 'SHINY À VISTA!' });
+    L.eventos = L.eventos.slice(0, 20);
+  }
+  const novaLive = () => ({ inicio: Date.now(), contas: {}, eventos: [], seq: 0 });
+  function overlayDados() {
+    const L = D.stream.live || novaLive();
+    const accs = poke.accounts().filter((a) => a.isPoke);
+    const main = poke.mainId ? poke.mainId() : null;
+    return {
+      at: Date.now(), inicio: L.inicio, eventos: L.eventos.slice(0, 5),
+      contas: accs.map((a) => {
+        const i = poke.infoOf(a.id) || {}; const c = L.contas[a.id] || VAZIO(); const s = i.sess;
+        const rate = (x) => (s && s.ms > 0 ? Math.round((x * 3600000) / s.ms) : 0);
+        const xp = /([\d.]+)\s*\/\s*([\d.]+)/.exec(i.xp || '');
+        const dentro = xp ? num(xp[1]) : 0; const faixa = xp ? num(xp[2]) : 0;
+        return { main: a.id === main, nick: i.logged && i.nick && i.nick !== '—' ? i.nick : a.name, logged: !!i.logged, nivel: num(i.level), pct: faixa ? Math.min(100, (dentro / faixa) * 100) : 0,
+          xpH: s ? rate(s.xpTreinador) : 0, goldH: s ? rate(s.gold) : 0, live: { ms: c.ms, xp: c.xp, gold: c.gold, ab: c.ab, cap: c.cap, shV: c.shV, shC: c.shC, niveis: Math.max(0, (c.lvl || 0) - (c.lvl0 || 0)) } };
+      }),
+    };
+  }
+  const OVERLAY = `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Idleterino · overlay</title>
+<style>html,body{margin:0;background:transparent;font-family:"Segoe UI",system-ui,sans-serif;color:#fff;overflow:hidden}
+.w{display:flex;flex-direction:column;gap:10px;padding:12px}.c{background:rgba(10,11,18,.78);border:1px solid rgba(255,255,255,.14);border-radius:16px;padding:12px 16px;box-shadow:0 8px 24px rgba(0,0,0,.35);min-width:300px}
+.t{display:flex;align-items:baseline;gap:10px}.t b{font-size:22px}.t span{color:#c9b8ff;font-weight:700}.bar{height:8px;border-radius:8px;background:rgba(255,255,255,.12);overflow:hidden;margin:8px 0}.bar i{display:block;height:100%;background:linear-gradient(90deg,#ff4d6d,#a970ff,#53fc18);transition:width 1s}
+.g{display:flex;gap:16px;flex-wrap:wrap}.g div{display:flex;flex-direction:column}.g b{font-size:20px}.g small{color:#b8bdd0;font-size:12px;font-weight:600}.gold{color:#ffd166}.sh{color:#ffe28a}
+.barra .c{display:flex;align-items:center;gap:18px}.barra .bar{width:160px;margin:0}.barra .g{gap:14px}
+.ev{position:fixed;left:50%;top:40%;transform:translate(-50%,-50%) scale(.6);opacity:0;font-size:56px;font-weight:900;text-align:center;text-shadow:0 4px 24px rgba(0,0,0,.6);transition:all .5s cubic-bezier(.2,1.6,.4,1);pointer-events:none;white-space:nowrap}
+.ev.on{opacity:1;transform:translate(-50%,-50%) scale(1)}.ev small{display:block;font-size:24px;font-weight:700;color:#fff}.ev.shiny{color:#ffe28a}.ev.nivel{color:#9dffb0}</style></head>
+<body><div class="w" id="w"></div><div class="ev" id="ev"></div>
+<script>const q=new URLSearchParams(location.search);const k=q.get('k'),estilo=q.get('estilo')||'card',quem=q.get('contas')||'principal';document.body.classList.add(estilo);
+const big=n=>{n=+n||0;const a=Math.abs(n);return a>=1e9?(n/1e9).toFixed(1).replace('.',',')+'B':a>=1e6?(n/1e6).toFixed(1).replace('.',',')+'M':a>=1e4?Math.round(n/1e3)+'k':String(Math.round(n))};const hm=ms=>{const m=Math.round(ms/6e4);return Math.floor(m/60)+'h'+String(m%60).padStart(2,'0')};
+const E=(t,c,x)=>{const e=document.createElement(t);if(c)e.className=c;if(x!=null)e.textContent=x;return e};let visto=null;const fila=[];let mostrando=false;
+function anim(){if(mostrando||!fila.length)return;mostrando=true;const e=fila.shift();const ev=document.getElementById('ev');ev.className='ev '+e.tipo;ev.replaceChildren((e.tipo==='shiny'?'✨ ':'⬆ ')+e.texto,E('small',null,e.nick));requestAnimationFrame(()=>ev.classList.add('on'));setTimeout(()=>{ev.classList.remove('on');setTimeout(()=>{mostrando=false;anim()},600)},5000)}
+async function go(){try{const d=await (await fetch('/dados?k='+encodeURIComponent(k))).json();const w=document.getElementById('w');w.replaceChildren();
+let cs=d.contas.filter(c=>c.logged);if(quem==='principal')cs=cs.filter(c=>c.main).slice(0,1);
+for(const c of cs){const b=E('div','c');const t=E('div','t');t.append(E('b',null,c.nick),E('span',null,'Nv '+c.nivel+(c.live.niveis?'  (+'+c.live.niveis+')':'')));const bar=E('div','bar');const f=E('i');f.style.width=c.pct+'%';bar.append(f);
+const g=E('div','g');const st=(v,l,cl)=>{const x=E('div',cl);x.append(E('b',null,v),E('small',null,l));return x};g.append(st('+'+big(c.live.xp),'XP na live'),st(big(c.xpH),'XP/h'),st('+'+big(c.live.gold),'ouro na live','gold'),st((c.live.shV||0)+' / '+(c.live.shC||0),'✨ vistos / capt.','sh'),st(hm(c.live.ms),'farmando'));
+b.append(t,bar,g);w.append(b)}
+if(visto===null)visto=d.eventos.length?d.eventos[0].id:0;for(const e of [...d.eventos].reverse())if(e.id>visto){fila.push(e);visto=e.id}anim()}catch(e){}}
+go();setInterval(go,3000)</script></body></html>`;
+  let sserver = null; let sErr = null;
+  function startStream() {
+    stopStream();
+    if (!D.stream.key) { D.stream.key = randKey(20); }
+    if (!D.stream.live) D.stream.live = novaLive();
+    save();
+    sErr = null;
+    sserver = http.createServer((req, res) => {
+      const u = new URL(req.url, 'http://x');
+      if (!sameKey(u.searchParams.get('k'), D.stream.key) || req.method !== 'GET') { res.writeHead(403); return res.end('Acesso negado'); }
+      res.setHeader('Cache-Control', 'no-store');
+      if (u.pathname === '/dados') { res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' }); return res.end(JSON.stringify(overlayDados())); }
+      if (u.pathname === '/overlay') { res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'" }); return res.end(OVERLAY); }
+      res.writeHead(404); res.end();
+    });
+    sserver.on('error', (e) => { sErr = e.code === 'EADDRINUSE' ? `A porta ${D.stream.port} está ocupada por outro programa.` : String(e.message || e); sserver = null; ctx.send('app:diario', state()); });
+    // Só neste PC: o OBS roda no mesmo computador. Ninguém da rede acessa (e o firewall nem pergunta).
+    sserver.listen(D.stream.port, '127.0.0.1');
+  }
+  function stopStream() { if (sserver) { try { sserver.close(); } catch {} sserver = null; } }
 
   // Horas de cada conta (vão para a lista de contas e para o painel).
   function horasOf(id) {
@@ -296,6 +417,8 @@ async function go(){try{const d=await (await fetch('/api?k='+encodeURIComponent(
       painel: { on: D.painel.on, rodando: !!server, erro: serverErr, url: D.painel.on ? painelUrl : null, qr: D.painel.on && painelUrl ? qr(painelUrl) : null, semRede: !ip },
       noite: D.noite ? { inicio: D.noite.inicio, prev: D.noite.prev } : null,
       ultimoRelatorio: D.relatorios[0] || null,
+      lab: labState(),
+      stream: { on: D.stream.on, rodando: !!sserver, erro: sErr, base: D.stream.on && D.stream.key ? `http://127.0.0.1:${D.stream.port}/overlay?k=${D.stream.key}` : null, liveInicio: D.stream.live ? D.stream.live.inicio : null },
       eventos: D.eventos.slice(0, 30),
     };
   }
@@ -338,6 +461,24 @@ async function go(){try{const d=await (await fetch('/api?k='+encodeURIComponent(
     save();
     return new Promise((res) => setTimeout(() => res(state()), 300));
   });
+  ipcMain.handle('app:diario:lab:start', (_e, accId) => {
+    const a = poke.accounts().find((x) => x.id === accId && x.isPoke);
+    if (!a) return { ...state(), error: 'Escolha uma conta do PokeIdle.' };
+    const i = poke.infoOf(a.id) || {};
+    if (!i.logged) return { ...state(), error: 'Essa conta não está logada.' };
+    const h = i.where && i.where !== '—' ? String(i.where).split(' · ')[0].trim() : (i.huntRank && i.huntRank.atualEst && i.huntRank.atualEst.nome) || null;
+    D.lab = { accId: a.id, nick: i.nick && i.nick !== '—' ? i.nick : a.name, inicio: Date.now(), atual: h, hunts: {} };
+    save(); return state();
+  });
+  ipcMain.handle('app:diario:lab:end', () => { if (D.lab && !D.lab.fim) D.lab.fim = Date.now(); save(); return state(); });
+  ipcMain.handle('app:diario:lab:clear', () => { D.lab = null; save(); return state(); });
+  ipcMain.handle('app:diario:stream', (_e, patch) => {
+    if (patch && 'on' in patch) { D.stream.on = !!patch.on; if (D.stream.on) startStream(); else stopStream(); }
+    if (patch && patch.zerar) { D.stream.live = novaLive(); }
+    if (patch && patch.novoCodigo) { D.stream.key = randKey(20); if (D.stream.on) startStream(); }
+    save();
+    return new Promise((res) => setTimeout(() => res(state()), 300));
+  });
   ipcMain.handle('app:diario:noite:check', () => checklist());
   ipcMain.handle('app:diario:noite:start', () => startNight());
   ipcMain.handle('app:diario:noite:end', () => ({ rel: endNight(false), state: state() }));
@@ -349,8 +490,9 @@ async function go(){try{const d=await (await fetch('/api?k='+encodeURIComponent(
     const lim = dayKey(Date.now() - DAY_KEEP * 86400000);
     for (const c of Object.values(D.contas)) for (const k of Object.keys(c.dias)) if (k < lim) delete c.dias[k];
     if (D.painel.on) startServer();
+    if (D.stream.on) startStream();
     // Modo noite esquecido ligado por mais de 16 h: desliga e manda o relatório.
     setInterval(() => { if (D.noite && Date.now() - D.noite.inicio > 16 * 3600 * 1000) { const rel = endNight(true); if (rel) ctx.send('app:bomdia', rel); } }, 10 * 60 * 1000);
   }
-  return { start, onRead, onEvent, horasOf, alerta, onWake, save, stopServer };
+  return { start, onRead, onEvent, horasOf, alerta, onWake, save, stopServer: () => { stopServer(); stopStream(); } };
 };
