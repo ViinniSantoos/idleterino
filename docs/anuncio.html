@@ -9,7 +9,7 @@
   <link rel="icon" href="icon.png">
   <link rel="stylesheet" href="style.css">
   <style>
-    .ponte { width: min(520px, 100%); margin: 9vh auto 40px; padding: 0 16px; text-align: center; }
+    .ponte { width: min(520px, 100%); margin: 8vh auto 40px; padding: 0 16px; text-align: center; }
     .ponte .caixa { background: var(--s1); border: 1px solid var(--line); border-radius: 18px; padding: 28px 22px; }
     .ponte img.logo { margin: 0 auto 14px; border-radius: 14px; }
     .ponte h1 { font-size: 26px; margin: 0 0 6px; }
@@ -17,23 +17,33 @@
     .ponte .quem { color: var(--muted); font-size: 15px; margin: 0 0 18px; overflow-wrap: anywhere; }
     .ponte .cta { flex-direction: column; align-items: stretch; }
     .ponte .passo { color: var(--muted); font-size: 14px; margin: 18px 0 0; }
-    .ponte .ok { color: var(--ok); }
+    .dica { margin: 18px 0 0; padding: 14px 16px; border-radius: 12px; border: 1px solid rgba(169, 112, 255, .45); background: rgba(169, 112, 255, .1); text-align: left; font-size: 14.5px; }
+    .dica b { color: var(--text); }
+    .dica .caixinha { display: inline-block; width: 14px; height: 14px; border: 2px solid #c6a6ff; border-radius: 3px; vertical-align: -2px; margin-right: 4px; position: relative; }
+    .dica .caixinha::after { content: ""; position: absolute; left: 3px; top: 0; width: 4px; height: 8px; border: solid #c6a6ff; border-width: 0 2px 2px 0; transform: rotate(45deg); }
+    .feito { display: none; margin: 16px 0 0; padding: 12px 14px; border-radius: 12px; background: rgba(69, 227, 155, .12); border: 1px solid rgba(69, 227, 155, .4); color: var(--ok); font-weight: 700; }
+    .aberto .feito { display: block; }
   </style>
 </head>
 <body>
   <div class="glow" aria-hidden="true"></div>
   <main class="ponte">
-    <div class="caixa">
+    <div class="caixa" id="caixa">
       <img class="logo" src="icon.png" alt="" width="56" height="56">
-      <h1>Abrindo no Idleterino…</h1>
+      <h1 id="titulo">Abrindo no Idleterino…</h1>
       <p class="item" id="item" hidden></p>
       <p class="quem" id="quem" hidden></p>
-      <div class="cta">
-        <a class="btn primary" id="abrir" href="#">🏪 Abrir no Idleterino</a>
-        <a class="btn" href="https://pokeidle.io/app?modal=community">Abrir o Market no navegador</a>
+      <p class="feito">✓ Enviado para o Idleterino. Abriu? Pode fechar esta aba.</p>
+      <div class="dica some" id="dica">
+        Se o navegador perguntar, marque <span class="caixinha" aria-hidden="true"></span><b>Sempre permitir</b> e clique em <b>Abrir Idleterino</b>.
+        Assim, nos próximos cliques do #comércio o app abre direto, sem perguntar.
       </div>
-      <p class="passo" id="passo">Se o navegador perguntar, clique em <b>Abrir Idleterino</b>. O anúncio abre no Market do jogo, na sua conta logada; a compra é você quem confirma lá.</p>
-      <p class="passo">Ainda não tem o app? <a href="./">Baixe o Idleterino</a> (grátis, Windows e Linux).</p>
+      <div class="cta" style="margin-top:18px">
+        <a class="btn primary" id="abrir" href="#">🏪 Abrir no Idleterino</a>
+        <a class="btn some" href="https://pokeidle.io/app?modal=community">Abrir o Market no navegador</a>
+      </div>
+      <p class="passo">O anúncio abre no Market do jogo, na sua conta logada; a compra é você quem confirma lá.</p>
+      <p class="passo some">Ainda não tem o app? <a href="./">Baixe o Idleterino</a> (grátis, Windows e Linux).</p>
     </div>
   </main>
   <script>
@@ -46,13 +56,26 @@
       if (vend) { var qm = document.getElementById('quem'); qm.textContent = 'Vendedor: ' + vend; qm.hidden = false; }
       var bt = document.getElementById('abrir');
       if (!id) {
-        document.querySelector('h1').textContent = 'Link de anúncio inválido';
+        document.getElementById('titulo').textContent = 'Link de anúncio inválido';
         bt.hidden = true;
+        document.getElementById('dica').hidden = true;
         return;
       }
       var link = 'idleterino://anuncio/' + id;
       bt.href = link;
-      setTimeout(function () { location.href = link; }, 400);
+      // A aba perdeu o foco logo depois de mandar abrir: o Idleterino (ou a pergunta do navegador) veio
+      // para a frente. O navegador não conta qual dos dois, então a frase fica no "Abriu?".
+      var pediu = 0;
+      function abriu() {
+        if (!pediu || Date.now() - pediu > 60000) return;
+        document.getElementById('caixa').classList.add('aberto');
+        bt.textContent = '🏪 Abrir de novo';
+      }
+      window.addEventListener('blur', function () { setTimeout(abriu, 150); });
+      document.addEventListener('visibilitychange', function () { if (document.hidden) abriu(); });
+      function abrir() { pediu = Date.now(); location.href = link; }
+      bt.addEventListener('click', function (e) { e.preventDefault(); abrir(); });
+      abrir();
     })();
   </script>
 </body>
