@@ -202,11 +202,15 @@ contextBridge.executeInMainWorld({
     //    com o desconto do Speed (`cooldownGolpeComSpeed`);
     //  · AoE (disco): o golpe pega o bando inteiro (área 11×11) — o bando cai no tempo de um selvagem;
     //  · bicicleta: divide só a caminhada.
-    // Depois, o que a conta MEDIU (placar do jogo, 10+ min na hunt com este pokémon) acerta a escala das
+    //  · ritmo do mapa: andar até o próximo bando e esperar a onda custam um tempo por selvagem que o dano
+    //    não encurta (o jogo calibrou o mesmo ritmo em toda hunt). É ele que segura a hunt fácil: matar em
+    //    menos de 1 s não passa de ~1.000 abates/h.
+    // Depois, o que a conta MEDIU (placar do jogo, 10+ min na hunt com este pokémon) acerta o ritmo das
     // outras e substitui a estimativa da própria hunt. O resto é estimativa.
     const IV_SELVAGEM = 16;            // IV médio de selvagem (1–32)
     const HP_SELVAGEM_EXTRA = 1.33;    // Gible nv 1000: 72.000 de vida no campo contra 54.000 da conta crua (28/10/2026)
     const BANDO_PADRAO = 5;            // selvagens por bando enquanto o campo não mostrou nenhum
+    const RITMO_PADRAO_MS = 2400;      // ritmo do mapa por selvagem, a pé (o /hunt do jogo: ~900 abates/h matando em <1 s)
     const MEDIDO_MIN_MS = 10 * 60 * 1000;
     const VARIACAO_MEDIA = 0.925;      // o dano de cada golpe sai entre 0,85 e 1,00
     const naHunt = (v, amp) => (v === 0 || v === 1 ? v : v > 1 ? 1 + (v - 1) * amp : v / amp);
@@ -344,7 +348,6 @@ contextBridge.executeInMainWorld({
       }
       const hpExtra = mediana(razoes) || HP_SELVAGEM_EXTRA;
 
-      const passo = (ha.MS_DESLOC_MS || 600) / (1 + vel);
       const out = [];
       for (const h of jogo.hunts) {
         const nivel = Number(h.nivel) || 0;
@@ -375,36 +378,38 @@ contextBridge.executeInMainWorld({
         const M = medido[h.slug] || null;
         const bando = act.aoe ? Math.min(porOnda, mediana((M && M.bando) || []) || BANDO_PADRAO) : 1;
         // Por selvagem: a luta (o bando inteiro de uma vez com AoE), a caminhada até o próximo alvo e a pausa da onda.
-        const msModelo = tAbate / bando + passo / bando + (ha.MS_ONDA || 2600) / porOnda;
+        const msLuta = tAbate / bando; // com AoE o bando inteiro cai no tempo de um selvagem
         let xp = 0, gold = 0;
         try { const r = ha.mediaPorKill(h, esp, 0); xp = r.xp; gold = r.gold; } catch {}
         const med = M && M.pk && M.pk[act.id];
         const golpe = Object.entries(golpeUso).sort((a, b) => b[1] - a[1])[0];
-        out.push({ slug: h.slug || null, nome: String(h.nome || h.name || h.slug || '?'), nivel, msModelo, xp, gold,
+        out.push({ slug: h.slug || null, nome: String(h.nome || h.name || h.slug || '?'), nivel, msLuta, xp, gold,
           medido: med && med.ms >= MEDIDO_MIN_MS && med.ab >= 20 ? med : null,
           seg: Math.round(tAbate / 100) / 10, bando: Math.round(bando * 10) / 10, golpe: golpe ? golpe[0] : null,
           risco: Math.round(risco * 100) / 100, eff: Math.round(effMed * 100) / 100, effH: Math.round(effH * 100) / 100, effMax });
       }
 
       // Escala: o que a conta mediu com este pokémon contra o que a conta previa nas mesmas hunts.
-      const k = mediana(out.filter((h) => h.medido).map((h) => (h.medido.ms / h.medido.ab) / h.msModelo)) || 1;
+      // Ritmo do mapa: o que sobra do tempo medido por selvagem depois da luta, sem a bicicleta.
+      const ritmoMedido = mediana(out.filter((h) => h.medido).map((h) => ((h.medido.ms / h.medido.ab) - h.msLuta) * (1 + vel)));
+      const ritmo = Math.min(8000, Math.max(500, ritmoMedido || RITMO_PADRAO_MS));
       for (const h of out) {
         const m = h.medido;
         const horas = m ? m.ms / 3600000 : 0;
-        const kph = m ? m.ab / horas : 3600000 / (h.msModelo * k);
+        const kph = m ? m.ab / horas : 3600000 / (h.msLuta + ritmo / (1 + vel));
         h.kph = Math.round(kph);
         h.xpH = Math.round(m ? m.xp / horas : kph * h.xp * bx);
         h.goldH = Math.round(m ? m.gold / horas : kph * h.gold);
         // Ouro "de verdade": quanto mais o pokémon apanha, mais poção some do lucro (estimativa).
         h.goldLiq = Math.round(h.goldH / (1 + Math.max(0, h.risco - 1) * 0.6));
         h.medidoMin = m ? Math.round(m.ms / 60000) : 0;
-        delete h.medido; delete h.msModelo; delete h.xp; delete h.gold;
+        delete h.medido; delete h.msLuta; delete h.xp; delete h.gold;
       }
       out.sort((a, b) => b.xpH - a.xpH);
       const atualEst = out.find((h) => h.slug && h.slug === atualSlug) || null;
       return {
         pronto: true, L, pokemon: cat.name || '?', tipos: atk, aoe: act.aoe, bike: rar, vel, bonus: bx,
-        calibrado: out.filter((h) => h.medidoMin).length, escala: Math.round(k * 100) / 100, hpExtra: Math.round(hpExtra * 100) / 100,
+        calibrado: out.filter((h) => h.medidoMin).length, ritmo: Math.round(ritmo), hpExtra: Math.round(hpExtra * 100) / 100,
         top: out.slice(0, 8), atual: atualSlug, atualEst,
         topOuro: [...out].sort((a, b) => b.goldLiq - a.goldLiq).slice(0, 8),
       };
