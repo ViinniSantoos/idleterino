@@ -847,7 +847,7 @@ function metaOf(a, xpH, hunts) {
   return { L, nextMs: eta(L + 1), hunt: next ? { nome: next.nome, nivel: next.nivel, ms: eta(next.nivel) } : null,
     boost: bx ? Math.round((nowMult - 1) * 1000) / 10 : null, ending };
 }
-// Sugestão de hunt (vem da página do jogo: as contas do jogo + AoE, bicicleta e efetividade).
+// Sugestão de hunt (vem da página do jogo: tempo de abate com as fórmulas do jogo, AoE, bicicleta e o que a conta já mediu).
 // Duas opções: a que dá MAIS XP e a que dá MAIS OURO (descontando o risco de gastar poção). O "quanto
 // a mais" é relativo à hunt em que a conta está, calibrado com o que ela rende de verdade na sessão.
 function huntSugg(hr, f) {
@@ -860,14 +860,17 @@ function huntSugg(hr, f) {
   const kg = f && cur && cur.goldLiq > 0 ? f.gold / cur.goldLiq : null;
   const est = (v, k) => (k ? `≈ ${(v * k / 1e6).toFixed(1).replace('.', ',')}M` : '');
   const risco = (h) => (h.risco >= 2 ? 'gasta muita poção' : h.risco >= 1.3 ? 'gasta poção' : 'pouca poção');
+  const x = (v) => String(v).replace('.', ',');
+  const como = (h) => (h.medidoMin ? `medido em ${h.medidoMin} min` : `${x(h.seg)} s por abate${h.golpe ? ` com ${h.golpe}` : ''} · dano ×${x(h.effH)}`);
   const tip = [
     `Pokémon em campo: ${hr.pokemon} (${(hr.tipos || []).join('/')})${hr.aoe ? ' · AoE' : ' · sem AoE'} · ${hr.bike ? `bike ${hr.bike} (+${Math.round(hr.vel * 100)}%)` : 'a pé'}`,
     '⚡ Mais XP:',
-    ...hr.top.slice(0, 4).map((h, i) => `${i + 1}. ${h.nome} (Nv ${h.nivel}) · dano ${h.eff}× ${est(h.xpH, kx)} XP/h${cur ? ` · ${ganho(h.xpH, cur.xpH) >= 0 ? '+' : ''}${ganho(h.xpH, cur.xpH)}%` : ''} · ${risco(h)}`),
+    ...hr.top.slice(0, 4).map((h, i) => `${i + 1}. ${h.nome} (Nv ${h.nivel}) · ${como(h)} ${est(h.xpH, kx)} XP/h${cur ? ` · ${ganho(h.xpH, cur.xpH) >= 0 ? '+' : ''}${ganho(h.xpH, cur.xpH)}%` : ''} · ${risco(h)}`),
     '💰 Mais ouro (já descontando poção):',
     ...(hr.topOuro || []).slice(0, 4).map((h, i) => `${i + 1}. ${h.nome} (Nv ${h.nivel}) ${est(h.goldLiq, kg)} ouro/h${cur ? ` · ${ganho(h.goldLiq, cur.goldLiq) >= 0 ? '+' : ''}${ganho(h.goldLiq, cur.goldLiq)}%` : ''} · ${risco(h)}`),
-    cur ? `Hunt atual: ${cur.nome} (dano ${cur.eff}×, ${risco(cur)})` : '',
-    'Estimativa: contas do jogo + efetividade de tipo (com Z-Move), AoE, bicicleta e o quanto o seu pokémon apanha. Muda quando você troca o pokémon em campo.',
+    cur ? `Hunt atual: ${cur.nome} (${como(cur)}, ${risco(cur)})` : '',
+    hr.calibrado ? `Acertado pelo que esta conta mediu em ${hr.calibrado} hunt${hr.calibrado > 1 ? 's' : ''} com este pokémon.` : 'Ainda sem medição com este pokémon: fique 10 min numa hunt para o número se acertar.',
+    'Conta: stats e golpes do pokémon contra a vida e a defesa de cada selvagem, com a efetividade da hunt (×2 vira ×2,5; ×4 vira ×5,5), AoE no bando inteiro e a bicicleta na caminhada. Muda quando você troca o pokémon em campo.',
   ].filter(Boolean).join('\n');
   const opt = (h, campo) => {
     const g = cur ? ganho(h[campo], cur[campo]) : null;

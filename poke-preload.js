@@ -9,7 +9,8 @@
 //  · mercado: Meus anúncios, Histórico de vendas e Tabela de preços;
 //  · Twitch/Kick: a lista oficial de canais e o tempo de bônus;
 //  · bônus de XP (com o fim de cada parte) e as hunts com o nível de cada uma;
-//  · sugestão de hunt: as contas do próprio jogo (módulo /hunt-analyser.mjs) + AoE, bicicleta e efetividade;
+//  · sugestão de hunt: o tempo de abate com as fórmulas do jogo (stats, golpes, efetividade da hunt, AoE,
+//    bicicleta), acertado pela vida real dos selvagens e pelo placar que a conta já fez em cada hunt;
 //  · PvP: a tabela ranqueada e a equipe pública dos primeiros (uma consulta a cada poucos segundos).
 const { contextBridge } = require('electron');
 
@@ -26,7 +27,7 @@ contextBridge.executeInMainWorld({
     const SEQ = 987654321;
 
     // ---- estado leve do jogador: o que a sugestão de hunt e o PvP precisam ----
-    const jogo = { hunts: null, tabelaTipos: null, amp: 1.5, eu: {}, pks: new Map(), keys: [] };
+    const jogo = { hunts: null, tabelaTipos: null, amp: 1.5, multHp: 5, eu: {}, pks: new Map(), keys: [] };
     const CAMPOS_EU = ['guild', 'xp', 'xpNivel', 'xpProximo', 'gold', 'nick', 'level', 'activeId', 'bicicleta', 'pvp', 'pvpRank', 'pvpPosicao', 'pvpHistorico', 'pvpTime', 'huntSlug', 'hunt', 'huntAtual', 'area'];
     const DUELO = (k) => ({ ivs: k.ivs || null, quality: k.quality ?? k.qualidade ?? null, potencia: k.potencia ?? null, refino: k.refino || null, tmElemental: k.tmElemental || null, tmFisico: !!k.tmFisico });
     const slimPk = (k) => ({
@@ -104,6 +105,7 @@ contextBridge.executeInMainWorld({
                   }
                   if (m.tabelaTipos) jogo.tabelaTipos = m.tabelaTipos;
                   if (m.ampliacaoHunt) jogo.amp = Number(m.ampliacaoHunt) || 1.5;
+                  if (m.multHpSelvagem) jogo.multHp = Number(m.multHpSelvagem) || 5;
                 }
                 aplicarEstado(est, m.t === 'welcome');
                 const bx = est && est.bonusXp;
@@ -139,6 +141,12 @@ contextBridge.executeInMainWorld({
             }
             if (d.indexOf('"t":"pvp"') >= 0) {
               try { const m = JSON.parse(d); if (m.t === 'pvp') pvp.eu = { em: Date.now(), dados: JSON.parse(JSON.stringify(m)) }; } catch {}
+              return;
+            }
+            // Campo: só o pacote em que selvagens aparecem (`mhp`), para a vida real e o tamanho dos bandos.
+            const ic = d.indexOf('"t":"campo"');
+            if (ic >= 0 && ic < 40) {
+              if (d.indexOf('"mhp"') >= 0) { try { campoNovos(JSON.parse(d)); } catch {} }
               return;
             }
             if (d.indexOf('"market"') < 0) return;
@@ -184,63 +192,219 @@ contextBridge.executeInMainWorld({
     const tabuleiro = () => (modTab || (modTab = import('/shared/pvp-tabuleiro.mjs').catch(() => null)));
 
     // ---- sugestão de hunt ----
-    // Base: as contas do jogo (kills por onda, golpe, deslocamento e XP/ouro por kill, do /hunt-analyser.mjs).
-    // Em cima delas: efetividade do pokemon em campo contra cada espécie (com a ampliação de hunt do jogo),
-    // AoE (até 3 alvos por golpe) e bicicleta (o passo divide pelo fator da raridade). É estimativa.
-    const GOLPES_NEUTRO = 2; // golpes para derrubar um selvagem com dano neutro (premissa da estimativa)
+    // Quanto tempo o pokémon em campo leva para derrubar cada selvagem de cada hunt, com as contas do jogo:
+    //  · stats do pokémon: `statsNoNivel` (/shared/ginasios.mjs), a mesma conta do "Poder no PvE";
+    //  · selvagem: stats da espécie no nível da hunt (IV médio); vida = HP × 12 × multHpSelvagem (welcome),
+    //    acertada pela vida que o campo mostra (`mhp`) nas hunts em que a conta já esteve;
+    //  · dano de cada golpe: nível, power, ataque ÷ defesa do selvagem, STAB e a efetividade AMPLIADA da
+    //    hunt (×2 → ×2,5; ×4 → ×5,5; ×0,5 → ×0,33), golpe a golpe, com o tipo de cada um (e o Z-Move);
+    //  · ritmo: a IA usa o golpe pronto que mais dá dano; intervalo e Investida pelo IV de Speed, skills
+    //    com o desconto do Speed (`cooldownGolpeComSpeed`);
+    //  · AoE (disco): o golpe pega o bando inteiro (área 11×11) — o bando cai no tempo de um selvagem;
+    //  · bicicleta: divide só a caminhada.
+    // Depois, o que a conta MEDIU (placar do jogo, 10+ min na hunt com este pokémon) acerta a escala das
+    // outras e substitui a estimativa da própria hunt. O resto é estimativa.
+    const IV_SELVAGEM = 16;            // IV médio de selvagem (1–32)
+    const HP_SELVAGEM_EXTRA = 1.33;    // Gible nv 1000: 72.000 de vida no campo contra 54.000 da conta crua (28/10/2026)
+    const BANDO_PADRAO = 5;            // selvagens por bando enquanto o campo não mostrou nenhum
+    const MEDIDO_MIN_MS = 10 * 60 * 1000;
+    const VARIACAO_MEDIA = 0.925;      // o dano de cada golpe sai entre 0,85 e 1,00
+    const naHunt = (v, amp) => (v === 0 || v === 1 ? v : v > 1 ? 1 + (v - 1) * amp : v / amp);
+    const mediana = (l) => { const s = l.filter((x) => Number.isFinite(x)).sort((a, b) => a - b); return s.length ? s[Math.floor(s.length / 2)] : null; };
+
+    // O que a conta já viu em cada hunt: vida dos selvagens, tamanho dos bandos e o placar com cada pokémon.
+    const MEDIDO_KEY = 'idleterino:huntMedido';
+    let medido = {};
+    try { medido = JSON.parse(localStorage.getItem(MEDIDO_KEY) || '{}') || {}; } catch { medido = {}; }
+    let medidoSalvoEm = 0;
+    const medidoDe = (slug) => medido[slug] || (medido[slug] = { hp: {}, bando: [], pk: {} });
+    function salvarMedido(agora) {
+      if (!agora && Date.now() - medidoSalvoEm < 30000) return;
+      medidoSalvoEm = Date.now();
+      try { localStorage.setItem(MEDIDO_KEY, JSON.stringify(medido)); } catch {}
+    }
+    const huntAtualSlug = () => jogo.eu.huntSlug || (jogo.eu.hunt && jogo.eu.hunt.slug) || null;
+    // Quantos quadrados 11×11 cobrem os selvagens que nasceram juntos (cobertura gulosa).
+    function bandosDe(mobs) {
+      let resto = mobs.slice(), n = 0;
+      while (resto.length) {
+        let melhor = null;
+        for (const a of resto) {
+          const dentro = resto.filter((b) => Math.abs(b.c - a.c) <= 5 && Math.abs(b.r - a.r) <= 5);
+          if (!melhor || dentro.length > melhor.length) melhor = dentro;
+        }
+        resto = resto.filter((b) => !melhor.includes(b));
+        n++;
+      }
+      return n;
+    }
+    // Pacote de campo com selvagens novos (`mhp` só vem quando o mob aparece): vida real e bandos.
+    function campoNovos(m) {
+      const slug = huntAtualSlug();
+      if (!slug || !Array.isArray(m.mobs)) return;
+      const novos = m.mobs.filter((b) => b && b.mhp != null && b.c != null && !b.tr && !b.bn && b.eq == null && b.dn == null);
+      if (!novos.length) return;
+      const M = medidoDe(slug);
+      for (const b of novos) if (b.n && b.nv && !b.sh) M.hp[`${b.n}|${b.nv}`] = Number(b.mhp) || 0;
+      if (novos.length >= 3) {
+        M.bando.push(Math.round((novos.length / bandosDe(novos)) * 10) / 10);
+        if (M.bando.length > 40) M.bando.shift();
+      }
+      salvarMedido();
+    }
+    // Soma ao placar da hunt o que a sessão do jogo andou desde a última leitura (mesma hunt e mesmo pokémon).
+    let ultimaSessao = null;
+    function medirSessao(slug, pkId) {
+      const nick = String(jogo.eu.nick || '').toLowerCase();
+      let s = null;
+      try { s = nick && JSON.parse(localStorage.getItem('sessao-hunt:' + nick) || 'null'); } catch {}
+      if (!s || !(s.ms > 0) || !slug || pkId == null) { ultimaSessao = null; return; }
+      const agora = { slug, pk: pkId, ms: +s.ms, ab: +s.abates || 0, xp: +s.xpTreinador || 0, gold: +s.gold || 0, em: Date.now() };
+      const p = ultimaSessao;
+      if (p && p.slug === slug && p.pk === pkId && agora.ms > p.ms && agora.ab >= p.ab && agora.em - p.em < 10 * 60 * 1000) {
+        const pks = medidoDe(slug).pk;
+        const P = pks[pkId] || (pks[pkId] = { ms: 0, ab: 0, xp: 0, gold: 0 });
+        P.ms += agora.ms - p.ms; P.ab += agora.ab - p.ab;
+        P.xp += Math.max(0, agora.xp - p.xp); P.gold += Math.max(0, agora.gold - p.gold);
+        salvarMedido(true);
+      }
+      ultimaSessao = agora;
+    }
+
+    // Dano por segundo do pokémon contra uma espécie, simulando a escolha de golpe da IA por 3 minutos.
+    function dpsContra(P, tiposAlvo, defW, spDefW, tabela, ef) {
+      const dano = (g) => {
+        const e = ef(g.type, tiposAlvo[0] || null, tiposAlvo[1] || null, tabela);
+        if (!(e > 0)) return 0;
+        const especial = g.category === 'SPECIAL';
+        const atk = especial ? P.st.spAtk : P.st.atk;
+        const def = Math.max(1, especial ? spDefW : defW);
+        const base = ((2 * P.nivel) / 5 + 2) * (g.power || 0) * (atk / def) / 50 + 2;
+        return base * (P.tipos.includes(g.type) ? 1.5 : 1) * naHunt(e, P.amp) * VARIACAO_MEDIA;
+      };
+      const lista = P.golpes.map((g) => ({ g, d: dano(g) })).filter((x) => x.d > 0);
+      const basico = P.tipos.map((t) => ({ g: { name: 'Investida', power: 30, type: t, category: 'PHYSICAL', cd: P.cdBasico }, d: 0 }))
+        .map((x) => ({ ...x, d: dano(x.g) })).sort((a, b) => b.d - a.d)[0];
+      if (basico && basico.d > 0) lista.push(basico);
+      if (!lista.length) return { dps: 0, golpe: null };
+      const T = 180000;
+      const pronto = lista.map(() => 0);
+      const usado = lista.map(() => 0);
+      let t = 0, total = 0;
+      while (t < T) {
+        let i = -1;
+        for (let k = 0; k < lista.length; k++) if (pronto[k] <= t && (i < 0 || lista[k].d > lista[i].d)) i = k;
+        if (i < 0) { t = Math.min(...pronto); continue; }
+        total += lista[i].d; usado[i] += lista[i].d;
+        pronto[i] = t + lista[i].g.cd;
+        t += P.gi;
+      }
+      const top = usado.indexOf(Math.max(...usado));
+      return { dps: total / (T / 1000), golpe: lista[top].g.name };
+    }
+
     async function huntRank() {
       if (!jogo.hunts || !jogo.tabelaTipos) return { pronto: false };
-      let ha;
-      try { ha = await import('/hunt-analyser.mjs'); } catch { return { pronto: false, erro: 'modulo' }; }
+      let ha, gi, cdm, tm;
+      try {
+        [ha, gi, cdm, tm] = await Promise.all([import('/hunt-analyser.mjs'), import('/shared/ginasios.mjs'), import('/shared/cooldown-golpes.mjs'), import('/shared/tm-elemental.mjs')]);
+      } catch { return { pronto: false, erro: 'modulo' }; }
       const esp = await especies();
       const L = Number(jogo.eu.level) || 0;
       const act = jogo.pks.get(jogo.eu.activeId);
       if (!act) return { pronto: true, semPokemon: true };
       const cat = esp.get(act.speciesId) || {};
-      const atk = [...new Set([...tiposDe(cat), act.el ? String(act.el).toUpperCase() : null].filter(Boolean))];
+      const tiposPk = tiposDe(cat);
+      const atk = [...new Set([...tiposPk, act.el ? String(act.el).toUpperCase() : null].filter(Boolean))];
       const rar = jogo.eu.bicicleta && (jogo.eu.bicicleta.equipadaRar || null);
       const vel = VEL_BIKE[rar] || 0;
       const bx = bonusXp ? bonusXp.tr : 1;
       const amp = jogo.amp || 1.5;
+      const atualSlug = huntAtualSlug();
+      medirSessao(atualSlug, act.id);
+
+      // O pokémon em campo: stats de verdade, golpes que já aprendeu (e o Z-Move) e o ritmo pelo Speed.
+      const st = act.ivs ? gi.statsNoNivel(act, cat, act.level) : null;
+      if (!st) return { pronto: true, semPokemon: true };
+      const ivSpe = Math.min(32, Math.max(1, Math.round(Number(act.ivs.speed) || 1)));
+      const comSpeed = (g) => ({ ...g, type: String(g.type || 'NORMAL').toUpperCase(), cd: g.cdFixo ? g.cooldownMs : cdm.cooldownGolpeComSpeed(g.cooldownMs, cat.baseSpeed, ivSpe) });
+      const golpes = (cat.attacks || []).filter((a) => (a.learnLevel || 1) <= act.level).map(comSpeed);
+      if (act.tmElemental) golpes.push(comSpeed(tm.golpeTmElemental(String(act.tmElemental).toUpperCase(), act.tmFisico)));
+      const P = { st, nivel: Number(act.level) || 1, tipos: tiposPk, golpes, amp,
+        gi: Math.max(400, 900 - 10 * ivSpe), cdBasico: 2000 - 10 * ivSpe };
+
+      // Vida dos selvagens: a conta crua, acertada pelo que o campo já mostrou.
+      const statW = (base, n) => ((Number(base) || 0) + 2 * IV_SELVAGEM) * n / 100;
+      const hpCru = (c, n) => 12 * (jogo.multHp || 5) * statW(c.baseHp, n);
+      const porNome = new Map(); for (const c of esp.values()) if (c && c.name && !porNome.has(c.name)) porNome.set(c.name, c);
+      const razoes = [];
+      for (const M of Object.values(medido)) for (const [k, v] of Object.entries(M.hp || {})) {
+        const [nome, nv] = k.split('|'); const c = porNome.get(nome);
+        if (c && v > 0) razoes.push(v / hpCru(c, Number(nv)));
+      }
+      const hpExtra = mediana(razoes) || HP_SELVAGEM_EXTRA;
+
+      const passo = (ha.MS_DESLOC_MS || 600) / (1 + vel);
       const out = [];
       for (const h of jogo.hunts) {
         const nivel = Number(h.nivel) || 0;
         if (nivel > L || !Array.isArray(h.especies) || !h.especies.length) continue;
-        let pontos = 0, golpes = 0, effMed = 0, effMax = 0, risco = 0;
-        const def = tiposDe(cat);
+        let pontos = 0, tAbate = 0, effMed = 0, effH = 0, effMax = 0, risco = 0, semDano = false;
+        const golpeUso = {};
         const nivelRel = nivel / Math.max(1, Number(act.level) || 1); // hunt acima do nível do pokémon = mob batendo mais forte
         for (const e of h.especies) {
           const c = esp.get(e.pokeId) || {};
           const t = tiposDe(c);
-          let eff = 1;
-          try { eff = ha.melhorEfetividadeContra(atk, t[0] || null, t[1] || null, jogo.tabelaTipos) || 1; } catch {}
-          const effH = eff > 1 ? 1 + (eff - 1) * amp : eff;
           const w = Number(e.pontos) || 1;
-          pontos += w; effMed += eff * w; effMax = Math.max(effMax, eff);
-          golpes += Math.max(1, Math.ceil(GOLPES_NEUTRO / Math.max(0.05, effH))) * w;
+          let eff = 1;
+          try { eff = ha.melhorEfetividadeContra(atk, t[0] || null, t[1] || null, jogo.tabelaTipos) || 0; } catch {}
+          const r = dpsContra(P, t, statW(c.baseDef, nivel), statW(c.baseSpDef, nivel), jogo.tabelaTipos, ha.efetividade);
+          if (!(r.dps > 0)) { semDano = true; break; }
+          const hp = hpCru(c, nivel) * hpExtra;
+          tAbate += Math.max(P.gi, (hp / r.dps) * 1000) * w;
+          golpeUso[r.golpe] = (golpeUso[r.golpe] || 0) + w;
+          pontos += w; effMed += eff * w; effH += naHunt(eff, amp) * w; effMax = Math.max(effMax, eff);
           // Risco de gastar poção: o golpe do selvagem contra o SEU pokémon (tipos dele × os seus) e o nível da hunt.
           let dano = 1;
-          try { dano = ha.melhorEfetividadeContra(t, def[0] || null, def[1] || null, jogo.tabelaTipos) || 1; } catch {}
+          try { dano = ha.melhorEfetividadeContra(t, tiposPk[0] || null, tiposPk[1] || null, jogo.tabelaTipos) || 1; } catch {}
           risco += dano * nivelRel * w;
         }
-        if (!pontos) continue;
-        golpes /= pontos; effMed /= pontos; risco /= pontos;
+        if (semDano || !pontos) continue;
+        tAbate /= pontos; effMed /= pontos; effH /= pontos; risco /= pontos;
         const porOnda = Math.min(ha.MAX_MOBS || 16, pontos);
-        const alvos = act.aoe ? Math.min(3, porOnda) : 1;
-        const msKill = (golpes * ((ha.CD_GOLPE_MS || 900) + (ha.CD_MOVIMENTO_MEDIO_MS || 2000)) + (ha.MS_DESLOC_MS || 600) / (1 + vel)) / alvos;
-        const kph = (porOnda / ((porOnda * msKill + (ha.MS_ONDA || 2600)) / 1000)) * 3600;
+        const M = medido[h.slug] || null;
+        const bando = act.aoe ? Math.min(porOnda, mediana((M && M.bando) || []) || BANDO_PADRAO) : 1;
+        // Por selvagem: a luta (o bando inteiro de uma vez com AoE), a caminhada até o próximo alvo e a pausa da onda.
+        const msModelo = tAbate / bando + passo / bando + (ha.MS_ONDA || 2600) / porOnda;
         let xp = 0, gold = 0;
         try { const r = ha.mediaPorKill(h, esp, 0); xp = r.xp; gold = r.gold; } catch {}
+        const med = M && M.pk && M.pk[act.id];
+        const golpe = Object.entries(golpeUso).sort((a, b) => b[1] - a[1])[0];
+        out.push({ slug: h.slug || null, nome: String(h.nome || h.name || h.slug || '?'), nivel, msModelo, xp, gold,
+          medido: med && med.ms >= MEDIDO_MIN_MS && med.ab >= 20 ? med : null,
+          seg: Math.round(tAbate / 100) / 10, bando: Math.round(bando * 10) / 10, golpe: golpe ? golpe[0] : null,
+          risco: Math.round(risco * 100) / 100, eff: Math.round(effMed * 100) / 100, effH: Math.round(effH * 100) / 100, effMax });
+      }
+
+      // Escala: o que a conta mediu com este pokémon contra o que a conta previa nas mesmas hunts.
+      const k = mediana(out.filter((h) => h.medido).map((h) => (h.medido.ms / h.medido.ab) / h.msModelo)) || 1;
+      for (const h of out) {
+        const m = h.medido;
+        const horas = m ? m.ms / 3600000 : 0;
+        const kph = m ? m.ab / horas : 3600000 / (h.msModelo * k);
+        h.kph = Math.round(kph);
+        h.xpH = Math.round(m ? m.xp / horas : kph * h.xp * bx);
+        h.goldH = Math.round(m ? m.gold / horas : kph * h.gold);
         // Ouro "de verdade": quanto mais o pokémon apanha, mais poção some do lucro (estimativa).
-        const goldH = Math.round(kph * gold);
-        const goldLiq = Math.round(goldH / (1 + Math.max(0, risco - 1) * 0.6));
-        out.push({ slug: h.slug || null, nome: String(h.nome || h.name || h.slug || '?'), nivel, kph: Math.round(kph), xpH: Math.round(kph * xp * bx), goldH, goldLiq, risco: Math.round(risco * 100) / 100, eff: Math.round(effMed * 100) / 100, effMax });
+        h.goldLiq = Math.round(h.goldH / (1 + Math.max(0, h.risco - 1) * 0.6));
+        h.medidoMin = m ? Math.round(m.ms / 60000) : 0;
+        delete h.medido; delete h.msModelo; delete h.xp; delete h.gold;
       }
       out.sort((a, b) => b.xpH - a.xpH);
-      const atualSlug = jogo.eu.huntSlug || (jogo.eu.hunt && jogo.eu.hunt.slug) || null;
       const atualEst = out.find((h) => h.slug && h.slug === atualSlug) || null;
       return {
         pronto: true, L, pokemon: cat.name || '?', tipos: atk, aoe: act.aoe, bike: rar, vel, bonus: bx,
+        calibrado: out.filter((h) => h.medidoMin).length, escala: Math.round(k * 100) / 100, hpExtra: Math.round(hpExtra * 100) / 100,
         top: out.slice(0, 8), atual: atualSlug, atualEst,
         topOuro: [...out].sort((a, b) => b.goldLiq - a.goldLiq).slice(0, 8),
       };

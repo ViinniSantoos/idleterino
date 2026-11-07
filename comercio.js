@@ -156,6 +156,7 @@ module.exports = function createComercio(ctx, poke) {
       footer: { text: '📦 Anúncio real, lido do jogo pelo Idleterino' }, timestamp: new Date().toISOString(),
     };
   }
+  const mesmoBicho = (u, a) => !!u && u.sp === a.sp && u.level === a.level && !!u.shiny === !!a.shiny && u.iv === a.iv && u.q === a.q && u.pot === a.pot;
   const corpo = (embed) => ({ embeds: [embed], allowed_mentions: { parse: [] } });
 
   // Chamado a cada leitura de conta (30 s). Os anúncios ("Meus anúncios") se atualizam a cada leitura do Market.
@@ -169,12 +170,22 @@ module.exports = function createComercio(ctx, poke) {
     const meus = r.mercado && r.mercado.meus;
     if (!meus || !meus.at) { status[id] = { ok: true, texto: 'Esperando a primeira leitura do Market (até 5 min).' }; return; }
     const nick = r.nick && r.nick !== '—' ? r.nick : 'Treinador';
-    // Só pokémon vai para o Discord (itens floodariam o canal).
-    const linhas = (meus.linhas || []).filter((a) => a.tipo === 'pokemon');
+    // Só pokémon à venda em GEMAS vai para o Discord (itens e vendas em ouro floodariam o canal).
+    const pokes = (meus.linhas || []).filter((a) => a.tipo === 'pokemon');
+    // A chave é o POKÉMON, não o anúncio: tirar do Market e pôr de novo (ou trocar o preço, que no jogo
+    // vira anúncio novo) cria outro id de anúncio, e o card certo é o que já está no canal.
+    const chave = (a) => (a.pk != null ? `${id}|p${a.pk}` : `${id}|${a.id}`);
+    // "Vivo" = ainda está no Market em gemas. O resto que tinha card vira RETIRADO lá embaixo.
     const vivos = new Set();
-    for (const a of linhas) {
-      const k = `${id}|${a.id}`; vivos.add(k);
-      const sig = `${a.preco}|${a.moeda}|${a.qtd}|${a.retidoAte && a.retidoAte > Date.now() ? 1 : 0}`;
+    for (const a of pokes) {
+      if (a.moeda !== 'orb') continue;
+      const k = chave(a); vivos.add(k);
+      const sig = `${a.id}|${a.preco}|${a.moeda}|${a.qtd}|${a.retidoAte && a.retidoAte > Date.now() ? 1 : 0}`;
+      // Card antigo (de antes da chave por pokémon) do mesmo bicho: passa a usar a chave nova.
+      if (!C.posts[k] && a.pk != null) {
+        const velho = Object.keys(C.posts).find((kv) => kv.startsWith(`${id}|`) && !kv.includes('|p') && C.posts[kv].msg && C.posts[kv].estado !== 'vendido' && mesmoBicho(C.posts[kv].ultimo, a));
+        if (velho) { C.posts[k] = C.posts[velho]; delete C.posts[velho]; }
+      }
       const p = C.posts[k];
       if (!p) {
         C.posts[k] = { estado: 'enviando', sig, t: Date.now(), nick, nome: a.nome, canal: canal.key };
@@ -185,8 +196,9 @@ module.exports = function createComercio(ctx, poke) {
           } catch { delete C.posts[k]; } // tenta de novo na próxima leitura
           save();
         });
-      } else if (p.estado === 'aberto' && p.sig !== sig && p.msg) {
-        p.sig = sig;
+      } else if (p.msg && (p.estado === 'retirado' || (p.estado === 'aberto' && p.sig !== sig))) {
+        // Voltou ao Market ou mudou o preço: o MESMO card volta a valer, com o anúncio de agora.
+        p.estado = 'aberto'; p.sig = sig; p.t = Date.now(); p.nick = nick;
         fila.push(async () => { await enviar(p.canal || canal.key, 'PATCH', sufixoMsg(p), corpo(card(a, nick, minhaTag))); save(); });
       }
       if (C.posts[k]) C.posts[k].ultimo = a;

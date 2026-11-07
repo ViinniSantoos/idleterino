@@ -127,8 +127,8 @@ window.HELP = [
   ]],
   ['Início', 'O que é a "Melhor hunt agora" (🧭)?', [
     'São duas opções: ⚡ "Quer mais XP" (a hunt liberada que mais rende XP para o pokémon em campo) e 💰 "Quer mais ouro" (a que mais rende ouro, já descontando o risco de gastar poção). Quando é a mesma hunt, aparece "Melhor em XP e ouro". O "+X%" compara com a hunt em que você está.',
-    'A conta usa as fórmulas do próprio jogo (abates por onda, golpe, deslocamento, XP e ouro por abate) e soma: a efetividade de tipo do seu pokémon contra cada espécie da hunt (com o tipo do Z-Move), o AoE (até 3 alvos por golpe), a velocidade da bicicleta equipada e o quanto o seu pokémon apanha lá ("pouca poção", "gasta poção", "gasta muita poção").',
-    'É uma estimativa: passe o mouse para ver as 5 melhores e o que entrou na conta. Trocou o pokémon em campo, a sugestão muda.',
+    'A conta calcula quanto tempo o seu pokémon leva para derrubar cada selvagem, com as fórmulas do próprio jogo: os stats e golpes dele (e o Z-Move) contra a vida e a defesa da espécie no nível da hunt, a efetividade ampliada da hunt (×2 vira ×2,5; ×4 vira ×5,5; ×0,5 vira ×0,33), o IV de Speed, o AoE (o golpe pega o bando inteiro) e a bicicleta equipada (só a caminhada). Depois soma o XP e o ouro por abate e o quanto o seu pokémon apanha lá ("pouca poção", "gasta poção", "gasta muita poção").',
+    'Hunt em que a conta já ficou 10 min ou mais com o mesmo pokémon usa o número MEDIDO e acerta a escala das outras. Passe o mouse para ver as melhores e o que entrou na conta. Trocou o pokémon em campo, a sugestão muda.',
   ]],
   ['PvP', 'O que tem na aba PvP?', [
     'Meta: a tier list dos arquétipos do top 50 (times que dividem 3 ou mais pokémon), com quantos usam, PR médio, taxa de vitória e se subiu ou caiu nos últimos dias; os pokémon e tipos mais usados; e o top 50 com as equipes.',
