@@ -914,15 +914,18 @@ function openNextStore() {
   send('status', snapshot());
 }
 
-// Confere cada live oculta: aviso de conteúdo adulto (só a pessoa pode confirmar) e estado do player.
+// Confere cada live oculta: aviso de conteúdo (classificação/maiores de idade) e estado do player.
+// O aviso tapa o vídeo e a live rende menos: o app clica em "Começar a assistir" sozinho (decisão do dono do app).
 async function checkPlayers() {
   for (const [slug, win] of watchers) {
     const s = status.get(slug);
     if (!s || win.isDestroyed() || userOpened.has(win)) continue;
     const info = await withTimeout(win.webContents.executeJavaScript(`(() => {
       const v = document.querySelector('video');
+      const aviso = document.querySelector('[data-a-target="content-classification-gate-overlay-start-watching-button"], [data-a-target="player-overlay-mature-accept"]');
+      if (aviso) { aviso.click(); setTimeout(() => { const vv = document.querySelector('video'); if (vv && vv.paused) vv.play().catch(() => {}); }, 1500); }
       return {
-        gate: !!document.querySelector('[data-a-target="content-classification-gate-overlay-start-watching-button"], [data-a-target="player-overlay-mature-accept"]'),
+        gate: !!aviso, avisoClicado: !!aviso,
         video: v ? { paused: v.paused, time: Math.round(v.currentTime), height: v.videoHeight, ready: v.readyState } : null,
       };
     })()`), PLAYER_CHECK_MS).catch((err) => {
@@ -964,10 +967,13 @@ function logHistory() {
   }
   const line = JSON.stringify({ t: new Date(now).toISOString(), loggedIn, maxWatchers: config.maxWatchers, limitTest: limitTestSnapshot(), channels });
   const file = path.join(app.getPath('userData'), 'points-log.jsonl');
+  // Troca de arquivo aos 5 MB. Se a troca falhar (Windows), o registro não pode parar: começa um arquivo limpo.
   try {
-    if (fs.existsSync(file) && fs.statSync(file).size > 5 * 1024 * 1024) fs.renameSync(file, file + '.old');
-    fs.appendFileSync(file, line + '\n');
+    if (fs.existsSync(file) && fs.statSync(file).size > 5 * 1024 * 1024) {
+      try { fs.rmSync(file + '.old', { force: true }); fs.renameSync(file, file + '.old'); } catch { fs.writeFileSync(file, ''); }
+    }
   } catch {}
+  try { fs.appendFileSync(file, line + '\n'); } catch {}
 }
 
 // Foco em bônus: as vagas vão para quem está mais perto do próximo bônus, com o preço de cada

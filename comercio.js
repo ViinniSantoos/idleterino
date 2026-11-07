@@ -122,10 +122,15 @@ module.exports = function createComercio(ctx, poke) {
   }
   const sufixoMsg = (p) => `/messages/${p.msg}${p.thread ? `?thread_id=${p.thread}` : ''}`;
 
+  // Título do tópico no padrão que a guild já usa no fórum: "VENDO GALLADE SHINY 60K".
+  const precoCurto = (n) => {
+    n = Number(n) || 0;
+    const f = (v, suf) => `${(Math.round(v * 10) / 10).toString().replace('.', ',')}${suf}`;
+    return n >= 1e6 ? f(n / 1e6, 'M') : n >= 1e3 ? f(n / 1e3, 'K') : String(n);
+  };
   function tituloTopico(a) {
-    const moeda = a.moeda === 'orb' ? 'GEMAS' : 'OURO';
-    const nome = String(a.nome || 'Anúncio').toUpperCase();
-    return `${a.shiny ? '✨ ' : ''}${nome}${a.shiny ? ' SHINY' : ''}${a.level ? ` NV ${a.level}` : ''}${a.qtd > 1 ? ` x${a.qtd}` : ''} · ${fmt(a.preco)} ${moeda}${a.qtd > 1 ? ' CADA' : ''}`.slice(0, 100);
+    const nome = String(a.nome || 'Pokémon').toUpperCase();
+    return `VENDO ${nome}${a.shiny ? ' SHINY' : ''}${a.qtd > 1 ? ` x${a.qtd}` : ''} ${precoCurto(a.preco)}${a.moeda === 'orb' ? '' : ' OURO'}${a.qtd > 1 ? ' CADA' : ''}`.slice(0, 100);
   }
 
   const quemContata = () => { const d = String(C.discord || '').trim(); return /^\d{15,22}$/.test(d) ? `<@${d}>` : d ? d.replace(/[`*_~|<>@]/g, '').slice(0, 40) : null; };

@@ -662,10 +662,13 @@ function logHistory() {
     maxWatchers: config.maxWatchers, limitTest: limitTestSnapshot(), channels,
   });
   const file = path.join(app.getPath('userData'), 'points-log.jsonl');
+  // Troca de arquivo aos 5 MB. Se a troca falhar (Windows), o registro não pode parar: começa um arquivo limpo.
   try {
-    if (fs.existsSync(file) && fs.statSync(file).size > 5 * 1024 * 1024) fs.renameSync(file, file + '.old');
-    fs.appendFileSync(file, line + '\n');
+    if (fs.existsSync(file) && fs.statSync(file).size > 5 * 1024 * 1024) {
+      try { fs.rmSync(file + '.old', { force: true }); fs.renameSync(file, file + '.old'); } catch { fs.writeFileSync(file, ''); }
+    }
   } catch {}
+  try { fs.appendFileSync(file, line + '\n'); } catch {}
 }
 
 // Foco em bônus: o saldo é separado por canal, então espalhar pontos atrasa as compras. As vagas
