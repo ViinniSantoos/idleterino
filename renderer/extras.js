@@ -548,16 +548,26 @@ function streamSection(d) {
 // ---------- 🏪 Comércio da guild no Discord ----------
 function comercioSection(c) {
   const sec = el('div', 'card list xsec'); sec.id = 'sec-comercio';
-  sec.append(el('h3', null, '🏪 Comércio da guild no Discord'), el('p', 'sub', 'Anunciou no Market do jogo? O anúncio aparece sozinho no canal de comércio da sua guild, com preço, IV e qualidade. Quando vende ou tira do Market, o post atualiza sozinho.'));
+  sec.append(el('h3', null, '🏪 Comércio da guild no Discord'), el('p', 'sub', 'Anunciou no Market do jogo? O anúncio aparece sozinho no canal de comércio da sua guild (em canal de fórum, vira um tópico), com preço, IV e qualidade. Quando vende ou tira do Market, o post atualiza sozinho.'));
   const setC = async (patch) => { const r = await call('app:comercio:set', patch); if (r.error) toast(`⚠ ${r.error}`); renderSettings(); };
-  // Link do canal
-  const url = el('input'); url.type = 'text'; url.placeholder = 'Link do webhook que o líder da guild passou'; url.style.flex = '1';
+  // Canal oficial da guild (vem do site, cifrado: o link não aparece nem fica salvo)
+  const tags = new Set(c.contas.map((x) => x.guild).filter(Boolean).map((t) => t.toUpperCase()));
+  const ofs = (c.oficiais || []).filter((o) => tags.has(o.tag));
+  if (!c.temWebhook) {
+    if (ofs.length) sec.append(rowOpt('Canal da guild', 'Já vem configurado no Idleterino. Só as contas que são da guild no jogo postam, e o link do canal fica escondido.', el('span')),
+      el('p', 'ok-line', `✓ Conectado ao canal oficial ${ofs.map((o) => `"${o.nome}" [${o.tag}]`).join(', ')}. É só ligar as contas abaixo.`));
+    else sec.append(rowOpt('Canal da guild', c.oficiaisErro || (c.temOficial ? 'Nenhuma das suas contas é de uma guild com canal oficial no Idleterino (a guild aparece quando a conta está logada). Dá para usar outro canal aqui embaixo.' : 'Cole o link do webhook do canal da sua guild aqui embaixo.'), el('span')));
+  }
+  // Outro canal (link colado): tem prioridade sobre o oficial
+  const url = el('input'); url.type = 'text'; url.placeholder = 'Link de webhook de outro canal (opcional)'; url.style.flex = '1';
   if (c.temWebhook) url.placeholder = `Conectado (${c.webhookFim}). Cole outro link para trocar.`;
   const r1 = el('div', 'inline wide'); r1.append(url, button('Salvar', 'primary', () => { if (url.value.trim()) setC({ webhook: url.value.trim() }); }));
-  if (c.temWebhook) r1.append(button('Desconectar', 'ghost', () => setC({ webhook: '' })));
-  sec.append(rowOpt('Canal da guild', 'O líder cria um webhook no canal de comércio e põe a tag da guild entre colchetes no nome dele, ex.: "Comércio [TFT]". O link fica só neste PC.', el('span')), r1);
-  if (c.info && c.info.erro) sec.append(el('p', 'warn-google', `⚠ ${c.info.erro}`));
-  else if (c.info) sec.append(el('p', c.info.tag ? 'ok-line' : 'warn-google', c.info.tag ? `✓ Canal "${c.info.nome}" · só contas da guild [${c.info.tag}] postam.` : `⚠ O webhook "${c.info.nome}" não tem a tag da guild. Peça ao líder para renomear com a tag entre colchetes, ex.: "Comércio [TFT]".`));
+  if (c.temWebhook) r1.append(button(ofs.length ? 'Voltar ao canal oficial' : 'Desconectar', 'ghost', () => setC({ webhook: '' })));
+  sec.append(rowOpt(c.temWebhook ? 'Canal da guild (outro canal)' : 'Outro canal (opcional)', 'Para outra guild ou outro canal: o líder cria um webhook e põe a tag da guild entre colchetes no nome dele, ex.: "Comércio [TFT]". O link fica só neste PC.', el('span')), r1);
+  if (c.temWebhook) {
+    if (c.info && c.info.erro) sec.append(el('p', 'warn-google', `⚠ ${c.info.erro}`));
+    else if (c.info) sec.append(el('p', c.info.tag ? 'ok-line' : 'warn-google', c.info.tag ? `✓ Canal "${c.info.nome}" · só contas da guild [${c.info.tag}] postam.` : `⚠ O webhook "${c.info.nome}" não tem a tag da guild. Peça ao líder para renomear com a tag entre colchetes, ex.: "Comércio [TFT]".`));
+  }
   // Discord do vendedor
   const dc = el('input'); dc.type = 'text'; dc.placeholder = 'Seu Discord (ex.: vini.santos.) ou seu ID'; dc.value = c.discord || ''; dc.style.width = '260px';
   const r2 = el('div', 'inline'); r2.append(dc, button('Salvar', null, async () => { await setC({ discord: dc.value }); toast(dc.value.trim() ? '✓ Discord salvo. Vale para os próximos anúncios.' : 'Discord tirado dos anúncios.'); }));
@@ -567,9 +577,7 @@ function comercioSection(c) {
     ? `✓ Discord conectado pelo ID (${dcv}): nos anúncios vira um link para o seu perfil, sem te notificar.`
     : `✓ Discord salvo: "${dcv}" aparece nos anúncios. Para virar link clicável, use o seu ID.`));
   else sec.append(el('p', 'warn-google', '⚠ Sem Discord: o comprador só vai ver o nick do jogo.'));
-  // O que postar
-  const so = el('select'); for (const [v, l] of [['pokemon', 'Só pokémon'], ['tudo', 'Tudo (pokémon e itens)']]) { const o = el('option', null, l); o.value = v; so.append(o); } so.value = c.so; so.onchange = () => setC({ so: so.value });
-  sec.append(rowOpt('O que postar', 'Os anúncios que você colocar no Market depois de ligar (e os que já estão lá).', so));
+  sec.append(el('p', 'sub', 'Só os anúncios de pokémon vão para o Discord (itens ficam de fora, para não floodar o canal).'));
   // Contas
   for (const a of c.contas) {
     const help = a.status ? a.status.texto : a.guild ? `Guild no jogo: [${a.guild}]` : 'Guild aparece quando a conta estiver logada.';

@@ -39,6 +39,7 @@ function go(p) {
   for (const b of document.querySelectorAll('.nav')) b.classList.toggle('on', b.dataset.page === p);
   for (const s of document.querySelectorAll('.page')) s.classList.toggle('on', s.id === `page-${p}`);
   if (P[p]) renderPlatform(p);
+  document.body.classList.toggle('foco', p === 'poke' && pokeFoco);
   if (p === 'poke') renderPoke(); else pokeView(false);
   if (p === 'home') renderHome();
   if (p === 'settings') renderSettings();
@@ -558,6 +559,25 @@ let pokeStageRect = null;
 let pokeGrid = (() => { try { return localStorage.getItem('pokeGrid') === '1'; } catch { return false; } })();
 let pokeGridMain = (() => { try { return localStorage.getItem('pokeGridMain') === '1'; } catch { return false; } })(); // principal junto no "Ver juntas"
 let pokeExpanded = (() => { try { return localStorage.getItem('pokeExpanded') === '1'; } catch { return false; } })();
+// Modo foco: só o jogo na tela (some a barra lateral, o topo e a barra da conta; fica uma faixa fina).
+let pokeFoco = (() => { try { return localStorage.getItem('pokeFoco') === '1'; } catch { return false; } })();
+function setFoco(v) { pokeFoco = !!v; try { localStorage.setItem('pokeFoco', pokeFoco ? '1' : '0'); } catch {} document.body.classList.toggle('foco', pokeFoco && page === 'poke'); renderPoke(); }
+function focoBar(s) {
+  const f = el('div', 'foco-bar');
+  for (const x of s.accounts) {
+    const i = x.info || {};
+    const nick = i.logged && i.nick && i.nick !== '—' ? i.nick : x.name;
+    const b = button('', `foco-acc${x.id === s.selected ? ' on' : ''}`, async () => { S.poke = await call('poke:select', x.id); renderPoke(); });
+    b.append(el('i', `dot ${!i.logged ? 'off' : x.frozen ? 'frz' : 'ok'}`), `${x.id === s.mainId ? '★ ' : ''}${nick}`);
+    f.append(b);
+  }
+  f.append(el('span', 'spacer'));
+  const tc = button(S.app && S.app.fullscreen ? '🗗 Sair da tela cheia' : '⛶ Tela cheia (F11)', null, async () => { S.app = await call('app:fullscreen'); renderPoke(); });
+  const sair = button('✕ Sair do foco', null, () => setFoco(false));
+  sair.title = 'Volta a barra lateral, o topo e os botões da conta';
+  f.append(tc, sair);
+  return f;
+}
 function renderPoke() {
   const root = $('#page-poke');
   const s = S.poke;
@@ -635,6 +655,9 @@ function renderPoke() {
   const star = button(a.id === s.mainId ? '★' : '☆', a.id === s.mainId ? 'ghost main-on' : 'ghost', async () => { if (a.id !== s.mainId) { S.poke = await call('poke:main', a.id); renderPoke(); } });
   star.title = a.id === s.mainId ? 'Esta é a sua conta principal: ela aparece sempre sozinha' : 'Marcar esta conta como a principal (as outras viram ALTs)';
   bar.append(name, star, seg, el('span', 'spacer'));
+  const fb = button('⛶ Foco', null, () => setFoco(true));
+  fb.title = 'Só o jogo na tela: esconde a barra lateral, o topo e estes botões (F11 deixa em tela cheia)';
+  bar.append(fb);
   // Painel das extensões (ex.: o Cockpit do Rotom Sniper), aberto na sessão desta conta.
   for (const x of (S.ext || []).filter((x) => x.enabled && x.hasPanel)) {
     const b = button(`🧩 ${x.name.split(/\s[-–—|]\s/)[0].slice(0, 18)}`, null, async () => { const r = await call('poke:ext:open', x.id, a.id, a.info && a.info.nick && a.info.nick !== '—' ? a.info.nick : a.name); if (r && r.error) toast(`⚠ ${r.error}`); });
@@ -697,9 +720,16 @@ function renderPoke() {
     stage.append(f);
   }
   wrap.append(bar, stage);
-  body.classList.toggle('expanded', pokeExpanded);
-  if (pokeExpanded) body.append(wrap); else body.append(list, wrap);
-  root.append(top, body);
+  document.body.classList.toggle('foco', pokeFoco && page === 'poke');
+  if (pokeFoco) {
+    bar.remove();
+    wrap.classList.add('foco-wrap');
+    root.append(focoBar(s), wrap);
+  } else {
+    body.classList.toggle('expanded', pokeExpanded);
+    if (pokeExpanded) body.append(wrap); else body.append(list, wrap);
+    root.append(top, body);
+  }
   requestAnimationFrame(() => pokeView(page === 'poke' && $('#drawer').hidden && $('#modal').hidden));
 }
 // Diz ao app onde a conta aparece (o jogo fica por cima da tela, nesse retângulo).

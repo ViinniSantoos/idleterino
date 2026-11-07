@@ -201,6 +201,7 @@ function appState() {
   return {
     version: app.getVersion(), platform: process.platform, openAtLogin: isOpenAtLogin(),
     platforms: config.platforms, firstRun,
+    fullscreen: !!(mainWin && !mainWin.isDestroyed() && mainWin.isFullScreen()),
     news: config.lastSeenVersion && config.lastSeenVersion !== app.getVersion(),
     update,
     seg: { falhas: seg.falhas(), canRollback: seg.canRollback() },
@@ -277,6 +278,12 @@ ipcMain.handle('app:platform', (_e, ns, on) => { if (modules[ns]) setPlatform(ns
 ipcMain.handle('app:autostart', (_e, on) => { try { setOpenAtLogin(!!on); } catch {} return appState(); });
 ipcMain.handle('app:introDone', () => { config.lastSeenVersion = app.getVersion(); firstRun = false; saveConfig(); return appState(); });
 ipcMain.handle('app:quit', quitApp);
+// Tela cheia da janela (modo foco do PokeIdle): F11 em qualquer tela do app ou o botão da faixa.
+function toggleFullscreen() { if (mainWin && !mainWin.isDestroyed()) mainWin.setFullScreen(!mainWin.isFullScreen()); }
+ipcMain.handle('app:fullscreen', () => { toggleFullscreen(); return appState(); });
+app.on('web-contents-created', (_e, wc) => {
+  wc.on('before-input-event', (ev, input) => { if (input.type === 'keyDown' && input.key === 'F11' && !input.alt && !input.control) { ev.preventDefault(); toggleFullscreen(); } });
+});
 ipcMain.handle('app:update:install', () => installUpdate());
 // Segurança e versões
 ipcMain.handle('app:seg:state', () => ({ backups: seg.list(), falhas: seg.falhas(), canRollback: seg.canRollback(), version: app.getVersion(), minRollback: seg.MIN_ROLLBACK }));
@@ -416,6 +423,7 @@ app.whenReady().then(() => {
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, sandbox: true, nodeIntegration: false },
   });
   mainWin.setMenuBarVisibility(false);
+  for (const ev of ['enter-full-screen', 'leave-full-screen']) mainWin.on(ev, () => send('app:state', appState()));
   mainWin.loadFile(path.join(__dirname, 'renderer', 'index.html'));
   for (const m of Object.values(modules)) m.setMain(mainWin);
   poke.setMain(mainWin);

@@ -685,3 +685,16 @@ button.warn { border-color: rgba(255, 159, 67, .6); color: #ffb36b; }
 .stream-opts select { width: 100%; }
 @media (max-width: 1100px) { .stream-opts { grid-template-columns: 1fr 1fr; } }
 .row.aviso-linha .txt small { color: #ffb366; }
+
+/* Modo foco: só o jogo */
+body.foco #rail { display: none; }
+body.foco .page.poke.on { padding: 0; }
+body.foco .glow { display: none; }
+.foco-wrap { flex: 1; border: 0; border-radius: 0; }
+.foco-bar { display: flex; align-items: center; gap: 6px; height: 30px; flex-shrink: 0; padding: 0 8px; background: var(--s1); border-bottom: 1px solid var(--line); }
+.foco-bar .spacer { flex: 1; }
+.foco-bar button { height: 22px; padding: 0 10px; font-size: 12px; border-radius: 7px; display: inline-flex; align-items: center; gap: 6px; }
+.foco-acc { background: transparent; border: 1px solid transparent; color: var(--muted); }
+.foco-acc.on { color: var(--text); border-color: color-mix(in srgb, var(--pk) 55%, transparent); background: color-mix(in srgb, var(--pk) 12%, transparent); }
+.foco-acc .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+.foco-acc .dot.ok { background: var(--ok); } .foco-acc .dot.off { background: #6b7085; } .foco-acc .dot.frz { background: #8fc8ff; }
