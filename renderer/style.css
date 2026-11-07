@@ -698,3 +698,9 @@ body.foco .glow { display: none; }
 .foco-acc.on { color: var(--text); border-color: color-mix(in srgb, var(--pk) 55%, transparent); background: color-mix(in srgb, var(--pk) 12%, transparent); }
 .foco-acc .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
 .foco-acc .dot.ok { background: var(--ok); } .foco-acc .dot.off { background: #6b7085; } .foco-acc .dot.frz { background: #8fc8ff; }
+
+/* Previsão de shiny na faixa do Início */
+.sh-prev { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.sh-prev .sep { color: var(--muted); }
+.sh-bx { font-size: 11px; padding: 1px 7px; border-radius: 999px; background: color-mix(in srgb, #ffcf4a 18%, transparent); color: #ffcf66; }
+.alt-row .n i.shp { color: #ffcf66; }

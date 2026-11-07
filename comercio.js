@@ -46,7 +46,7 @@ module.exports = function createComercio(ctx, poke) {
     for (const [tag, g] of Object.entries((j && j.guildas) || {})) {
       try {
         const [iv, tg, ct] = String(g.c).split('.').map((x) => Buffer.from(x, 'base64'));
-        const d = crypto.createDecipheriv('aes-256-gcm', crypto.createHash('sha256').update(`${SEGREDO}|${tag}`).digest(), iv);
+        const d = crypto.createDecipheriv('aes-256-gcm', crypto.createHash('sha256').update(`${SEGREDO}|${tag}|v${Number(g.v) || 1}`).digest(), iv);
         d.setAuthTag(tg);
         const url = Buffer.concat([d.update(ct), d.final()]).toString('utf8');
         if (WEBHOOK.test(url)) novo[tag.toUpperCase()] = { url, nome: String(g.nome || `Comércio ${tag}`).slice(0, 60) };

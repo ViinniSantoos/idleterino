@@ -41,6 +41,8 @@ contextBridge.executeInMainWorld({
       const { cheio, pokemons, pkMud, pkFora } = p;
       if (cheio || cheioForcado) jogo.keys = Object.keys(p);
       for (const k of CAMPOS_EU) if (k in p) jogo.eu[k] = p[k];
+      // Shiny Secret Lure da Loja: só o fim dele (o resto da Loja não interessa ao app).
+      if (p.loja && p.loja.boosts && 'shiny' in p.loja.boosts) jogo.eu.lureAte = Number(p.loja.boosts.shiny) || 0;
       if ('nick' in p || 'xp' in p || 'level' in p) jogo.at = Date.now();
       if (Array.isArray(pokemons)) jogo.pks = new Map(pokemons.map((k) => [k.id, slimPk(k)]));
       for (const k of pkMud || []) jogo.pks.set(k.id, slimPk(k));
@@ -106,6 +108,7 @@ contextBridge.executeInMainWorld({
                   if (m.tabelaTipos) jogo.tabelaTipos = m.tabelaTipos;
                   if (m.ampliacaoHunt) jogo.amp = Number(m.ampliacaoHunt) || 1.5;
                   if (m.multHpSelvagem) jogo.multHp = Number(m.multHpSelvagem) || 5;
+                  if (m.chanceShiny) jogo.chanceShiny = Number(m.chanceShiny) || 0;
                 }
                 aplicarEstado(est, m.t === 'welcome');
                 const bx = est && est.bonusXp;
@@ -636,6 +639,11 @@ contextBridge.executeInMainWorld({
         },
         ler() { return JSON.parse(JSON.stringify(keep)); },
         canais() { return JSON.parse(JSON.stringify(canais)); },
+        // Previsão de shiny: chance por encontro (do servidor) e o fim de cada bônus de shiny que vale agora.
+        shinyInfo() {
+          const fim = (k) => Number(canais[k] && canais[k].bonus && canais[k].bonus.shiny) || 0;
+          return { chance: jogo.chanceShiny || 0, lure: jogo.eu.lureAte || 0, kick: fim('kick'), twitch: fim('twitch') };
+        },
         hunts() { return hunts.slice(); },
         bonusXp() { return bonusXp ? JSON.parse(JSON.stringify(bonusXp)) : null; },
         huntRank() { return huntRank().then((r) => JSON.parse(JSON.stringify(r))).catch((e) => ({ pronto: false, erro: String(e) })); },

@@ -928,6 +928,22 @@ function renderHomePoke() {
   const big = (n) => { n = Number(n) || 0; const a = Math.abs(n); return a >= 1e9 ? `${(n / 1e9).toFixed(a >= 1e10 ? 0 : 1)}B` : a >= 1e6 ? `${(n / 1e6).toFixed(a >= 1e7 ? 0 : 1)}M` : a >= 1e4 ? `${Math.round(n / 1e3)}k` : fmt(n); };
   const farmOf = (a) => { const x = a.info && a.info.sess; if (!x) return null; return { ms: x.ms, xp: rate(x.xpTreinador, x.ms), pxp: rate(x.xpPokemon, x.ms), gold: rate(x.gold, x.ms), ab: rate(x.abates, x.ms), cap: x.capturas, capH: rate(x.capturas, x.ms), lucroH: x.lucroH, shV: x.shVistos || 0, shC: x.shCapt || 0 }; };
   const lvl = (a) => { const i = a.info || {}; return i.logged && i.level ? `Nv ${i.level.replace(/\D+/g, '')}` : ''; };
+  // Previsão de shiny: o jogo sorteia shiny a cada encontro (≈ abate), com a mesma chance em toda hunt.
+  // Bônus que multiplicam: Shiny Secret Lure da Loja ×2, bônus de shiny da live na Kick e na Twitch +15% cada.
+  const shinyPrev = (a, f) => {
+    const x = (a.info && a.info.shiny) || {};
+    if (!f || !(f.ab > 0)) return null;
+    const agora = Date.now();
+    const chance = x.chance > 0 ? x.chance : 1 / 24000;
+    const lure = x.lure > agora, kick = x.kick > agora, tw = x.twitch > agora;
+    const mult = (lure ? 2 : 1) * (kick ? 1.15 : 1) * (tw ? 1.15 : 1);
+    const h = 1 / (f.ab * chance * mult);
+    const hLure = lure ? null : h / 2;
+    const dur = (hh) => (hh < 1 ? `${Math.max(1, Math.round(hh * 60))} min` : hh < 10 ? `${hh.toFixed(1).replace('.', ',')} h` : hh < 48 ? `${Math.round(hh)} h` : `${(hh / 24).toFixed(1).replace('.', ',')} dias`);
+    const bonus = [lure && 'Lure ×2', kick && 'Kick +15%', tw && 'Twitch +15%'].filter(Boolean);
+    return { txt: `~1 a cada ${dur(h)}`, lure: hLure ? `com Lure: ~${dur(hLure)}` : null, bonus,
+      tip: `Chance por encontro: 1 em ${fmt(Math.round(1 / chance))}${x.chance > 0 ? '' : ' (padrão do jogo)'} · ${fmt(f.ab)} abates/h${bonus.length ? ` · bônus: ${bonus.join(', ')} (×${mult.toFixed(2).replace('.', ',')})` : ' · sem bônus de shiny'}. É uma média: o shiny é sorteio, pode vir antes ou depois. Conta shiny visto (ainda precisa capturar).` };
+  };
   const statBox = (v, l, cls) => { const d = el('div', `fstat${cls ? ' ' + cls : ''}`); d.append(el('b', null, v), el('span', null, l)); return d; };
 
   const farm = el('div', 'home-farm');
@@ -945,6 +961,15 @@ function renderHomePoke() {
   if (mf) {
     const sh = el('div', `shiny-strip${mf.shV || mf.shC ? ' tem' : ''}`);
     sh.append(el('span', 'ico', '✨'), el('span', null, 'Shinys nesta sessão'), el('b', null, fmt(mf.shV)), el('span', 'l', 'vistos'), el('b', null, fmt(mf.shC)), el('span', 'l', 'capturados'));
+    const sp = shinyPrev(main, mf);
+    if (sp) {
+      const pv = el('span', 'sh-prev');
+      pv.append(el('span', 'sep', '·'), el('span', null, 'previsão'), el('b', null, sp.txt));
+      if (sp.bonus.length) pv.append(el('span', 'sh-bx', sp.bonus.join(' · ')));
+      if (sp.lure) pv.append(el('span', 'l', `(${sp.lure})`));
+      pv.title = sp.tip; sh.title = sp.tip;
+      sh.append(pv);
+    }
     mc.append(mg, sh);
   }
   if (!mg.parentNode) mc.append(mg);
@@ -1002,6 +1027,8 @@ function renderHomePoke() {
       }
       if (am) { const t = el('i', 'meta', am.hunt ? `🎯 ${am.hunt.nome} (Nv ${fmt(am.hunt.nivel)}) em ${longDur(am.hunt.ms)}` : `🎯 Nv ${am.L + 1} em ${longDur(am.nextMs)}`); t.title = [`Próximo nível (Nv ${am.L + 1}) em ${longDur(am.nextMs)}`, am.boost != null ? (am.boost > 0 ? `Bônus de XP agora: +${am.boost}%` : 'Sem bônus de XP agora') : '', ...am.ending, 'Já conta quando cada bônus acaba.'].filter(Boolean).join('\n'); n.append(t); }
       r.append(n, el('span', null, f ? big(f.xp) : '—'), el('span', 'gold', f ? big(f.gold) : '—'), el('span', null, f ? big(f.ab) : '—'), el('span', null, f ? fmt(f.cap) : '—'), el('span', f && (f.shV || f.shC) ? 'shiny' : null, f ? `${fmt(f.shV)} / ${fmt(f.shC)}` : '—'));
+      const sp = shinyPrev(a, f);
+      if (sp) { const t3 = el('i', 'shp', `✨ ${sp.txt}${sp.bonus.length ? ` (${sp.bonus.join(', ')})` : ''}`); t3.title = sp.tip; n.append(t3); }
       r.onclick = () => openAcc(a);
       tbl.append(r);
     });
