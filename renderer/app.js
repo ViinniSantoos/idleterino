@@ -249,7 +249,9 @@ function chatCol(ns, s) {
   const t = el('div', 't'); t.append(el('b', null, ch.displayName), el('span', null, ch.live ? `🔴 ${fmt(ch.viewers)} · ${ch.title}` : 'offline'));
   const fav = button((s.favorites || []).includes(ch.slug) ? '★' : '☆', 'ghost', async () => apply(ns, await call(`${ns}:favorite:toggle`, ch.slug)));
   fav.title = 'Fixar no topo e avisar quando entrar ao vivo';
-  head.append(avatar(ns, ch), t, fav, button('▶ Live', null, () => call(`${ns}:channel:show`, ch.slug)), button('Loja', null, () => call(`${ns}:store:open`, ch.slug)));
+  const rm = button('🗑', 'ghost', () => confirmRemoveChannel(ns, ch));
+  rm.title = 'Remover este canal do Idleterino (para de assistir e de juntar pontos nele)';
+  head.append(avatar(ns, ch), t, fav, button('▶ Live', null, () => call(`${ns}:channel:show`, ch.slug)), button('Loja', null, () => call(`${ns}:store:open`, ch.slug)), rm);
   const prices = el('div', 'prices');
   if (ns === 'twitch' && ch.rewards && ch.rewards.length) {
     for (const k of ['xp', 'capture', 'lure']) {
@@ -779,6 +781,25 @@ function confirmRemove(a) {
   card.replaceChildren(el('h3', null, `Remover ${a.name}?`), el('p', null, 'A conta sai deste app e o login dela é apagado deste PC. A conta no jogo continua existindo normalmente.'));
   const actions = el('div', 'actions');
   actions.append(button('Cancelar', null, closeModal), button('Remover', 'primary', async () => { closeModal(); S.poke = await call('poke:remove', a.id); renderPoke(); }));
+  card.append(actions);
+  $('#modal').hidden = false;
+}
+// Tirar um canal da Twitch ou da Kick (ex.: banido no chat): para de assistir e de juntar pontos nele.
+// Canal oficial do PokeIdle que a pessoa tirou não volta sozinho (fica em seenDefaults no módulo).
+function confirmRemoveChannel(ns, ch) {
+  const card = $('#modal-card');
+  const plat = ns === 'twitch' ? 'Twitch' : 'Kick';
+  card.replaceChildren(el('h3', null, `Remover ${ch.displayName}?`),
+    el('p', null, `O Idleterino para de assistir e de juntar pontos nesse canal da ${plat}. Os pontos que você já tem no canal continuam lá, na sua conta.`),
+    el('p', 'sub', 'Mesmo sendo um canal oficial do PokeIdle, ele não volta sozinho. Para pôr de volta: ＋ Adicionar canal, na lista.'));
+  const actions = el('div', 'actions');
+  actions.append(button('Cancelar', null, closeModal), button('Remover', 'primary', async () => {
+    closeModal();
+    const snap = await call(`${ns}:channels:remove`, ch.slug);
+    if (view[ns].active === ch.slug) view[ns].active = null;
+    apply(ns, snap);
+    toast(`${ch.displayName} removido da ${plat}.`);
+  }));
   card.append(actions);
   $('#modal').hidden = false;
 }

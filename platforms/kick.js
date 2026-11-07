@@ -993,6 +993,9 @@ ipcMain.handle('kick:channels:add', async (_e, slug) => {
 });
 ipcMain.handle('kick:channels:remove', (_e, slug) => {
   config.channels = config.channels.filter((c) => c !== slug);
+  // Tirou: não volta sozinho (nem sendo canal oficial do PokeIdle) e sai dos favoritos.
+  config.seenDefaults = [...new Set([...(config.seenDefaults || []), slug])];
+  config.favorites = (config.favorites || []).filter((s) => s !== slug);
   stopWatcher(slug); status.delete(slug); saveConfig();
   return snapshot();
 });
