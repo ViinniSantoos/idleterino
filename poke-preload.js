@@ -28,7 +28,7 @@ contextBridge.executeInMainWorld({
 
     // ---- estado leve do jogador: o que a sugestão de hunt e o PvP precisam ----
     const jogo = { hunts: null, tabelaTipos: null, amp: 1.5, multHp: 5, eu: {}, pks: new Map(), keys: [] };
-    const CAMPOS_EU = ['guild', 'xp', 'xpNivel', 'xpProximo', 'gold', 'nick', 'level', 'activeId', 'bicicleta', 'pvp', 'pvpRank', 'pvpPosicao', 'pvpHistorico', 'pvpTime', 'huntSlug', 'hunt', 'huntAtual', 'area'];
+    const CAMPOS_EU = ['diaSazonal', 'guild', 'xp', 'xpNivel', 'xpProximo', 'gold', 'nick', 'level', 'activeId', 'bicicleta', 'pvp', 'pvpRank', 'pvpPosicao', 'pvpHistorico', 'pvpTime', 'huntSlug', 'hunt', 'huntAtual', 'area'];
     const DUELO = (k) => ({ ivs: k.ivs || null, quality: k.quality ?? k.qualidade ?? null, potencia: k.potencia ?? null, refino: k.refino || null, tmElemental: k.tmElemental || null, tmFisico: !!k.tmFisico });
     const slimPk = (k) => ({
       ...DUELO(k),
@@ -268,11 +268,11 @@ contextBridge.executeInMainWorld({
           const ataques = TIPOS.map((tp) => ({ t: tp, x: naHuntX(fxTipo(tp, t)) })).filter((a) => a.x >= 2.4).sort((a, b) => b.x - a.x).slice(0, 4);
           let meu = null;
           for (const m of meus) { const x = melhorX([...new Set([...m.tipos, m.el].filter(Boolean))], t); if (!meu || x > meu.x || (x === meu.x && m.level > meu.level)) meu = { nome: m.nome, level: m.level, x }; }
-          return { nome: String(h.nome || h.slug), tipos: t, ataques, meu };
+          return { nome: String(h.nome || h.slug), tipos: t, ataques, meu, doDia: !!(tipoDoDia() && t.includes(tipoDoDia())) };
         }).sort((a, b) => (b.meu ? b.meu.x : 0) - (a.meu ? a.meu.x : 0));
         return { nivel: nv, hunts };
       });
-      return { pronto: true, L, grupos };
+      return { pronto: true, L, grupos, tipoDia: tipoDoDia() };
     }
     async function pveEvolucoes(speciesId) {
       const { map, ram } = await catalogoPve();
@@ -305,12 +305,72 @@ contextBridge.executeInMainWorld({
       const opcoes = finais.map((f) => ({ passos: f.passos, final: avalia(f.final, false), megas: megasDe(f.final).map((m) => avalia(m, true)) }));
       return { base: { pokeId: base.pokeId, nome: base.name, tipos: tiposDe(base), stats: statsBase(base), bst: bst(base) }, L, opcoes };
     }
+    // Comprar no Market para FARMAR: as espécies que mais rendem nas próximas hunts da conta, as ofertas mais
+    // baratas delas agora (consulta escondida do jogo, como a do PvP) e o ataque REAL de cada pokémon à venda.
+    let pveBuscando = false;
+    async function pveMercado(moeda) {
+      if (pveBuscando) return { erro: 'Já estou procurando. Espere terminar.' };
+      if (!jogo.hunts || !jogo.tabelaTipos) return { erro: 'A conta precisa estar logada no jogo.' };
+      if (!sock || sock.readyState !== 1) return { erro: 'Sem conexão com o jogo agora.' };
+      pveBuscando = true;
+      try {
+        const { map, gi } = await catalogoNota();
+        const L = Number(jogo.eu.level) || 0;
+        const alvo = jogo.hunts.filter((h) => { const n = Number(h.nivel) || 0; return n >= L * 0.8 && n <= Math.max(L * 3, L + 3000) && Array.isArray(h.especies) && h.especies.length; });
+        const tiposH = alvo.map((h) => tiposDe(map.get(h.especies[0].pokeId) || {}));
+        const cobertura = (t) => { let x25 = 0, x55 = 0; for (const th of tiposH) { const x = melhorX(t, th); if (x >= 5) x55++; else if (x >= 2.4) x25++; } return { x25, x55 }; };
+        // Candidatas: espécies com arte, capturáveis (sem Mega), que mais rendem nessas hunts pelo tipo e pelo ataque-base.
+        const cand = [];
+        for (const c of map.values()) {
+          if (!c || !c.name || /^Mega /.test(c.name) || !(Number(c.looktype) > 1)) continue;
+          const t = tiposDe(c); if (!t.length) continue;
+          const cv = cobertura(t);
+          const atkB = Math.max(Number(c.baseAtk) || 0, Number(c.baseSpAtk) || 0);
+          const sc = (cv.x55 * 2 + cv.x25) * atkB;
+          if (sc > 0) cand.push({ id: c.pokeId, sc });
+        }
+        cand.sort((a, b) => b.sc - a.sc);
+        const vistos = new Set();
+        const ids = [];
+        for (const x of cand) { const nm = map.get(x.id).name; if (vistos.has(nm)) continue; vistos.add(nm); ids.push(x.id); if (ids.length >= 15) break; }
+        const out = [];
+        for (const id of ids) {
+          if (!sock || sock.readyState !== 1) break;
+          if (document.querySelector('#community:not(.hidden)')) return { erro: 'mercado-aberto', lista: out };
+          const antes = ultimaLista && ultimaLista.em;
+          nossos.lista = Date.now();
+          sock.send(JSON.stringify({ t: 'market.listar', tipo: 'pokemon', moeda: moeda === 'gold' ? 'gold' : 'orb', ordem: 'baratos', busca: '', criterios: [], elementos: [], pagina: 0, especieId: Number(id) }));
+          for (let i = 0; i < 12 && (ultimaLista && ultimaLista.em) === antes; i++) await espera(400);
+          if (ultimaLista && ultimaLista.em !== antes) {
+            for (const a of (ultimaLista.m.linhas || []).slice(0, 8)) {
+              const f = a.ficha || {};
+              if (a.tipo !== 'pokemon' || !f.speciesId) continue;
+              const c = map.get(f.speciesId); if (!c) continue;
+              const pk = { id: 1, speciesId: f.speciesId, level: Number(f.level) || 1, ivs: f.ivs || null, quality: f.quality ?? null, potencia: f.potencia ?? null, refino: f.refino || null, shiny: !!f.shiny };
+              let st = null; try { st = pk.ivs ? gi.statsNoNivel(pk, c, pk.level) : null; } catch {}
+              const t = [...new Set([...tiposDe(c), f.tmElemental ? String(f.tmElemental).toUpperCase() : null].filter(Boolean))];
+              const cv = cobertura(t);
+              const ataque = st ? Math.max(Number(st.atk) || 0, Number(st.spAtk) || 0) : 0;
+              out.push({ anuncio: a.id, speciesId: f.speciesId, nome: f.nome || c.name, level: pk.level, shiny: pk.shiny, aoe: f.tmAoe === true || f.tmAoe === 1, el: f.tmElemental || null, potencia: f.potencia ?? null,
+                preco: Number(a.preco) || 0, qtd: Number(a.qtd) || 1, moeda: a.moeda, vendedor: a.vendedor || '', retido: !!(a.compravelEm && a.compravelEm > Date.now()),
+                tipos: tiposDe(c), x25: cv.x25, x55: cv.x55, ataque, farm: (cv.x55 * 2 + cv.x25) * ataque * ((f.tmAoe === true || f.tmAoe === 1) ? 1.5 : 1) });
+            }
+          }
+          await espera(2500);
+        }
+        return { lista: out, L, huntsAlvo: tiposH.length, em: Date.now() };
+      } finally { pveBuscando = false; }
+    }
     async function pveBuscar(texto) {
       const { map } = await catalogoNota();
       const q = String(texto || '').trim().toLowerCase();
       if (q.length < 2) return [];
       return [...map.values()].filter((c) => c && c.name && c.name.toLowerCase().includes(q) && !/^Mega /.test(c.name)).slice(0, 12).map((c) => ({ speciesId: c.pokeId, nome: c.name, tipos: tiposDe(c) }));
     }
+    // DIA SAZONAL (shared/dia-sazonal.mjs): nas hunts do Mapa, todo pokémon da tipagem do dia — o seu E os
+    // selvagens — causa o dobro de dano e recebe ¼ (dobro de defesa e de vida). Vira às 18:00 de Brasília.
+    const tipoDoDia = () => { const d = jogo.eu.diaSazonal; return d && d.tipo && (!d.fim || Number(d.fim) > Date.now()) ? String(d.tipo).toUpperCase() : null; };
+    const multSazonal = (tipoDia, atq, def) => (!tipoDia ? 1 : (atq.includes(tipoDia) ? 2 : 1) / (def.includes(tipoDia) ? 4 : 1));
     const VEL_BIKE = { comum: 0.15, incomum: 0.25, rara: 0.5, mitica: 0.75, lendaria: 1 };
     const tiposDe = (c) => [c && c.type1, c && c.type2].filter((x) => x && x !== 'NONE').map((x) => String(x).toUpperCase());
     let modTab = null;
@@ -335,7 +395,10 @@ contextBridge.executeInMainWorld({
     const IV_SELVAGEM = 16;            // IV médio de selvagem (1–32)
     const HP_SELVAGEM_EXTRA = 1.33;    // Gible nv 1000: 72.000 de vida no campo contra 54.000 da conta crua (28/10/2026)
     const BANDO_PADRAO = 5;            // selvagens por bando enquanto o campo não mostrou nenhum
-    const RITMO_PADRAO_MS = 2400;      // ritmo do mapa por selvagem, a pé (o /hunt do jogo: ~900 abates/h matando em <1 s)
+    // TETO DO RITMO: andar até o próximo alvo e esperar a onda nascer. Mesmo matando na hora, a pé não passa de
+    // ~900 abates/h (medido: 934/h numa hunt de ×5,5 e 847/h em outra conta). O tempo de cada abate é o MAIOR
+    // entre a luta e esse teto — não a soma: matar mais rápido que o teto não rende mais abates.
+    const PISO_PADRAO_MS = 3900;
     const MEDIDO_MIN_MS = 10 * 60 * 1000;
     const VARIACAO_MEDIA = 0.925;      // o dano de cada golpe sai entre 0,85 e 1,00
     const naHunt = (v, amp) => (v === 0 || v === 1 ? v : v > 1 ? 1 + (v - 1) * amp : v / amp);
@@ -473,11 +536,12 @@ contextBridge.executeInMainWorld({
       }
       const hpExtra = mediana(razoes) || HP_SELVAGEM_EXTRA;
 
+      const tipoDia = tipoDoDia();
       const out = [];
       for (const h of jogo.hunts) {
         const nivel = Number(h.nivel) || 0;
         if (nivel > L || !Array.isArray(h.especies) || !h.especies.length) continue;
-        let pontos = 0, tAbate = 0, effMed = 0, effH = 0, effMax = 0, risco = 0, semDano = false;
+        let pontos = 0, tAbate = 0, effMed = 0, effH = 0, effMax = 0, risco = 0, semDano = false, selvagemDoDia = false;
         const golpeUso = {};
         const nivelRel = nivel / Math.max(1, Number(act.level) || 1); // hunt acima do nível do pokémon = mob batendo mais forte
         for (const e of h.especies) {
@@ -489,51 +553,63 @@ contextBridge.executeInMainWorld({
           const r = dpsContra(P, t, statW(c.baseDef, nivel), statW(c.baseSpDef, nivel), jogo.tabelaTipos, ha.efetividade);
           if (!(r.dps > 0)) { semDano = true; break; }
           const hp = hpCru(c, nivel) * hpExtra;
-          tAbate += Math.max(P.gi, (hp / r.dps) * 1000) * w;
+          if (tipoDia && t.includes(tipoDia)) selvagemDoDia = true;
+          tAbate += Math.max(P.gi, (hp / (r.dps * multSazonal(tipoDia, tiposPk, t))) * 1000) * w;
           golpeUso[r.golpe] = (golpeUso[r.golpe] || 0) + w;
           pontos += w; effMed += eff * w; effH += naHunt(eff, amp) * w; effMax = Math.max(effMax, eff);
           // Risco de gastar poção: o golpe do selvagem contra o SEU pokémon (tipos dele × os seus) e o nível da hunt.
           let dano = 1;
           try { dano = ha.melhorEfetividadeContra(t, tiposPk[0] || null, tiposPk[1] || null, jogo.tabelaTipos) || 1; } catch {}
-          risco += dano * nivelRel * w;
+          risco += dano * multSazonal(tipoDia, t, tiposPk) * nivelRel * w;
         }
         if (semDano || !pontos) continue;
         tAbate /= pontos; effMed /= pontos; effH /= pontos; risco /= pontos;
         const porOnda = Math.min(ha.MAX_MOBS || 16, pontos);
         const M = medido[h.slug] || null;
-        const bando = act.aoe ? Math.min(porOnda, mediana((M && M.bando) || []) || BANDO_PADRAO) : 1;
-        // Por selvagem: a luta (o bando inteiro de uma vez com AoE), a caminhada até o próximo alvo e a pausa da onda.
-        const msLuta = tAbate / bando; // com AoE o bando inteiro cai no tempo de um selvagem
+        // Bando que nasce junto (medido no campo, quadrado 11×11 do AoE). O AoE pega o bando inteiro de uma vez.
+        const bandoSpawn = act.aoe ? Math.min(porOnda, mediana((M && M.bando) || []) || BANDO_PADRAO) : 1;
         let xp = 0, gold = 0;
         try { const r = ha.mediaPorKill(h, esp, 0); xp = r.xp; gold = r.gold; } catch {}
         const med = M && M.pk && M.pk[act.id];
         const golpe = Object.entries(golpeUso).sort((a, b) => b[1] - a[1])[0];
-        out.push({ slug: h.slug || null, nome: String(h.nome || h.name || h.slug || '?'), nivel, msLuta, xp, gold,
+        out.push({ slug: h.slug || null, nome: String(h.nome || h.name || h.slug || '?'), nivel, tAbate, bandoSpawn, porOnda, xp, gold, selvagemDoDia,
           medido: med && med.ms >= MEDIDO_MIN_MS && med.ab >= 20 ? med : null,
-          seg: Math.round(tAbate / 100) / 10, bando: Math.round(bando * 10) / 10, golpe: golpe ? golpe[0] : null,
+          seg: Math.round(tAbate / 100) / 10, bando: Math.round(bandoSpawn * 10) / 10, golpe: golpe ? golpe[0] : null,
           risco: Math.round(risco * 100) / 100, eff: Math.round(effMed * 100) / 100, effH: Math.round(effH * 100) / 100, effMax });
       }
 
-      // Escala: o que a conta mediu com este pokémon contra o que a conta previa nas mesmas hunts.
-      // Ritmo do mapa: o que sobra do tempo medido por selvagem depois da luta, sem a bicicleta.
-      const ritmoMedido = mediana(out.filter((h) => h.medido).map((h) => ((h.medido.ms / h.medido.ab) - h.msLuta) * (1 + vel)));
-      const ritmo = Math.min(8000, Math.max(500, ritmoMedido || RITMO_PADRAO_MS));
+      // Teto do ritmo calibrado pelo que a conta MEDIU — só nas hunts em que a luta é bem mais rápida que o tempo
+      // medido (senão a luta é que manda e a medida não diz nada do teto). Sem medida assim, o padrão.
+      const pisoMedido = mediana(out.filter((h) => h.medido && h.tAbate < 0.6 * (h.medido.ms / h.medido.ab) * h.bandoSpawn)
+        .map((h) => (h.medido.ms / h.medido.ab) * h.bandoSpawn * (1 + vel)));
+      const ritmo = Math.min(9000, Math.max(2500, pisoMedido || PISO_PADRAO_MS));
+      const pisoParada = ritmo / (1 + vel); // a bike encurta só a caminhada
+      // Tempo por abate: a parada leva o MAIOR entre a luta e o teto. Com AoE o golpe pega o bando inteiro, e
+      // quando a luta é mais lenta que o teto os selvagens das próximas ondas se juntam e o bando cresce
+      // (até o máximo da onda).
+      const msPorAbate = (h) => {
+        const bandoEf = act.aoe ? Math.min(h.porOnda, h.bandoSpawn * Math.max(1, h.tAbate / pisoParada)) : 1;
+        h.bando = Math.round(bandoEf * 10) / 10;
+        return Math.max(h.tAbate, pisoParada) / bandoEf;
+      };
       for (const h of out) {
         const m = h.medido;
         const horas = m ? m.ms / 3600000 : 0;
-        const kph = m ? m.ab / horas : 3600000 / (h.msLuta + ritmo / (1 + vel));
+        const kph = m ? m.ab / horas : 3600000 / msPorAbate(h);
+        if (m) msPorAbate(h);
         h.kph = Math.round(kph);
         h.xpH = Math.round(m ? m.xp / horas : kph * h.xp * bx);
         h.goldH = Math.round(m ? m.gold / horas : kph * h.gold);
         // Ouro "de verdade": quanto mais o pokémon apanha, mais poção some do lucro (estimativa).
         h.goldLiq = Math.round(h.goldH / (1 + Math.max(0, h.risco - 1) * 0.6));
         h.medidoMin = m ? Math.round(m.ms / 60000) : 0;
-        delete h.medido; delete h.msLuta; delete h.xp; delete h.gold;
+        h.teto = h.tAbate <= pisoParada; // mata mais rápido que o teto: ×5,5 ou ×2,5 tanto faz aqui
+        delete h.medido; delete h.tAbate; delete h.bandoSpawn; delete h.porOnda; delete h.xp; delete h.gold;
       }
       out.sort((a, b) => b.xpH - a.xpH);
       const atualEst = out.find((h) => h.slug && h.slug === atualSlug) || null;
       return {
-        pronto: true, L, pokemon: cat.name || '?', tipos: atk, aoe: act.aoe, bike: rar, vel, bonus: bx,
+        pronto: true, L, pokemon: cat.name || '?', tipos: atk, aoe: act.aoe, bike: rar, vel, bonus: bx, tipoDia, seuDoDia: !!(tipoDia && tiposPk.includes(tipoDia)),
         calibrado: out.filter((h) => h.medidoMin).length, ritmo: Math.round(ritmo), hpExtra: Math.round(hpExtra * 100) / 100,
         top: out.slice(0, 8), atual: atualSlug, atualEst,
         topOuro: [...out].sort((a, b) => b.goldLiq - a.goldLiq).slice(0, 8),
@@ -763,7 +839,7 @@ contextBridge.executeInMainWorld({
         canais() { return JSON.parse(JSON.stringify(canais)); },
         // Aba PvE do app (só leitura).
         pve(o, arg) {
-          const f = o === 'proximas' ? pveProximas : o === 'evolucoes' ? () => pveEvolucoes(arg) : o === 'meus' ? pveMeus : o === 'buscar' ? () => pveBuscar(arg) : null;
+          const f = o === 'proximas' ? pveProximas : o === 'evolucoes' ? () => pveEvolucoes(arg) : o === 'meus' ? pveMeus : o === 'buscar' ? () => pveBuscar(arg) : o === 'mercado' ? () => pveMercado(arg) : null;
           return f ? f().catch((e) => ({ erro: String(e && e.message || e) })) : null;
         },
         // Comércio: nota, stats e espécie da ficha de um anúncio (mesma conta da ficha do jogo).

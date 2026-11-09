@@ -618,9 +618,11 @@ module.exports = function createPokeIdle(ctx) {
   });
   ipcMain.handle('poke:optimizeEvery', (_e, min) => { config.optimizeEvery = [0, 30, 60, 120, 300].includes(Number(min)) ? Number(min) : 0; saveConfig(); return snapshot(); });
   ipcMain.handle('poke:pvp:get', (_e, accId) => pvpGet(accId));
+  // "Ver no Market": abre o anúncio no jogo (o mesmo caminho do link do #comércio).
+  ipcMain.handle('poke:anuncio:abrir', async (_e, id) => { const r = await api.abrirAnuncio(id).catch(() => ({ erro: 'Não deu para abrir o anúncio.' })); return r; });
   // Aba PvE: as contas leem os dados do próprio jogo (próximas hunts, evoluções).
   ipcMain.handle('poke:pve', async (_e, accId, o, arg) => {
-    if (!['proximas', 'evolucoes', 'meus', 'buscar'].includes(o)) return null;
+    if (!['proximas', 'evolucoes', 'meus', 'buscar', 'mercado'].includes(o)) return null;
     const v = views.get(accId) || views.get(mainAccId());
     if (!v || v.webContents.isDestroyed()) return { erro: 'Conta do PokeIdle fechada.' };
     return v.webContents.executeJavaScript(`window.__idleterinoMercado && window.__idleterinoMercado.pve ? window.__idleterinoMercado.pve(${JSON.stringify(o)}, ${JSON.stringify(arg == null ? null : arg)}) : null`).catch(() => null);
@@ -692,7 +694,7 @@ module.exports = function createPokeIdle(ctx) {
     // Com o comércio da guild ligado, a leitura dos anúncios vem a cada 5 min (senão, 10 min).
     timers.push(setInterval(() => { const cada = ctx.comercioAtivo && ctx.comercioAtivo() ? 5 * 60 * 1000 : MARKET_MS; if (Date.now() - lastMarket >= cada - 5000) askMarket(); }, 60 * 1000));
   }
-  return {
+  const api = {
     partitions: () => config.accounts.map((a) => partitionOf(a.id)),
     reloadAll: () => { for (const v of views.values()) if (!v.webContents.isDestroyed()) v.webContents.reload(); },
     start, snapshot, setMain: (w) => { mainWin = w; mainWin.on('resize', () => send('relayout', true)); },
@@ -752,4 +754,5 @@ module.exports = function createPokeIdle(ctx) {
     },
     setOptimizeEvery: (min) => { config.optimizeEvery = [0, 30, 60, 120, 300].includes(Number(min)) ? Number(min) : 0; saveConfig(); send('status', snapshot()); },
   };
+  return api;
 };

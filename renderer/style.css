@@ -749,3 +749,4 @@ body.foco .glow { display: none; }
 .pve-nums { font-size: 12.5px; } .pve-nums .pvp { color: #ff9a9a; font-weight: 700; }
 .pve-row .up { color: var(--ok); } .pve-row .down { color: #ff8a8a; }
 .tchip .pve-x { color: #fff !important; background: rgba(0,0,0,.38); padding: 0 5px; border-radius: 4px; margin-left: 4px; }
+.pve-dia { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 8px 12px; border-radius: 10px; background: color-mix(in srgb, #ff7ad9 10%, transparent); border: 1px solid color-mix(in srgb, #ff7ad9 30%, transparent); font-size: 12.5px; margin-bottom: 10px; }
