@@ -415,7 +415,7 @@ contextBridge.executeInMainWorld({
     // Comprar no Market para FARMAR: as espécies que mais rendem nas próximas hunts da conta, as ofertas mais
     // baratas delas agora (consulta escondida do jogo, como a do PvP) e o ataque REAL de cada pokémon à venda.
     let pveBuscando = false;
-    async function pveMercado(moeda, dias) {
+    async function pveMercado(moeda, dias, orcamento) {
       if (pveBuscando) return { erro: 'Já estou procurando. Espere terminar.' };
       if (!jogo.hunts || !jogo.tabelaTipos) return { erro: 'A conta precisa estar logada no jogo.' };
       if (!sock || sock.readyState !== 1) return { erro: 'Sem conexão com o jogo agora.' };
@@ -443,20 +443,35 @@ contextBridge.executeInMainWorld({
         const vistos = new Set();
         const ids = [];
         for (const x of cand) { const nm = map.get(x.id).name; if (vistos.has(nm)) continue; vistos.add(nm); ids.push(x.id); if (ids.length >= 15) break; }
+        // Regra do jogo: o pokémon só entra em campo até o nível do treinador + 5. A busca pede ao Market só essa
+        // faixa (do ~75% do nível até o teto), só até o orçamento, e os de MAIOR nível primeiro — o nível pesa
+        // mais que tudo nos stats. Sem nada nessa faixa, tenta de novo sem o piso.
+        const tetoNv = L + 5;
+        const pisoNv = Math.max(1, Math.floor(L * 0.75));
+        const precoMax = Number(orcamento) > 0 ? String(Math.floor(Number(orcamento))) : '';
+        const vazias = { potenciaMin: '', potenciaMax: '', ivMin: '', ivMax: '', qualidadeMin: '', qualidadeMax: '', notaMin: '', notaMax: '', precoMin: '' };
+        async function listarEspecie(id, nivelMin) {
+          const antes = ultimaLista && ultimaLista.em;
+          nossos.lista = Date.now();
+          sock.send(JSON.stringify({ t: 'market.listar', tipo: 'pokemon', moeda: moeda === 'gold' ? 'gold' : 'orb', ordem: 'baratos', busca: '', criterios: ['nivel'], elementos: [], tiposUnidos: true,
+            ...vazias, nivelMin: nivelMin ? String(nivelMin) : '', nivelMax: String(tetoNv), precoMax, pagina: 0, especieId: Number(id) }));
+          for (let i = 0; i < 12 && (ultimaLista && ultimaLista.em) === antes; i++) await espera(400);
+          return ultimaLista && ultimaLista.em !== antes ? (ultimaLista.m.linhas || []) : null;
+        }
         const out = [];
+        let semPiso = 0;
         for (const id of ids) {
           if (!sock || sock.readyState !== 1) break;
           if (document.querySelector('#community:not(.hidden)')) return { erro: 'mercado-aberto', lista: out };
-          const antes = ultimaLista && ultimaLista.em;
-          nossos.lista = Date.now();
-          sock.send(JSON.stringify({ t: 'market.listar', tipo: 'pokemon', moeda: moeda === 'gold' ? 'gold' : 'orb', ordem: 'baratos', busca: '', criterios: [], elementos: [], pagina: 0, especieId: Number(id) }));
-          for (let i = 0; i < 12 && (ultimaLista && ultimaLista.em) === antes; i++) await espera(400);
-          if (ultimaLista && ultimaLista.em !== antes) {
-            for (const a of (ultimaLista.m.linhas || []).slice(0, 8)) {
+          let linhas = await listarEspecie(id, pisoNv);
+          if (linhas && !linhas.length) { await espera(1500); linhas = await listarEspecie(id, 0); if (linhas && linhas.length) semPiso++; }
+          if (linhas) {
+            for (const a of linhas) {
               const f = a.ficha || {};
               if (a.tipo !== 'pokemon' || !f.speciesId) continue;
               const c = map.get(f.speciesId); if (!c) continue;
               const pk = { id: 1, speciesId: f.speciesId, level: Number(f.level) || 1, ivs: f.ivs || null, quality: f.quality ?? null, potencia: f.potencia ?? null, refino: f.refino || null, shiny: !!f.shiny };
+              if (pk.level > tetoNv) continue; // acima do treinador + 5: a conta não pode usar
               let st = null; try { st = pk.ivs ? gi.statsNoNivel(pk, c, pk.level) : null; } catch {}
               const t = [...new Set([...tiposDe(c), f.tmElemental ? String(f.tmElemental).toUpperCase() : null].filter(Boolean))];
               const cv = cobertura(t);
@@ -469,7 +484,7 @@ contextBridge.executeInMainWorld({
           await espera(2500);
         }
         const regs = [...new Set(alvo.map((h) => h.regiao))];
-        return { lista: out, L, Lh, dias: nDias, xpH: Math.round(xpH), regioes: regs, huntsAlvo: alvo.length, em: Date.now() };
+        return { lista: out, L, Lh, dias: nDias, xpH: Math.round(xpH), regioes: regs, huntsAlvo: alvo.length, pisoNv, tetoNv, semPiso, em: Date.now() };
       } finally { pveBuscando = false; }
     }
     async function pveBuscar(texto) {
@@ -964,7 +979,7 @@ contextBridge.executeInMainWorld({
         canais() { return JSON.parse(JSON.stringify(canais)); },
         // Aba PvE do app (só leitura).
         pve(o, arg) {
-          const f = o === 'proximas' ? pveProximas : o === 'evolucoes' ? () => pveEvolucoes(arg) : o === 'meus' ? pveMeus : o === 'buscar' ? () => pveBuscar(arg) : o === 'mercado' ? () => (arg && typeof arg === 'object' ? pveMercado(arg.moeda, arg.dias) : pveMercado(arg)) : null;
+          const f = o === 'proximas' ? pveProximas : o === 'evolucoes' ? () => pveEvolucoes(arg) : o === 'meus' ? pveMeus : o === 'buscar' ? () => pveBuscar(arg) : o === 'mercado' ? () => (arg && typeof arg === 'object' ? pveMercado(arg.moeda, arg.dias, arg.valor) : pveMercado(arg)) : null;
           return f ? f().catch((e) => ({ erro: String(e && e.message || e) })) : null;
         },
         // Comércio: nota, stats e espécie da ficha de um anúncio (mesma conta da ficha do jogo).

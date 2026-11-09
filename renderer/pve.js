@@ -302,9 +302,9 @@ function pveMercado(box, a) {
     if (!(valor > 0)) return toast('Digite quanto quer gastar.');
     pveBusca = { carregando: true, valor, moeda: pveMoeda, acc: pveAcc };
     renderPve();
-    const r = await call('poke:pve', pveAcc, 'mercado', { moeda: pveMoeda, dias: pveDias });
+    const r = await call('poke:pve', pveAcc, 'mercado', { moeda: pveMoeda, dias: pveDias, valor });
     pveBusca = { carregando: false, valor, moeda: pveMoeda, acc: pveAcc, lista: (r && r.lista) || [], em: r && r.em, L: r && r.L, huntsAlvo: r && r.huntsAlvo,
-      Lh: r && r.Lh, dias: r && r.dias, regioes: (r && r.regioes) || [], xpH: r && r.xpH,
+      Lh: r && r.Lh, dias: r && r.dias, regioes: (r && r.regioes) || [], xpH: r && r.xpH, pisoNv: r && r.pisoNv, tetoNv: r && r.tetoNv, semPiso: r && r.semPiso,
       erro: r && r.erro === 'mercado-aberto' ? 'Feche o Market dentro do jogo e tente de novo (com ele aberto, a consulta apareceria na sua tela).' : r && r.erro };
     if (page === 'pve' && pveTab === 'mercado') renderPve();
   });
@@ -327,7 +327,7 @@ function pveMercado(box, a) {
   const fmtP = (o) => { const b = el('b', moeda === 'orb' ? 'orb' : ''); b.append(el('i', `cur ${moeda === 'orb' ? 'orb' : 'gold'}`), fmt(o.preco)); return b; };
   const linha = (o) => {
     const r = el('div', 'cand');
-    const l = el('div', 'pu-n'); l.append(el('b', null, `${o.nome} · Nv ${fmt(o.level)}${o.shiny ? ' ✨' : ''}`), el('span', 'sub', `${o.x55} hunts ×5,5 · ${o.x25} hunts ×2,5 · ataque ${fmt(o.ataque)} · vendedor ${o.vendedor || '—'}`));
+    const l = el('div', 'pu-n'); l.append(el('b', null, `${o.nome} · Nv ${fmt(o.level)}${o.shiny ? ' ✨' : ''}${Lc && usa(o) && o.level < Lc * 0.75 ? ' (nível bem abaixo do seu)' : ''}`), el('span', 'sub', `${o.x55} hunts ×5,5 · ${o.x25} hunts ×2,5 · ataque ${fmt(o.ataque)} · vendedor ${o.vendedor || '—'}`));
     if (!usa(o)) l.append(el('span', 'lvl-warn', `precisa de treinador Nv ${fmt(o.level - 5)}`));
     const tg = el('div', 'pm-tags'); for (const tt of o.tipos || []) tg.append(tipoChip(tt)); if (o.el && typeof zChip === 'function') tg.append(zChip(o.el)); if (o.aoe) tg.append(el('span', 'aoechip', 'AoE')); if (o.potencia) tg.append(el('span', 'pn-p', `P${o.potencia}`));
     const pr = el('div', 'price'); pr.append(fmtP(o), el('span', 'sub', o.qtd > 1 ? `${o.qtd} un.` : 'no Market agora'));
@@ -335,13 +335,14 @@ function pveMercado(box, a) {
     r.append(l, tg, pr, ver);
     return r;
   };
-  if (!lista || !lista.length) { c.append(el('div', 'mempty', `Nenhuma oferta em ${nm} encontrada agora para os pokémon que rendem nas suas próximas hunts.`)); return; }
+  if (!lista || !lista.length) { c.append(el('div', 'mempty', `Nenhuma oferta em ${nm} até ${fmt(valor)} e no seu nível (até o Nv ${fmt(pveBusca.tetoNv || Lc + 5)}) para os pokémon que rendem nas suas hunts.`)); return; }
   c.append(el('div', 'sub up-lead', pick.length
-    ? `Com ${fmt(valor)} ${nm}, a melhor compra para farmar agora (${new Date(pveBusca.em || Date.now()).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}): ${pick.length} pokémon por ${fmt(gasto)} ${nm}, sobram ${fmt(valor - gasto)}. Contei ${fmt(pveBusca.huntsAlvo || 0)} hunts de ${(pveBusca.regioes || []).join(' e ') || 'suas regiões'}${pveBusca.Lh && pveBusca.Lh > Lc ? ` — em ${pveBusca.dias} dias (~12 h de farm por dia, no seu ritmo de agora) você chega perto do Nv ${fmt(pveBusca.Lh)}` : ''}.`
-    : `Com ${fmt(valor)} ${nm}, nada à venda agora que esta conta possa usar rende nas suas próximas hunts. Abaixo, as melhores ofertas (acima do valor ou do seu nível).`));
+    ? `Com ${fmt(valor)} ${nm}, a melhor compra para farmar agora (${new Date(pveBusca.em || Date.now()).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}): ${pick.length} pokémon por ${fmt(gasto)} ${nm}, sobram ${fmt(valor - gasto)}. Procurei só pokémon do Nv ${fmt(pveBusca.pisoNv || 1)} ao Nv ${fmt(pveBusca.tetoNv || Lc + 5)} (o máximo que esta conta usa é o nível dela + 5), até ${fmt(valor)} ${nm}, os de maior nível primeiro.${pveBusca.semPiso ? ` Em ${pveBusca.semPiso} espécie${pveBusca.semPiso > 1 ? 's' : ''} não havia nada nessa faixa e mostrei as de nível mais alto que existem.` : ''} Contei ${fmt(pveBusca.huntsAlvo || 0)} hunts de ${(pveBusca.regioes || []).join(' e ') || 'suas regiões'}${pveBusca.Lh && pveBusca.Lh > Lc ? ` — em ${pveBusca.dias} dias (~12 h de farm por dia, no seu ritmo de agora) você chega perto do Nv ${fmt(pveBusca.Lh)}` : ''}.`
+    : `Com ${fmt(valor)} ${nm}, nada à venda agora no seu nível (até o Nv ${fmt((pveBusca.tetoNv || Lc + 5))}) rende nas suas hunts. Tente um valor maior ou outra moeda.`));
   const l1 = el('div', 'cand-list'); for (const o of pick) l1.append(linha(o)); c.append(l1);
-  const resto = [...lista].filter((o) => o.moeda === moeda && !pick.includes(o) && o.farm > 0).sort((x, y) => y.farm - x.farm).slice(0, 8);
-  if (resto.length) { c.append(el('div', 'ext-sec mk-sub', 'Outras ofertas boas para farmar (algumas acima do seu valor ou do seu nível)')); const l2 = el('div', 'cand-list'); for (const o of resto) l2.append(linha(o)); c.append(l2); }
+  // Todas as ofertas que cabem no orçamento e que a conta pode usar, da que mais rende para a que menos rende.
+  const resto = ord.filter((o) => !pick.includes(o));
+  if (resto.length) { c.append(el('div', 'ext-sec mk-sub', `Todas as outras no seu orçamento e no seu nível (${fmt(resto.length)}), da que mais rende para a que menos rende`)); const l2 = el('div', 'cand-list'); for (const o of resto) l2.append(linha(o)); c.append(l2); }
   c.append(el('div', 'mempty', '"Ver no Market" abre o anúncio no jogo, nesta conta. Confira o nível e o vendedor antes de comprar. A compra é sempre sua.'));
 }
 function go2Poke() { if (typeof go === 'function') go('poke'); }
