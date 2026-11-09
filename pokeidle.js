@@ -81,7 +81,7 @@ const READ_SCRIPT = `(() => {
     shiny: (() => { try { return window.__idleterinoMercado && window.__idleterinoMercado.shinyInfo ? window.__idleterinoMercado.shinyInfo() : null; } catch { return null; } })(),
     mercado: (() => { try { const r = window.__idleterinoMercado && window.__idleterinoMercado.ler(); if (!r) return null;
       const out = {};
-      if (r.meus) out.meus = { at: r.meus.at, linhas: (r.meus.m.linhas || []).slice(0, 40).map((a) => ({ id: a.id, pk: a.pokemonId != null ? a.pokemonId : (a.ficha && a.ficha.id != null ? a.ficha.id : null), tipo: a.tipo, nome: (a.ficha && (a.ficha.nome || (a.ficha.casaId ? 'Casa' : a.ficha.caixaId ? 'Caixa' : ''))) || a.nome || '—', level: a.ficha && a.ficha.level, shiny: !!(a.ficha && a.ficha.shiny), qtd: a.qtd || 1, preco: a.preco, moeda: a.moeda, retidoAte: a.compravelEm || 0, sp: a.ficha && a.ficha.speciesId, iv: a.ficha && a.ficha.ivs ? Object.values(a.ficha.ivs).reduce((t, x) => t + (Number(x) || 0), 0) : 0, q: a.ficha && (a.ficha.quality != null ? a.ficha.quality : a.ficha.qualidade), pot: a.ficha && a.ficha.potencia, aoe: !!(a.ficha && (a.ficha.tmAoe === true || a.ficha.tmAoe === 1)), favoritos: a.favoritos })) };
+      if (r.meus) out.meus = { at: r.meus.at, linhas: (r.meus.m.linhas || []).slice(0, 40).map((a) => ({ id: a.id, pk: a.pokemonId != null ? a.pokemonId : (a.ficha && a.ficha.id != null ? a.ficha.id : null), tipo: a.tipo, nome: (a.ficha && (a.ficha.nome || (a.ficha.casaId ? 'Casa' : a.ficha.caixaId ? 'Caixa' : ''))) || a.nome || '—', level: a.ficha && a.ficha.level, shiny: !!(a.ficha && a.ficha.shiny), qtd: a.qtd || 1, preco: a.preco, moeda: a.moeda, retidoAte: a.compravelEm || 0, sp: a.ficha && a.ficha.speciesId, iv: a.ficha && a.ficha.ivs ? Object.values(a.ficha.ivs).reduce((t, x) => t + (Number(x) || 0), 0) : 0, q: a.ficha && (a.ficha.quality != null ? a.ficha.quality : a.ficha.qualidade), pot: a.ficha && a.ficha.potencia, ivs: (a.ficha && a.ficha.ivs) || null, refino: (a.ficha && a.ficha.refino) || null, aoe: !!(a.ficha && (a.ficha.tmAoe === true || a.ficha.tmAoe === 1)), favoritos: a.favoritos })) };
       const hist = (m) => (m.linhas || []).slice(0, 30).map((l) => ({ em: l.em, tipo: l.tipo, descricao: l.descricao, shiny: !!(l.ficha && l.ficha.shiny), bruto: l.bruto, moeda: l.moeda, vendedor: l.vendedor, comprador: l.comprador }));
       if (r.historico) out.vendas = { at: r.historico.at, linhas: hist(r.historico.m) };
       const g = Object.keys(r).filter((k) => k.indexOf('historicoGlobal:') === 0).map((k) => r[k]);
@@ -618,6 +618,13 @@ module.exports = function createPokeIdle(ctx) {
   });
   ipcMain.handle('poke:optimizeEvery', (_e, min) => { config.optimizeEvery = [0, 30, 60, 120, 300].includes(Number(min)) ? Number(min) : 0; saveConfig(); return snapshot(); });
   ipcMain.handle('poke:pvp:get', (_e, accId) => pvpGet(accId));
+  // Aba PvE: as contas leem os dados do próprio jogo (próximas hunts, evoluções).
+  ipcMain.handle('poke:pve', async (_e, accId, o, arg) => {
+    if (!['proximas', 'evolucoes', 'meus', 'buscar'].includes(o)) return null;
+    const v = views.get(accId) || views.get(mainAccId());
+    if (!v || v.webContents.isDestroyed()) return { erro: 'Conta do PokeIdle fechada.' };
+    return v.webContents.executeJavaScript(`window.__idleterinoMercado && window.__idleterinoMercado.pve ? window.__idleterinoMercado.pve(${JSON.stringify(o)}, ${JSON.stringify(arg == null ? null : arg)}) : null`).catch(() => null);
+  });
   ipcMain.handle('poke:pvp:duel', async (_e, accId, a, b) => {
     const id = account(accId) ? accId : mainAccId();
     const v = id && views.get(id);
@@ -698,6 +705,12 @@ module.exports = function createPokeIdle(ctx) {
     getOptimizeEvery: () => config.optimizeEvery || 0,
     mainId: () => mainAccId(),
     refreshMarket: () => { if (Date.now() - lastMarket > 60 * 1000) askMarket(); },
+    // Comércio: a nota e os stats da ficha de um anúncio, calculados na página do jogo desta conta.
+    fichaNota: async (accId, f) => {
+      const v = views.get(accId);
+      if (!v || v.webContents.isDestroyed()) return null;
+      return v.webContents.executeJavaScript(`window.__idleterinoMercado && window.__idleterinoMercado.fichaNota ? window.__idleterinoMercado.fichaNota(${JSON.stringify(f)}) : null`).catch(() => null);
+    },
     // Link do #comércio no Discord: leva ao anúncio no Market do jogo, na conta logada (a da frente,
     // senão a principal). Usa o mesmo caminho do link de anúncio do chat do jogo: o jogo busca o
     // anúncio na hora e mostra a folha dele. Comprar continua sendo um clique da pessoa.

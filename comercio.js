@@ -12,6 +12,7 @@ const { app, ipcMain, net } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
+const { gerarFichaPng, FAIXAS } = require('./fichaImagem');
 
 const WEBHOOK = /^https:\/\/(discord|discordapp)\.com\/api\/webhooks\/(\d+)\/([\w-]+)$/;
 const fmt = (n) => Number(n || 0).toLocaleString('pt-BR');
@@ -99,24 +100,32 @@ module.exports = function createComercio(ctx, poke) {
       }
     } finally { rodando = false; }
   }
-  async function enviar(key, metodo, sufixo, body) {
+  async function enviar(key, metodo, sufixo, body, png) {
     const base = urlDe(key);
     if (!base) throw new Error('canal indisponível');
-    const r = await net.fetch(base + sufixo, { method: metodo, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-    if (r.status === 429) { const j = await r.json().catch(() => ({})); await new Promise((ok) => setTimeout(ok, ((j.retry_after || 2) * 1000) + 300)); return enviar(key, metodo, sufixo, body); }
+    let opts;
+    if (png) {
+      // Com a imagem da ficha: multipart (payload_json + o arquivo), que o Discord mostra dentro do card.
+      const fd = new FormData();
+      fd.append('payload_json', JSON.stringify({ ...body, attachments: [{ id: 0, filename: 'ficha.png' }] }));
+      fd.append('files[0]', new Blob([png], { type: 'image/png' }), 'ficha.png');
+      opts = { method: metodo, body: fd };
+    } else opts = { method: metodo, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
+    const r = await net.fetch(base + sufixo, opts);
+    if (r.status === 429) { const j = await r.json().catch(() => ({})); await new Promise((ok) => setTimeout(ok, ((j.retry_after || 2) * 1000) + 300)); return enviar(key, metodo, sufixo, body, png); }
     if (!r.ok) { const j = await r.json().catch(() => ({})); const e = new Error(`Discord ${r.status}`); e.code = j && j.code; throw e; }
     return r.status === 204 ? null : r.json().catch(() => null);
   }
   // Post novo: em canal de fórum o Discord exige um título (vira um tópico por anúncio).
-  async function postar(key, a, body) {
+  async function postar(key, a, body, png) {
     const comTopico = () => ({ ...body, thread_name: tituloTopico(a) });
-    if (C.forum[key]) { const m = await enviar(key, 'POST', '?wait=true', comTopico()); return { m, thread: m && m.channel_id }; }
+    if (C.forum[key]) { const m = await enviar(key, 'POST', '?wait=true', comTopico(), png); return { m, thread: m && m.channel_id }; }
     try {
-      return { m: await enviar(key, 'POST', '?wait=true', body), thread: null };
+      return { m: await enviar(key, 'POST', '?wait=true', body, png), thread: null };
     } catch (e) {
       if (e.code !== 220001) throw e;
       C.forum[key] = true; save();
-      const m = await enviar(key, 'POST', '?wait=true', comTopico());
+      const m = await enviar(key, 'POST', '?wait=true', comTopico(), png);
       return { m, thread: m && m.channel_id };
     }
   }
@@ -133,12 +142,23 @@ module.exports = function createComercio(ctx, poke) {
     return `VENDO ${nome}${a.shiny ? ' SHINY' : ''}${a.qtd > 1 ? ` x${a.qtd}` : ''} ${precoCurto(a.preco)}${a.moeda === 'orb' ? '' : ' OURO'}${a.qtd > 1 ? ' CADA' : ''}`.slice(0, 100);
   }
 
+  // Nota (0 a 10, igual à ficha do jogo) e a imagem da ficha. Se der errado, o card sai como antes.
+  async function extraDe(accId, a) {
+    if (a.tipo !== 'pokemon' || !poke.fichaNota) return null;
+    const info = await poke.fichaNota(accId, { speciesId: a.sp, ivs: a.ivs, refino: a.refino, quality: a.q, potencia: a.pot, shiny: a.shiny, level: a.level }).catch(() => null);
+    if (!info) return null;
+    const png = await gerarFichaPng({ ...info, nome: info.nome || a.nome, level: a.level, shiny: a.shiny, potencia: a.pot, qualidade: a.q, iv: a.iv, ivs: a.ivs, preco: a.preco }).catch(() => null);
+    return { nota: info.nota, faixa: info.faixa, png };
+  }
   const quemContata = () => { const d = String(C.discord || '').trim(); return /^\d{15,22}$/.test(d) ? `<@${d}>` : d ? d.replace(/[`*_~|<>@]/g, '').slice(0, 40) : null; };
-  function card(a, nick, tag, fim) {
+  function card(a, nick, tag, fim, extra) {
     const moedaNome = a.moeda === 'orb' ? 'gemas' : 'ouro';
     const cor = fim === 'vendido' ? 0x45e39b : fim === 'retirado' ? 0x5d6378 : a.shiny ? 0xffcf4a : a.moeda === 'orb' ? 0xe055b5 : 0xf2b72a;
     const prefixo = fim === 'vendido' ? '✅ VENDIDO · ' : fim === 'retirado' ? '❌ RETIRADO · ' : '';
     const fields = [{ name: '💰 Preço', value: `**${fmt(a.preco)} ${moedaNome}**${a.qtd > 1 ? ' (cada)' : ''}`, inline: true }];
+    const nota = extra && extra.nota != null ? extra.nota : a.nota;
+    const faixa = extra && extra.faixa ? extra.faixa : a.faixa;
+    if (nota != null) fields.unshift({ name: '🏅 Nota', value: `**${Number(nota).toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 3 })} / 10**${faixa && FAIXAS[faixa] ? ` · ${FAIXAS[faixa][0]}` : ''}`, inline: true });
     if (a.qtd > 1) fields.push({ name: '📦 Quantidade', value: fmt(a.qtd), inline: true });
     if (a.iv) fields.push({ name: '🧬 IV somado', value: `${a.iv}/192`, inline: true });
     if (a.q) fields.push({ name: '⭐ Qualidade', value: String(a.q).replace('.', ','), inline: true });
@@ -149,15 +169,17 @@ module.exports = function createComercio(ctx, poke) {
     const desc = fim === 'vendido' ? `Vendido${a.comprador ? ` para **${a.comprador}**` : ''}.`
       : fim === 'retirado' ? 'O vendedor tirou do Market.'
         : a.retidoAte && a.retidoAte > Date.now() ? `⏳ Liberado para compra <t:${Math.floor(a.retidoAte / 1000)}:R>. Compre no **Market do jogo**.` : 'Compre no **Market do jogo**: busque pelo nome ou pelo vendedor.';
-    const img = a.tipo === 'pokemon' ? sprite(a.sp, a.shiny) : null;
+    const comFicha = !!(extra && extra.png) && !fim;
+    const img = a.tipo === 'pokemon' && !comFicha ? sprite(a.sp, a.shiny) : null;
     // Botão para abrir o anúncio no Idleterino de quem clica (página do site -> idleterino://anuncio/<id>).
     const link = !fim && Number.isSafeInteger(Number(a.id)) && Number(a.id) > 0
       ? `${SITE}anuncio.html?id=${Number(a.id)}&n=${encodeURIComponent(String(a.nome || '').slice(0, 60))}&v=${encodeURIComponent(String(nick || '').slice(0, 30))}` : null;
     return {
       title: `${prefixo}${a.shiny ? '✨ ' : ''}${a.nome}${a.level ? ` · Nv ${a.level}` : ''}`.slice(0, 250),
       ...(link ? { url: link } : {}),
-      description: link ? `${desc}\n🛒 **[Abrir no Idleterino](${link})**` : desc, color: cor, fields: fim ? fields.slice(0, 1).concat(fields.slice(-1)) : fields,
+      description: link ? `${desc}\n🛒 **[Abrir no Idleterino](${link})**` : desc, color: cor, fields: fim ? fields.filter((f) => /Nota|Preço/.test(f.name)).concat(fields.slice(-1)) : fields,
       ...(img ? { thumbnail: { url: img } } : {}),
+      ...(comFicha ? { image: { url: 'attachment://ficha.png' } } : {}),
       footer: { text: '📦 Anúncio real, lido do jogo pelo Idleterino' }, timestamp: new Date().toISOString(),
     };
   }
@@ -196,15 +218,21 @@ module.exports = function createComercio(ctx, poke) {
         C.posts[k] = { estado: 'enviando', sig, t: Date.now(), nick, nome: a.nome, canal: canal.key };
         fila.push(async () => {
           try {
-            const { m, thread } = await postar(canal.key, a, corpo(card(a, nick, minhaTag)));
-            C.posts[k] = { ...C.posts[k], estado: 'aberto', msg: m && m.id, thread };
+            const ex = await extraDe(id, a);
+            const { m, thread } = await postar(canal.key, a, corpo(card(a, nick, minhaTag, null, ex)), ex && ex.png);
+            C.posts[k] = { ...C.posts[k], estado: 'aberto', msg: m && m.id, thread, nota: ex && ex.nota, faixa: ex && ex.faixa };
           } catch { delete C.posts[k]; } // tenta de novo na próxima leitura
           save();
         });
       } else if (p.msg && (p.estado === 'retirado' || (p.estado === 'aberto' && p.sig !== sig))) {
         // Voltou ao Market ou mudou o preço: o MESMO card volta a valer, com o anúncio de agora.
         p.estado = 'aberto'; p.sig = sig; p.t = Date.now(); p.nick = nick;
-        fila.push(async () => { await enviar(p.canal || canal.key, 'PATCH', sufixoMsg(p), corpo(card(a, nick, minhaTag))); save(); });
+        fila.push(async () => {
+          const ex = await extraDe(id, a);
+          if (ex) { p.nota = ex.nota; p.faixa = ex.faixa; }
+          await enviar(p.canal || canal.key, 'PATCH', sufixoMsg(p), corpo(card(a, nick, minhaTag, null, ex)), ex && ex.png);
+          save();
+        });
       }
       if (C.posts[k]) C.posts[k].ultimo = a;
     }
@@ -214,7 +242,7 @@ module.exports = function createComercio(ctx, poke) {
       const vendas = (r.mercado.vendas && r.mercado.vendas.linhas) || [];
       const v = vendas.find((x) => x.em && x.em >= p.t - 60000 && String(x.descricao || '').toLowerCase().includes(String(p.nome || '').toLowerCase()));
       p.estado = v ? 'vendido' : 'retirado';
-      const a = { ...(p.ultimo || { nome: p.nome, preco: 0, moeda: 'gold', qtd: 1 }), comprador: v && v.comprador };
+      const a = { ...(p.ultimo || { nome: p.nome, preco: 0, moeda: 'gold', qtd: 1 }), comprador: v && v.comprador, nota: p.nota, faixa: p.faixa };
       fila.push(async () => { await enviar(p.canal || canal.key, 'PATCH', sufixoMsg(p), corpo(card(a, p.nick || nick, minhaTag, p.estado))); save(); });
     }
     status[id] = { ok: true, texto: `Conectada ao canal ${canal.key === 'manual' ? '' : 'oficial '}[${canal.tag}] · ${Object.entries(C.posts).filter(([k, p]) => k.startsWith(`${id}|`) && p.estado === 'aberto').length} anúncio(s) no canal.` };

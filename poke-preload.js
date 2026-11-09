@@ -189,6 +189,128 @@ contextBridge.executeInMainWorld({
       }
       return especiesP;
     }
+    // ---- nota do pokémon (0 a 10), igual à da ficha do jogo ----
+    // O jogo monta o catálogo com os elos de evolução e o "piso da linhagem" antes de dar a nota
+    // (evoluir sempre sobe a nota). Os mesmos módulos dele, só quando o comércio vai postar.
+    let catNotaP = null;
+    function catalogoNota() {
+      if (!catNotaP) {
+        catNotaP = (async () => {
+          const lista = [];
+          for (const f of ['/assets/creatures.json', '/assets/creatures-novos.json', '/assets/creatures-outland-novos.json', '/assets/creatures-formas.json']) {
+            try { const r = await fetch(f); if (r.ok) { const j = await r.json(); if (Array.isArray(j.creatures)) lista.push(...j.creatures); } } catch {}
+          }
+          const [mg, cz, ln, nt, gi] = await Promise.all([import('/shared/megas.mjs'), import('/shared/evolucoes-cruzadas.mjs'), import('/shared/linhagem-nota.mjs'), import('/shared/nota-pokemon.mjs'), import('/shared/ginasios.mjs')]);
+          try { cz.aplicarCadeiasTruncadas(lista); } catch {}
+          try { cz.aplicarEvolucoesEntreGeracoes(lista); } catch {}
+          let megasPedras = [];
+          try { for (const e of mg.criarEspeciesMega(lista)) lista.push(e); } catch {}
+          const map = new Map(lista.map((c) => [c.pokeId, c]));
+          try { ln.anotarLinhagemDaNota(lista, (id) => map.get(id), mg.elosMegaDaNota(lista)); } catch {}
+          try { megasPedras = mg; } catch {}
+          return { map, nt, gi, mg: megasPedras };
+        })().catch((e) => { catNotaP = null; throw e; });
+      }
+      return catNotaP;
+    }
+    async function fichaNota(f) {
+      const { map, nt, gi, mg } = await catalogoNota();
+      const esp = map.get(Number(f && f.speciesId));
+      if (!esp) return null;
+      const pk = { id: 1, speciesId: esp.pokeId, ivs: f.ivs || null, refino: f.refino || null, quality: f.quality, potencia: f.potencia, shiny: !!f.shiny, level: Number(f.level) || 1 };
+      let nota = null; try { nota = nt.notaDePokemon(pk, esp); } catch {}
+      let stats = null; try { stats = pk.ivs ? gi.statsNoNivel(pk, esp, pk.level) : null; } catch {}
+      let dex = esp.pokeId;
+      try { if (mg.especieBaseDaMega) { const b = mg.especieBaseDaMega(esp.pokeId); if (b) dex = b.pokeId || b; } } catch {}
+      if (dex >= 13000 && dex < 14000) dex -= 13000;
+      else if (dex >= 9000 && dex < 10000) dex -= 9000; // a 2ª Mega de um dex
+      else if (dex >= 3000 && dex < 4000) dex -= 3000; // a Mega (#3000 + dex)
+      return { nota, faixa: nota != null ? nt.faixaDaNota(nota) : null, nome: esp.name, tipos: [esp.type1, esp.type2].filter((x) => x && x !== 'NONE'), stats, dex: Number(dex) || 0 };
+    }
+    // ---- aba PvE: próximas hunts e "evoluir para qual?" (mesmas regras do jogo) ----
+    const PEDRA_POR_TIPO = { NORMAL: 'Sun Stone', FIRE: 'Fire Stone', WATER: 'Water Stone', GRASS: 'Leaf Stone', ELECTRIC: 'Thunder Stone', ICE: 'Ice Stone', FIGHTING: 'Punch Stone', POISON: 'Venom Stone', GROUND: 'Earth Stone', FLYING: 'Feather Stone', PSYCHIC: 'Enigma Stone', BUG: 'Cocoon Stone', ROCK: 'Rock Stone', GHOST: 'Darkness Stone', DRAGON: 'Ancient Stone', DARK: 'Darkness Stone', STEEL: 'Metal Stone', FAIRY: 'Heart Stone' };
+    let pveRam = null;
+    async function catalogoPve() {
+      const c = await catalogoNota();
+      if (!pveRam) {
+        pveRam = await import('/shared/evolucoes-ramificadas.mjs');
+        // Os níveis de evolução no teto de captura, como o jogo faz no boot (a tabela já vem ajustada por ele).
+        try { const teto = await import('/shared/teto-captura.mjs'); teto.aplicarTetoDeCaptura([...c.map.values()], (id) => c.map.get(id)); } catch {}
+      }
+      return { ...c, ram: pveRam };
+    }
+    const fxTipo = (atk, defs) => defs.reduce((m, d) => m * ((jogo.tabelaTipos && jogo.tabelaTipos[atk] && jogo.tabelaTipos[atk][d] != null) ? jogo.tabelaTipos[atk][d] : 1), 1);
+    const naHuntX = (x) => { const a = jogo.amp || 1.5; return x > 1 ? 1 + (x - 1) * a : x < 1 ? x / a : 1; };
+    const melhorX = (atks, defs) => Math.max(0, ...atks.map((t) => naHuntX(fxTipo(t, defs))));
+    const statsBase = (c) => ({ hp: c.baseHp, atk: c.baseAtk, def: c.baseDef, spAtk: c.baseSpAtk, spDef: c.baseSpDef, speed: c.baseSpeed });
+    const bst = (c) => ['baseHp', 'baseAtk', 'baseDef', 'baseSpAtk', 'baseSpDef', 'baseSpeed'].reduce((t, k) => t + (Number(c[k]) || 0), 0);
+    async function pveMeus() {
+      const { map } = await catalogoNota();
+      const por = new Map();
+      for (const k of jogo.pks.values()) {
+        const c = map.get(k.speciesId); if (!c) continue;
+        const cur = por.get(k.speciesId);
+        if (!cur || k.level > cur.level) por.set(k.speciesId, { speciesId: k.speciesId, nome: c.name, level: k.level, shiny: !!k.shiny, tipos: tiposDe(c), el: k.el || k.tmElemental || null });
+      }
+      return [...por.values()].sort((a, b) => b.level - a.level);
+    }
+    async function pveProximas() {
+      if (!jogo.hunts || !jogo.tabelaTipos) return { pronto: false };
+      const { map } = await catalogoNota();
+      const L = Number(jogo.eu.level) || 0;
+      // Só quem dá conta: até o nível do treinador + 5 (regra do jogo) e pelo menos metade dele.
+      const meus = (await pveMeus()).filter((m) => m.level <= L + 5 && m.level >= L * 0.5);
+      const niveis = [...new Set(jogo.hunts.map((h) => Number(h.nivel) || 0).filter((n) => n > L))].sort((a, b) => a - b).slice(0, 3);
+      const TIPOS = Object.keys(jogo.tabelaTipos);
+      const grupos = niveis.map((nv) => {
+        const hunts = jogo.hunts.filter((h) => Number(h.nivel) === nv && Array.isArray(h.especies) && h.especies.length).map((h) => {
+          const e = h.especies[0]; const c = map.get(e.pokeId) || {}; const t = tiposDe(c);
+          const ataques = TIPOS.map((tp) => ({ t: tp, x: naHuntX(fxTipo(tp, t)) })).filter((a) => a.x >= 2.4).sort((a, b) => b.x - a.x).slice(0, 4);
+          let meu = null;
+          for (const m of meus) { const x = melhorX([...new Set([...m.tipos, m.el].filter(Boolean))], t); if (!meu || x > meu.x || (x === meu.x && m.level > meu.level)) meu = { nome: m.nome, level: m.level, x }; }
+          return { nome: String(h.nome || h.slug), tipos: t, ataques, meu };
+        }).sort((a, b) => (b.meu ? b.meu.x : 0) - (a.meu ? a.meu.x : 0));
+        return { nivel: nv, hunts };
+      });
+      return { pronto: true, L, grupos };
+    }
+    async function pveEvolucoes(speciesId) {
+      const { map, ram } = await catalogoPve();
+      const base = map.get(Number(speciesId));
+      if (!base) return { erro: 'Espécie não encontrada.' };
+      const buscar = (id) => map.get(id);
+      const finais = [];
+      const dfs = (esp, passos, prof) => {
+        let ds = []; try { ds = ram.destinosDeEvolucao(esp, buscar); } catch {}
+        const comArte = ds.filter((d) => d.temArte);
+        const prox = comArte.length ? comArte : ds;
+        if (!prox.length || prof > 4) { finais.push({ final: esp, passos }); return; }
+        for (const d of prox) {
+          let tp = null; try { tp = ram.tipoDaPedraDeEvolucao(esp, d.especie); } catch {}
+          dfs(d.especie, [...passos, { de: esp.name, para: d.especie.name, nivel: Number(d.nivel) || 0, pedra: tp ? PEDRA_POR_TIPO[tp] || null : null, temArte: !!d.temArte }], prof + 1);
+        }
+      };
+      dfs(base, [], 0);
+      // Hunts que a pessoa vai enfrentar: do nível dela até o triplo (as próximas regiões).
+      const L = Number(jogo.eu.level) || 0;
+      const alvo = (jogo.hunts || []).filter((h) => { const n = Number(h.nivel) || 0; return n >= L * 0.8 && n <= Math.max(L * 3, L + 3000) && Array.isArray(h.especies) && h.especies.length; });
+      const tiposH = alvo.map((h) => tiposDe(map.get(h.especies[0].pokeId) || {}));
+      const avalia = (c, mega) => {
+        const t = tiposDe(c);
+        let x25 = 0, x55 = 0;
+        for (const th of tiposH) { const x = melhorX(t, th); if (x >= 5) x55++; else if (x >= 2.4) x25++; }
+        return { pokeId: c.pokeId, nome: c.name, tipos: t, stats: statsBase(c), bst: bst(c), ataque: Math.max(Number(c.baseAtk) || 0, Number(c.baseSpAtk) || 0), fisico: (Number(c.baseAtk) || 0) >= (Number(c.baseSpAtk) || 0), x25, x55, huntsAlvo: tiposH.length, mega };
+      };
+      const megasDe = (c) => { const vistos = new Set(); return [...map.values()].sort((x, y) => x.pokeId - y.pokeId).filter((m) => m && m.name && (m.name === `Mega ${c.name}` || m.name.startsWith(`Mega ${c.name} `)) && !vistos.has(m.name) && vistos.add(m.name)); };
+      const opcoes = finais.map((f) => ({ passos: f.passos, final: avalia(f.final, false), megas: megasDe(f.final).map((m) => avalia(m, true)) }));
+      return { base: { pokeId: base.pokeId, nome: base.name, tipos: tiposDe(base), stats: statsBase(base), bst: bst(base) }, L, opcoes };
+    }
+    async function pveBuscar(texto) {
+      const { map } = await catalogoNota();
+      const q = String(texto || '').trim().toLowerCase();
+      if (q.length < 2) return [];
+      return [...map.values()].filter((c) => c && c.name && c.name.toLowerCase().includes(q) && !/^Mega /.test(c.name)).slice(0, 12).map((c) => ({ speciesId: c.pokeId, nome: c.name, tipos: tiposDe(c) }));
+    }
     const VEL_BIKE = { comum: 0.15, incomum: 0.25, rara: 0.5, mitica: 0.75, lendaria: 1 };
     const tiposDe = (c) => [c && c.type1, c && c.type2].filter((x) => x && x !== 'NONE').map((x) => String(x).toUpperCase());
     let modTab = null;
@@ -639,6 +761,13 @@ contextBridge.executeInMainWorld({
         },
         ler() { return JSON.parse(JSON.stringify(keep)); },
         canais() { return JSON.parse(JSON.stringify(canais)); },
+        // Aba PvE do app (só leitura).
+        pve(o, arg) {
+          const f = o === 'proximas' ? pveProximas : o === 'evolucoes' ? () => pveEvolucoes(arg) : o === 'meus' ? pveMeus : o === 'buscar' ? () => pveBuscar(arg) : null;
+          return f ? f().catch((e) => ({ erro: String(e && e.message || e) })) : null;
+        },
+        // Comércio: nota, stats e espécie da ficha de um anúncio (mesma conta da ficha do jogo).
+        fichaNota(f) { return fichaNota(f).catch(() => null); },
         // Previsão de shiny: chance por encontro (do servidor) e o fim de cada bônus de shiny que vale agora.
         shinyInfo() {
           const fim = (k) => Number(canais[k] && canais[k].bonus && canais[k].bonus.shiny) || 0;

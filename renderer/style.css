@@ -704,3 +704,48 @@ body.foco .glow { display: none; }
 .sh-prev .sep { color: var(--muted); }
 .sh-bx { font-size: 11px; padding: 1px 7px; border-radius: 999px; background: color-mix(in srgb, #ffcf4a 18%, transparent); color: #ffcf66; }
 .alt-row .n i.shp { color: #ffcf66; }
+
+/* Aba PvE */
+#page-pve .card + .card, #page-pve .pvp-grid + .card, #page-pve .card + .pvp-grid { margin-top: 14px; }
+.pve-corpo { margin-top: 14px; }
+.pve-top { display: flex; flex-direction: column; gap: 10px; }
+.pve-pk, .pve-atual { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.pve-pk b { font-size: 16px; }
+.tipos { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+.pve-x { font-weight: 800; border-radius: 6px; padding: 1px 7px; font-size: 12px; font-style: normal; }
+.pve-x.x55 { background: color-mix(in srgb, #ffcf4a 22%, transparent); color: #ffcf66; }
+.pve-x.x25 { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
+.pve-x.x1 { color: var(--muted); } .pve-x.x0 { color: #ff8a8a; }
+.tchip .pve-x { padding: 0; background: none; }
+.pve-tab { display: flex; flex-direction: column; gap: 2px; }
+.pve-row { display: grid; grid-template-columns: minmax(0, 2.2fr) 0.8fr 0.8fr 1fr 1fr 0.7fr; gap: 8px; align-items: center; padding: 6px 8px; border-radius: 8px; font-size: 12.5px; }
+.pve-row.hd { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .5px; }
+.pve-row:not(.hd):hover { background: var(--s2); }
+.pve-row.atual { background: color-mix(in srgb, var(--pk) 12%, transparent); }
+.pve-row .n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.pve-row .b { font-weight: 800; }
+.gold { color: #f2c94c; } .warn { color: #ffb366; }
+.pve-lista { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.pve-hunt { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.6fr) minmax(0, 1fr); gap: 10px; align-items: center; padding: 8px 10px; border-radius: 10px; background: var(--s2); }
+.pve-hn, .pve-atk, .pve-meu { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.pve-evo { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 14px; align-items: start; }
+.pve-evo-esq { display: flex; flex-direction: column; gap: 8px; }
+.pve-evo-esq input { width: 100%; }
+.pve-busca, .pve-meus { display: flex; flex-direction: column; gap: 4px; max-height: 340px; overflow-y: auto; }
+.pve-op { text-align: left; justify-content: flex-start; background: transparent; border: 1px solid transparent; }
+.pve-op.on { border-color: color-mix(in srgb, var(--pk) 55%, transparent); background: color-mix(in srgb, var(--pk) 12%, transparent); }
+.pve-evo-dir { display: flex; flex-direction: column; gap: 12px; }
+.pve-veredito { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0 4px; }
+.pve-badge { font-size: 12px; font-weight: 800; border-radius: 999px; padding: 3px 10px; }
+.pve-badge.farm { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
+.pve-badge.pvp { background: color-mix(in srgb, #ff6b6b 18%, transparent); color: #ff9a9a; }
+.pve-badge.bst { background: color-mix(in srgb, #ffcf4a 18%, transparent); color: #ffcf66; }
+.pve-cam { font-size: 12.5px; color: var(--muted); margin-bottom: 8px; }
+.pve-final { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-radius: 10px; background: var(--s2); }
+.pve-final + .pve-final { margin-top: 8px; }
+.pve-final.mega { border: 1px solid color-mix(in srgb, #b98cff 45%, transparent); }
+.pve-fn, .pve-nums, .pve-bs { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.pve-fn b { font-size: 15px; }
+.pve-nums { font-size: 12.5px; } .pve-nums .pvp { color: #ff9a9a; font-weight: 700; }
+.pve-row .up { color: var(--ok); } .pve-row .down { color: #ff8a8a; }
+.tchip .pve-x { color: #fff !important; background: rgba(0,0,0,.38); padding: 0 5px; border-radius: 4px; margin-left: 4px; }
