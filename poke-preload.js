@@ -706,14 +706,21 @@ contextBridge.executeInMainWorld({
         h.bando = Math.round(bandoEf * 10) / 10;
         return Math.max(pisoParada, h.tAbate / bandoEf);
       };
+      // Acerto geral pelo que a conta MEDIU: abates/h medidos ÷ abates/h que a conta previa nas mesmas hunts.
+      // Vale para todas as estimativas (o teto e a luta erram juntos na mesma conta). Ex.: 917/h medidos no
+      // Gabite contra ~1.060/h previstos = ×0,86 em todas as outras.
+      const fatorMed = mediana(out.filter((h) => h.medido).map((h) => (h.medido.ab / (h.medido.ms / 3600000)) / (3600000 / msPorAbate(h))));
+      const fator = fatorMed ? Math.min(1.3, Math.max(0.5, fatorMed)) : 1;
       for (const h of out) {
         const m = h.medido;
         const horas = m ? m.ms / 3600000 : 0;
-        const kph = m ? m.ab / horas : 3600000 / msPorAbate(h);
+        const kph = m ? m.ab / horas : (3600000 / msPorAbate(h)) * fator;
         if (m) msPorAbate(h);
         h.kph = Math.round(kph);
-        h.xpH = Math.round(m ? m.xp / horas : kph * h.xp * bx);
-        h.goldH = Math.round(m ? m.gold / horas : kph * h.gold);
+        // XP e ouro: sempre abates/h × o que cada selvagem dá × os bônus de AGORA — a medida entra só no ritmo.
+        // (O XP medido mistura horas com e sem evento/boost e não dá para comparar com as estimativas.)
+        h.xpH = Math.round(kph * h.xp * bx);
+        h.goldH = Math.round(kph * h.gold);
         // Ouro "de verdade": quanto mais o pokémon apanha, mais poção some do lucro (estimativa).
         h.goldLiq = Math.round(h.goldH / (1 + Math.max(0, h.risco - 1) * 0.6));
         h.medidoMin = m ? Math.round(m.ms / 60000) : 0;
@@ -721,13 +728,16 @@ contextBridge.executeInMainWorld({
         h.lenta = !m && h.tAbate > pisoParada * 1.5; // luta bem mais lenta que o teto: estimativa menos certa
         delete h.medido; delete h.tAbate; delete h.bandoSpawn; delete h.bandoMedido; delete h.porOnda; delete h.xp; delete h.gold;
       }
-      out.sort((a, b) => b.xpH - a.xpH);
+      // Quase empate (até 3%): fica na frente a de mais dano (×5,5 antes de ×2,5) e depois a já medida.
+      // (Só na ORDEM: os números mostrados não mudam.)
+      const ordem = (h, k) => h[k] * (h.effH >= 4.5 ? 1.03 : 1) * (h.medidoMin ? 1.01 : 1);
+      out.sort((a, b) => ordem(b, 'xpH') - ordem(a, 'xpH'));
       const atualEst = out.find((h) => h.slug && h.slug === atualSlug) || null;
       return {
         pronto: true, L, pokemon: cat.name || '?', tipos: atk, aoe: act.aoe, bike: rar, vel, bonus: bx, tipoDia, seuDoDia: !!(tipoDia && tiposPk.includes(tipoDia)),
-        calibrado: out.filter((h) => h.medidoMin).length, ritmo: Math.round(ritmo), hpExtra: Math.round(hpExtra * 100) / 100,
+        calibrado: out.filter((h) => h.medidoMin).length, ritmo: Math.round(ritmo), fator: Math.round(fator * 100) / 100, hpExtra: Math.round(hpExtra * 100) / 100,
         top: out.slice(0, 8), atual: atualSlug, atualEst,
-        topOuro: [...out].sort((a, b) => b.goldLiq - a.goldLiq).slice(0, 8),
+        topOuro: [...out].sort((a, b) => ordem(b, 'goldLiq') - ordem(a, 'goldLiq')).slice(0, 8),
       };
     }
 
