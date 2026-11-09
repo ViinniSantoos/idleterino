@@ -4,11 +4,13 @@
 let pveAcc = (() => { try { return localStorage.getItem('pveAcc') || null; } catch { return null; } })();
 let pveTab = (() => { try { return localStorage.getItem('pveTab') || 'agora'; } catch { return 'agora'; } })();
 let pveEvoSel = null;   // speciesId escolhido no "evoluir para qual?"
+let pveEvoInd = null;   // { pkId } (pokémon da conta) ou { texto } (ficha colada): os IVs do indivíduo
+let pveFichaTxt = '';
 let pveBuscaTxt = '';
 const pveCache = new Map(); // `${acc}|${o}|${arg}` -> { at, v }
 
 async function pveGet(o, arg, maxIdadeMs = 60000) {
-  const k = `${pveAcc}|${o}|${arg == null ? '' : arg}`;
+  const k = `${pveAcc}|${o}|${arg == null ? '' : typeof arg === 'object' ? JSON.stringify(arg) : arg}`;
   const c = pveCache.get(k);
   if (c && Date.now() - c.at < maxIdadeMs) return c.v;
   const v = await call('poke:pve', pveAcc, o, arg);
@@ -39,7 +41,7 @@ async function renderPve() {
   const sel = el('select');
   for (const a of accs) { const i = a.info || {}; const o = el('option', null, `${a.id === S.poke.mainId ? '★ ' : ''}${i.logged && i.nick && i.nick !== '—' ? i.nick : a.name}`); o.value = a.id; sel.append(o); }
   sel.value = pveAcc;
-  sel.onchange = () => { pveAcc = sel.value; pveEvoSel = null; try { localStorage.setItem('pveAcc', pveAcc); } catch {} renderPve(); };
+  sel.onchange = () => { pveAcc = sel.value; pveEvoSel = null; pveEvoInd = null; try { localStorage.setItem('pveAcc', pveAcc); } catch {} renderPve(); };
   act.append(sel);
   head.append(t, act);
   const tabs = el('div', 'pvp-tabs');
@@ -148,21 +150,30 @@ async function pveEvo(box) {
   const q = el('input'); q.type = 'text'; q.placeholder = 'Buscar espécie (ex.: Eevee, Ralts, Kirlia)'; q.value = pveBuscaTxt;
   const res = el('div', 'pve-busca');
   let tm = null;
-  q.oninput = () => { pveBuscaTxt = q.value; clearTimeout(tm); tm = setTimeout(async () => { const l = q.value.trim().length >= 2 ? await pveGet('buscar', q.value.trim(), 600000) : []; res.replaceChildren(); for (const s of l || []) { const b = button(s.nome, 'pve-op', () => { pveEvoSel = s.speciesId; renderPve(); }); res.append(b); } }, 250); };
-  esq.append(q, res, el('b', 'tipos-hd', 'Seus pokémon'));
+  q.oninput = () => { pveBuscaTxt = q.value; clearTimeout(tm); tm = setTimeout(async () => { const l = q.value.trim().length >= 2 ? await pveGet('buscar', q.value.trim(), 600000) : []; res.replaceChildren(); for (const s of l || []) { const b = button(s.nome, 'pve-op', () => { pveEvoSel = s.speciesId; pveEvoInd = null; renderPve(); }); res.append(b); } }, 250); };
+  // Ficha colada: o "Copiar p/ ChatGPT" da ficha do pokémon no jogo (serve para um de outra conta ou do Market).
+  const fx = el('textarea', 'pve-ficha'); fx.rows = 3; fx.placeholder = 'Ou cole aqui a ficha do pokémon (botão "Copiar p/ ChatGPT" da ficha no jogo) para usar os IVs dele'; fx.value = pveFichaTxt;
+  fx.oninput = () => { pveFichaTxt = fx.value; };
+  const fb = button('Analisar ficha colada', 'ghost', () => { if (pveFichaTxt.trim().length < 20) return toast('Cole a ficha inteira primeiro.'); pveEvoInd = { texto: pveFichaTxt }; pveEvoSel = 'ficha'; renderPve(); });
+  esq.append(q, res, fx, fb, el('b', 'tipos-hd', 'Seus pokémon'));
   const meusBox = el('div', 'pve-meus');
   esq.append(meusBox);
   const meus = await pveGet('meus');
   if (page !== 'pve' || pveTab !== 'evo') return;
   for (const m of (Array.isArray(meus) ? meus : [])) {
-    const b = button('', `pve-op${pveEvoSel === m.speciesId ? ' on' : ''}`, () => { pveEvoSel = m.speciesId; renderPve(); });
+    const b = button('', `pve-op${pveEvoSel === m.speciesId ? ' on' : ''}`, () => { pveEvoSel = m.speciesId; pveEvoInd = m.id != null ? { pkId: m.id } : null; renderPve(); });
     b.append(el('b', null, `${m.shiny ? '✨ ' : ''}${m.nome}`), el('span', 'sub', ` Nv ${fmt(m.level)}`));
     meusBox.append(b);
   }
   if (!Array.isArray(meus) || !meus.length) meusBox.append(el('p', 'sub', 'A lista aparece quando a conta estiver logada.'));
-  if (!pveEvoSel) { dir.append(emptyBox('Evoluir para qual?', 'Escolha um pokémon seu ou busque uma espécie. O app mostra todos os caminhos (com o nível e a pedra), as Megas, e compara para farmar nas suas próximas hunts e para o PvP.')); return; }
+  if (!pveEvoSel) { dir.append(emptyBox('Evoluir para qual?', 'Escolha um pokémon seu (o app usa os IVs dele), cole a ficha de um pokémon ou busque uma espécie. O app mostra todos os caminhos (com o nível e a pedra), as Megas, e compara para farmar nas suas hunts e para o PvP.')); return; }
   dir.append(el('p', 'sub', 'Calculando…'));
-  const [r, pvp] = await Promise.all([pveGet('evolucoes', pveEvoSel), call('poke:pvp:get', pveAcc).catch(() => null)]);
+  const pvp = await call('poke:pvp:get', pveAcc).catch(() => null);
+  // As espécies dos times do top 50 (quantos times levam cada uma), para comparar cada forma contra o meta.
+  const metaCont = {};
+  for (const p of (pvp && pvp.meta && pvp.meta.perfis ? Object.values(pvp.meta.perfis) : [])) { const vs = new Set(); for (const k of p.time || []) if (k.speciesId != null && !vs.has(k.speciesId)) { vs.add(k.speciesId); metaCont[k.speciesId] = (metaCont[k.speciesId] || 0) + 1; } }
+  const meta = Object.entries(metaCont).map(([id, n]) => ({ id: Number(id), n }));
+  const r = await pveGet('evolucoes', { speciesId: pveEvoSel === 'ficha' ? null : pveEvoSel, ...(pveEvoInd || {}), meta });
   if (page !== 'pve' || pveTab !== 'evo') return;
   dir.replaceChildren();
   if (!r || r.erro) { dir.append(emptyBox('Não deu para calcular', (r && r.erro) || 'Tente de novo em instantes.')); return; }
@@ -177,19 +188,61 @@ async function pveEvo(box) {
   }
   const todas = [];
   for (const o of r.opcoes) { todas.push({ ...o.final, caminho: o.passos }); for (const m of o.megas) todas.push({ ...m, caminho: o.passos, deMega: o.final.nome }); }
-  for (const x of todas) { x.pvp = usoPvp[x.nome] || 0; x.farm = (x.x55 * 2 + x.x25) * x.ataque; }
+  const comInd = !!r.ind;
+  for (const x of todas) { x.pvp = usoPvp[x.nome] || 0; x.farm = (x.sc || 0) * (comInd && x.ataqueReal ? x.ataqueReal : x.ataque); }
   const melhor = (f) => todas.reduce((b, x) => (!b || f(x) > f(b) ? x : b), null);
-  const mFarm = melhor((x) => x.farm), mPvp = perfis.length ? melhor((x) => x.pvp * 1000 + x.bst) : null, mBst = melhor((x) => x.bst);
+  // PvP: força (ataque × resistência; com IVs, os stats reais) × como ela se sai contra o meta, e um
+  // bônus por já estar nos times do top (prova de que funciona lá).
+  const forca = (x) => (comInd && x.ataqueReal ? Math.sqrt(x.ataqueReal * x.resist) : Math.sqrt(x.ataque * (x.bst / 6)));
+  for (const x of todas) x.pvpSc = forca(x) * (1 + ((x.pvpVant || 0) - (x.pvpRisco || 0)) / 100) * (1 + 0.1 * Math.min(5, x.pvp));
+  const mFarm = melhor((x) => x.farm), mPvp = perfis.length ? melhor((x) => x.pvpSc) : null;
+  const mBst = comInd ? melhor((x) => x.resist || 0) : melhor((x) => x.bst);
+  const mEnc = comInd ? melhor((x) => (x.encaixe == null ? -999 : x.encaixe)) : null;
+  const STAT_N = { hp: 'HP', atk: 'ATK', def: 'DEF', spAtk: 'SP.ATK', spDef: 'SP.DEF', speed: 'SPD' };
   const cab = el('div', 'card');
   const ttp = el('span', 'tipos'); for (const tp of r.base.tipos) ttp.append(tipoChip(tp));
   cab.append(el('h3', null, `${r.base.nome}`), ttp);
+  if (comInd) {
+    const iv = r.ind.ivs || {};
+    const ord = Object.keys(STAT_N).sort((a2, b2) => (iv[b2] || 0) - (iv[a2] || 0));
+    const p = el('div', 'pve-ivs');
+    p.append(el('b', null, r.ind.colada ? 'Ficha colada — IVs: ' : 'Este pokémon seu — IVs: '));
+    for (const k of Object.keys(STAT_N)) p.append(el('span', `pve-iv${iv[k] >= 24 ? ' alto' : iv[k] <= 10 ? ' baixo' : ''}`, `${STAT_N[k]} ${iv[k] ?? '—'}`));
+    cab.append(p, el('p', 'small', `Forte em ${STAT_N[ord[0]]} e ${STAT_N[ord[1]]}, fraco em ${STAT_N[ord[5]]}. Os IVs não mudam ao evoluir: abaixo, os stats de VERDADE deste pokémon em cada forma (no Nv ${fmt(r.ind.nivelUso)}, com a potência${r.ind.shiny ? ' e o shiny' : ''} dele).`));
+  }
   if (!r.opcoes.length || (r.opcoes.length === 1 && !r.opcoes[0].passos.length && !r.opcoes[0].megas.length)) cab.append(el('p', 'sub', 'Esta espécie não evolui nem tem Mega.'));
   else {
     const v = el('div', 'pve-veredito');
     if (mFarm) v.append(el('span', 'pve-badge farm', `🌾 Para farmar: ${mFarm.nome}`));
     if (mPvp && mPvp.pvp) v.append(el('span', 'pve-badge pvp', `⚔ Para PvP: ${mPvp.nome} (${mPvp.pvp} do top 50)`));
-    if (mBst) v.append(el('span', 'pve-badge bst', `⭐ Mais forte: ${mBst.nome} (status ${fmt(mBst.bst)})`));
-    cab.append(v, el('p', 'small', `Farm = hunts com ×2,5 e ×5,5 do Nv ${fmt(Math.round(r.L * 0.8))} ao Nv ${fmt(Math.max(r.L * 3, r.L + 3000))} (as suas próximas regiões), pelo tipo e pelo melhor status de ataque. PvP = quantos times do top 50 usam a espécie${perfis.length ? '' : ' (o meta do PvP ainda não foi lido: abra a aba PvP)'}.`));
+    if (mEnc) v.append(el('span', 'pve-badge enc', `🎯 Combina com os IVs: ${mEnc.nome}`));
+    if (mBst) v.append(el('span', 'pve-badge bst', comInd ? `🛡 Mais resistente: ${mBst.nome}` : `⭐ Mais forte: ${mBst.nome} (status ${fmt(mBst.bst)})`));
+    // O porquê de cada frente, comparando com a 2ª melhor.
+    const seg = (f, x0) => todas.filter((x) => x !== x0).reduce((b, x) => (!b || f(x) > f(b) ? x : b), null);
+    const pct = (a2, b2) => (b2 > 0 ? Math.round((a2 / b2 - 1) * 100) : 0);
+    const rec = el('div', 'pve-rec');
+    if (mFarm) {
+      const s2 = seg((x) => x.farm, mFarm);
+      const atq = comInd && mFarm.ataqueReal ? `${mFarm.fisico ? 'ATK' : 'SP.ATK'} real ${fmt(mFarm.ataqueReal)} com os IVs dele` : `${mFarm.fisico ? 'ATK' : 'SP.ATK'} base ${fmt(mFarm.ataque)}`;
+      const p = el('div', 'pve-rec-item farm');
+      p.append(el('b', null, `🌾 Quer farmar mais no PvE → ${mFarm.nome}${mFarm.deMega ? ' (Mega)' : ''}`),
+        el('span', null, `Tira ×5,5 em ${mFarm.x55} e ×2,5 em ${mFarm.x25} das ${fmt(r.huntsAlvo || 0)} hunts de ${(r.regioes || []).join(' e ') || 'suas regiões'}, com ${atq}.${s2 ? ` A 2ª opção (${s2.nome}) rende ~${Math.max(0, pct(mFarm.farm, s2.farm))}% menos.` : ''}`));
+      rec.append(p);
+    }
+    if (mPvp) {
+      const s2 = seg((x) => x.pvpSc, mPvp);
+      const p = el('div', 'pve-rec-item pvp');
+      const motivos = [`bate forte (×2) em ${mPvp.pvpVant ?? 0}% dos times do top 50`, `${mPvp.pvpRisco ?? 0}% dos times batem forte nela`,
+        mPvp.pvp ? `${mPvp.pvp} dos top 50 já usam` : 'ninguém do top 50 usa ainda (aposta fora do meta)',
+        comInd && mPvp.real ? `com os IVs dele: ${mPvp.fisico ? 'ATK' : 'SP.ATK'} ${fmt(mPvp.ataqueReal)} e resistência ${fmt(mPvp.resist)}` : `status ${fmt(mPvp.bst)}`];
+      p.append(el('b', null, `⚔ Quer ir melhor no PvP → ${mPvp.nome}${mPvp.deMega ? ' (Mega)' : ''}`),
+        el('span', null, `${motivos.join('; ')}.${s2 ? ` A 2ª opção é ${s2.nome} (bate forte em ${s2.pvpVant ?? 0}%, apanha forte de ${s2.pvpRisco ?? 0}%${s2.pvp ? `, ${s2.pvp} no top` : ''}).` : ''}`));
+      rec.append(p);
+    } else rec.append(el('div', 'pve-rec-item pvp', '⚔ Para a sugestão de PvP, abra a aba PvP uma vez (o app lê os times do top 50).'));
+    if (mFarm && mPvp && mFarm === mPvp) rec.append(el('div', 'small', `${mFarm.nome} serve para as duas coisas: é a escolha mais segura.`));
+    else if (mFarm && mPvp) rec.append(el('div', 'small', `Se este pokémon vai ficar em campo farmando, vá de ${mFarm.nome}. Se for para o time do PvP, ${mPvp.nome}.`));
+    cab.append(rec);
+    cab.append(v, el('p', 'small', `Farm = as ${fmt(r.huntsAlvo || 0)} hunts de ${(r.regioes || []).join(' e ') || 'suas regiões'} (a região em que você está e a próxima, com todos os selvagens de cada uma), pelo tipo e pelo ${comInd ? 'ataque REAL deste pokémon em cada forma' : 'melhor status de ataque da espécie'}.${comInd ? ' "Combina com os IVs" = a forma em que os IVs altos caem nos stats fortes dela.' : ''} PvP = quantos times do top 50 usam a espécie${perfis.length ? '' : ' (o meta do PvP ainda não foi lido: abra a aba PvP)'}.`));
   }
   dir.append(cab);
   for (const o of r.opcoes) {
@@ -203,11 +256,15 @@ async function pveEvo(box) {
       const badges = el('span', 'pve-bs');
       if (x === mFarm) badges.append(el('span', 'pve-badge farm', '🌾 farm'));
       if (mPvp && x === mPvp && x.pvp) badges.append(el('span', 'pve-badge pvp', '⚔ PvP'));
-      if (x === mBst) badges.append(el('span', 'pve-badge bst', '⭐ status'));
+      if (x === mBst) badges.append(el('span', 'pve-badge bst', comInd ? '🛡 resistente' : '⭐ status'));
+      if (mEnc && x === mEnc) badges.append(el('span', 'pve-badge enc', '🎯 IVs'));
       n.append(badges);
       const nums = el('div', 'pve-nums');
-      nums.append(el('span', null, `status ${fmt(x.bst)}`), el('span', null, `${x.fisico ? 'ATK' : 'SP.ATK'} ${fmt(x.ataque)}`),
-        el('span', 'pve-x x25', `${x.x25} hunts ×2,5`), el('span', 'pve-x x55', `${x.x55} hunts ×5,5`), el('span', x.pvp ? 'pvp' : 'sub', perfis.length ? `PvP: ${x.pvp ? `${x.pvp} do top 50` : 'fora do top'}` : 'PvP: —'));
+      if (comInd && x.real) nums.append(el('span', null, `${x.fisico ? 'ATK' : 'SP.ATK'} real ${fmt(x.ataqueReal)}`), el('span', null, `resistência ${fmt(x.resist)}`),
+        el('span', x.encaixe >= 0 ? 'pve-enc mais' : 'pve-enc menos', `IVs ${x.encaixe >= 0 ? '+' : ''}${String(x.encaixe).replace('.', ',')}%`));
+      else nums.append(el('span', null, `status ${fmt(x.bst)}`), el('span', null, `${x.fisico ? 'ATK' : 'SP.ATK'} ${fmt(x.ataque)}`));
+      nums.append(
+        el('span', 'pve-x x25', `${x.x25} hunts ×2,5`), el('span', 'pve-x x55', `${x.x55} hunts ×5,5`), el('span', x.pvp ? 'pvp' : 'sub', perfis.length ? `PvP: ${x.pvp ? `${x.pvp} do top 50` : 'fora do top'} · bate forte em ${x.pvpVant ?? 0}% · apanha forte de ${x.pvpRisco ?? 0}%` : 'PvP: —'));
       if (mega) nums.append(el('span', 'sub', `precisa da Mega Stone (${x.deMega || ''})`));
       d.append(n, nums);
       return d;
@@ -223,30 +280,36 @@ async function pveEvo(box) {
 // ---------- 🛒 Comprar no Market para farmar (com o seu orçamento) ----------
 let pveBudget = (() => { try { return localStorage.getItem('pveBudget') || ''; } catch { return ''; } })();
 let pveMoeda = 'orb';
+let pveDias = (() => { try { return Number(localStorage.getItem('pveDias')) || 30; } catch { return 30; } })();
 let pveBusca = null; // { carregando, valor, moeda, lista, erro, em, L, huntsAlvo, acc }
 function pveMercado(box, a) {
   const i = (a && a.info) || {};
   const L = Number(String(i.level || '').replace(/\D+/g, '')) || 0;
   const c = el('div', 'card');
   c.append(el('div', 'ext-sec', 'Comprar no Market com o seu orçamento (para farmar)'));
-  c.append(el('div', 'sub up-lead', `${L ? `Treinador Nv ${fmt(L)}: esta conta usa pokémon até Nv ${fmt(L + 5)}, e a sugestão só inclui o que ela pode usar. ` : ''}Diga quanto quer gastar. O app procura agora as ofertas mais baratas dos pokémon que mais rendem nas SUAS próximas hunts (os que tiram ×2,5 e ×5,5) e avalia cada pokémon à venda pelo ataque de verdade dele (nível, IV, qualidade, potência, shiny, TM e AoE). Os preços mudam o tempo todo: a busca é sempre na hora.`));
+  c.append(el('div', 'sub up-lead', `${L ? `Treinador Nv ${fmt(L)}: esta conta usa pokémon até Nv ${fmt(L + 5)}, e a sugestão só inclui o que ela pode usar. ` : ''}Diga quanto quer gastar e por quanto tempo vai ficar com ele. O app conta TODAS as hunts (com todos os selvagens de cada uma) da região em que você está e da próxima, mais as que você alcança nesse tempo, e procura agora as ofertas mais baratas dos pokémon que mais tiram ×2,5 e ×5,5 nelas e avalia cada pokémon à venda pelo ataque de verdade dele (nível, IV, qualidade, potência, shiny, TM e AoE). Os preços mudam o tempo todo: a busca é sempre na hora.`));
   const form = el('div', 'budget');
   const inp = el('input'); inp.type = 'number'; inp.min = '0'; inp.step = '100'; inp.placeholder = 'Quanto quer gastar?'; inp.value = pveBudget;
   inp.oninput = () => { pveBudget = inp.value; try { localStorage.setItem('pveBudget', pveBudget); } catch {} };
   const msel = el('select'); for (const [v, l] of [['orb', 'em gemas 💎'], ['gold', 'em coins']]) { const o = el('option', null, l); o.value = v; msel.append(o); } msel.value = pveMoeda;
   msel.onchange = () => { pveMoeda = msel.value; };
+  const dsel = el('select'); dsel.title = 'Por quanto tempo pretende ficar com o pokémon sem trocar';
+  for (const [v, l] of [[7, 'vou usar por 1 semana'], [14, 'vou usar por 2 semanas'], [30, 'vou usar por 1 mês'], [90, 'vou usar por 3 meses'], [180, 'vou usar por 6 meses']]) { const o = el('option', null, l); o.value = String(v); dsel.append(o); }
+  dsel.value = String(pveDias);
+  dsel.onchange = () => { pveDias = Number(dsel.value) || 30; try { localStorage.setItem('pveDias', String(pveDias)); } catch {} };
   const go = button(pveBusca && pveBusca.carregando ? 'Procurando…' : 'Procurar no Market agora', 'primary', async () => {
     const valor = Number(pveBudget);
     if (!(valor > 0)) return toast('Digite quanto quer gastar.');
     pveBusca = { carregando: true, valor, moeda: pveMoeda, acc: pveAcc };
     renderPve();
-    const r = await call('poke:pve', pveAcc, 'mercado', pveMoeda);
+    const r = await call('poke:pve', pveAcc, 'mercado', { moeda: pveMoeda, dias: pveDias });
     pveBusca = { carregando: false, valor, moeda: pveMoeda, acc: pveAcc, lista: (r && r.lista) || [], em: r && r.em, L: r && r.L, huntsAlvo: r && r.huntsAlvo,
+      Lh: r && r.Lh, dias: r && r.dias, regioes: (r && r.regioes) || [], xpH: r && r.xpH,
       erro: r && r.erro === 'mercado-aberto' ? 'Feche o Market dentro do jogo e tente de novo (com ele aberto, a consulta apareceria na sua tela).' : r && r.erro };
     if (page === 'pve' && pveTab === 'mercado') renderPve();
   });
   go.disabled = !!(pveBusca && pveBusca.carregando);
-  form.append(inp, msel, go);
+  form.append(inp, msel, dsel, go);
   c.append(form);
   box.append(c);
   if (!pveBusca || pveBusca.acc !== pveAcc) return;
@@ -274,7 +337,7 @@ function pveMercado(box, a) {
   };
   if (!lista || !lista.length) { c.append(el('div', 'mempty', `Nenhuma oferta em ${nm} encontrada agora para os pokémon que rendem nas suas próximas hunts.`)); return; }
   c.append(el('div', 'sub up-lead', pick.length
-    ? `Com ${fmt(valor)} ${nm}, a melhor compra para farmar agora (${new Date(pveBusca.em || Date.now()).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}): ${pick.length} pokémon por ${fmt(gasto)} ${nm}, sobram ${fmt(valor - gasto)}. Contei ${fmt(pveBusca.huntsAlvo || 0)} hunts das suas próximas regiões.`
+    ? `Com ${fmt(valor)} ${nm}, a melhor compra para farmar agora (${new Date(pveBusca.em || Date.now()).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}): ${pick.length} pokémon por ${fmt(gasto)} ${nm}, sobram ${fmt(valor - gasto)}. Contei ${fmt(pveBusca.huntsAlvo || 0)} hunts de ${(pveBusca.regioes || []).join(' e ') || 'suas regiões'}${pveBusca.Lh && pveBusca.Lh > Lc ? ` — em ${pveBusca.dias} dias (~12 h de farm por dia, no seu ritmo de agora) você chega perto do Nv ${fmt(pveBusca.Lh)}` : ''}.`
     : `Com ${fmt(valor)} ${nm}, nada à venda agora que esta conta possa usar rende nas suas próximas hunts. Abaixo, as melhores ofertas (acima do valor ou do seu nível).`));
   const l1 = el('div', 'cand-list'); for (const o of pick) l1.append(linha(o)); c.append(l1);
   const resto = [...lista].filter((o) => o.moeda === moeda && !pick.includes(o) && o.farm > 0).sort((x, y) => y.farm - x.farm).slice(0, 8);

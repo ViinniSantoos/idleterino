@@ -243,6 +243,50 @@ contextBridge.executeInMainWorld({
     const naHuntX = (x) => { const a = jogo.amp || 1.5; return x > 1 ? 1 + (x - 1) * a : x < 1 ? x / a : 1; };
     const melhorX = (atks, defs) => Math.max(0, ...atks.map((t) => naHuntX(fxTipo(t, defs))));
     const statsBase = (c) => ({ hp: c.baseHp, atk: c.baseAtk, def: c.baseDef, spAtk: c.baseSpAtk, spDef: c.baseSpDef, speed: c.baseSpeed });
+    // Regiões do Mapa (nível em que cada uma abre). O sufixo do slug da hunt diz a região quando existe
+    // (ex.: gabite_sinnoh); senão vale a faixa de nível (Outland fica junto de Kanto/Johto).
+    const REGIOES = [['Kanto', 1], ['Johto', 200], ['Hoenn', 500], ['Sinnoh', 1000], ['Unova', 5000], ['Kalos', 10000], ['Alola', 25000], ['Galar', 40000], ['Paldea', 75000]];
+    const regiaoPorNivel = (n) => { let i = 0; for (let k = 0; k < REGIOES.length; k++) if (n >= REGIOES[k][1]) i = k; return i; };
+    const regiaoDe = (h) => {
+      const sl = String(h.slug || '').toLowerCase();
+      const k = REGIOES.findIndex(([nm]) => sl.endsWith('_' + nm.toLowerCase()));
+      return k >= 0 ? k : regiaoPorNivel(Number(h.nivel) || 0);
+    };
+    // XP total para chegar ao nível L (curva do jogo) e o nível a que a conta chega com X horas de farm.
+    const xpTotalNv = (L) => (50 / 3) * (L ** 3 - 6 * L ** 2 + 17 * L - 12);
+    function xpHoraDaConta() {
+      const nick = String(jogo.eu.nick || '').toLowerCase();
+      try { const s2 = nick && JSON.parse(localStorage.getItem('sessao-hunt:' + nick) || 'null'); if (s2 && s2.ms > 30 * 60000 && s2.xpTreinador > 0) return s2.xpTreinador / (s2.ms / 3600000); } catch {}
+      return 0;
+    }
+    function nivelDepoisDe(L, horas, xpH) {
+      if (!(xpH > 0) || !(horas > 0)) return L;
+      const alvo = xpTotalNv(L) + xpH * horas;
+      let lo = L, hi = L * 4 + 100;
+      for (let i = 0; i < 60; i++) { const m = (lo + hi) / 2; if (xpTotalNv(m) < alvo) lo = m; else hi = m; }
+      return Math.floor(lo);
+    }
+    // Hunts que importam para um pokémon que a conta vai usar por um tempo: TODAS as da região em que ela está
+    // e as da próxima, mais as que ela alcança no horizonte. Cada hunt leva todas as espécies (peso = pontos).
+    function huntsDoHorizonte(map, L, Lh) {
+      const rAtual = regiaoPorNivel(L);
+      const rFim = Math.max(rAtual + 1, regiaoPorNivel(Lh));
+      return (jogo.hunts || []).filter((h) => Array.isArray(h.especies) && h.especies.length).map((h) => {
+        const n = Number(h.nivel) || 0; const r = regiaoDe(h);
+        if (r < rAtual || r > rFim) return null;
+        // As que ela já pode ou vai poder caçar no horizonte valem 1; as de depois (só a próxima região) valem ½.
+        const peso = n <= Math.max(Lh, L) ? 1 : 0.5;
+        const esp2 = h.especies.map((e) => ({ t: tiposDe(map.get(e.pokeId) || {}), w: Number(e.pontos) || 1 })).filter((e) => e.t.length);
+        return esp2.length ? { nivel: n, regiao: REGIOES[r][0], peso, esp: esp2 } : null;
+      }).filter(Boolean);
+    }
+    // Quanto um ataque (lista de tipos) rende numa hunt: a média da melhor efetividade contra cada espécie.
+    const multNaHunt = (atks, h) => { let s2 = 0, w = 0; for (const e of h.esp) { s2 += melhorX(atks, e.t) * e.w; w += e.w; } return w ? s2 / w : 0; };
+    function coberturaHunts(atks, alvo) {
+      let x25 = 0, x55 = 0, sc = 0;
+      for (const h of alvo) { const m = multNaHunt(atks, h); if (m >= 4.5) x55++; else if (m >= 2.2) x25++; sc += h.peso * m; }
+      return { x25, x55, sc };
+    }
     const bst = (c) => ['baseHp', 'baseAtk', 'baseDef', 'baseSpAtk', 'baseSpDef', 'baseSpeed'].reduce((t, k) => t + (Number(c[k]) || 0), 0);
     async function pveMeus() {
       const { map } = await catalogoNota();
@@ -250,7 +294,7 @@ contextBridge.executeInMainWorld({
       for (const k of jogo.pks.values()) {
         const c = map.get(k.speciesId); if (!c) continue;
         const cur = por.get(k.speciesId);
-        if (!cur || k.level > cur.level) por.set(k.speciesId, { speciesId: k.speciesId, nome: c.name, level: k.level, shiny: !!k.shiny, tipos: tiposDe(c), el: k.el || k.tmElemental || null });
+        if (!cur || k.level > cur.level) por.set(k.speciesId, { id: k.id, speciesId: k.speciesId, nome: c.name, level: k.level, shiny: !!k.shiny, tipos: tiposDe(c), el: k.el || k.tmElemental || null });
       }
       return [...por.values()].sort((a, b) => b.level - a.level);
     }
@@ -274,8 +318,44 @@ contextBridge.executeInMainWorld({
       });
       return { pronto: true, L, grupos, tipoDia: tipoDoDia() };
     }
-    async function pveEvolucoes(speciesId) {
-      const { map, ram } = await catalogoPve();
+    const STATS_K = [['hp', 'HP'], ['atk', 'ATK'], ['def', 'DEF'], ['spAtk', 'SP.ATK'], ['spDef', 'SP.DEF'], ['speed', 'SPD']];
+    const numTxt = (v) => Number(String(v || '').replace(/[^\d.]/g, '')) || 0;
+    function lerFichaColada(txt, map) {
+      const t = String(txt || '');
+      const lin = (re) => { const m = t.match(re); return m ? m[1].trim() : null; };
+      const nomeEsp = lin(/^\s*-\s*(?:Espécie|Species|Especie)\s*:\s*([^(\n—]+)/mi);
+      if (!nomeEsp) return { erro: 'Não achei a espécie na ficha colada. Use o botão "Copiar p/ ChatGPT" da ficha do pokémon no jogo e cole tudo.' };
+      const alvo = nomeEsp.toLowerCase();
+      const esp = [...map.values()].find((c) => c && c.name && c.name.toLowerCase() === alvo);
+      if (!esp) return { erro: `Não conheço a espécie "${nomeEsp}".` };
+      const nivel = numTxt(lin(/^\s*-\s*(?:Nível|Level|Nivel)\s*:\s*([\d.,]+)/mi)) || 1;
+      const pot = Number((lin(/^\s*-\s*(?:Potência|Potency|Potencia)\s*:\s*P(\d)/mi)) || 1);
+      const qual = Number(lin(/^\s*-\s*(?:Qualidade|Quality|Calidad)\s*:\s*([\d.]+)/mi)) || null;
+      const shiny = /^\s*-\s*Shiny\s*:\s*(sim|yes|sí|si)\b/mi.test(t);
+      // A tabela: acha a coluna do IV pelo cabeçalho.
+      const linhas = t.split(/\r?\n/).filter((l) => /^\s*\|/.test(l)).map((l) => l.split('|').slice(1, -1).map((c) => c.trim()));
+      const cab = linhas.find((c) => c.some((x) => /^IV\b/i.test(x)));
+      if (!cab) return { erro: 'A ficha colada não traz os IVs (anúncio antigo?).' };
+      const iIv = cab.findIndex((x) => /^IV\b/i.test(x));
+      const ivs = {};
+      for (const [k, rot] of STATS_K) { const l = linhas.find((c) => c[0] && c[0].toUpperCase() === rot); if (l) ivs[k] = numTxt(l[iIv]); }
+      if (Object.keys(ivs).length < 6) return { erro: 'Não consegui ler os 6 IVs da ficha colada.' };
+      return { pk: { id: 1, speciesId: esp.pokeId, level: nivel, ivs, potencia: pot, quality: qual, shiny, refino: null }, esp };
+    }
+    async function pveEvolucoes(arg) {
+      const { map, ram, gi } = await catalogoPve();
+      const o0 = arg && typeof arg === 'object' ? arg : { speciesId: arg };
+      // O indivíduo (quando há): um pokémon da conta ou a ficha colada — os IVs dele valem em toda forma.
+      let ind = null;
+      if (o0.texto) {
+        const f = lerFichaColada(o0.texto, map);
+        if (f.erro) return { erro: f.erro };
+        ind = f.pk; o0.speciesId = f.esp.pokeId;
+      } else if (o0.pkId != null) {
+        const k = jogo.pks.get(o0.pkId) || [...jogo.pks.values()].find((x) => String(x.id) === String(o0.pkId));
+        if (k && k.ivs) ind = { id: 1, speciesId: k.speciesId, level: Number(k.level) || 1, ivs: k.ivs, potencia: k.potencia, quality: k.quality, shiny: !!k.shiny, refino: null };
+      }
+      const speciesId = o0.speciesId;
       const base = map.get(Number(speciesId));
       if (!base) return { erro: 'Espécie não encontrada.' };
       const buscar = (id) => map.get(id);
@@ -293,22 +373,49 @@ contextBridge.executeInMainWorld({
       dfs(base, [], 0);
       // Hunts que a pessoa vai enfrentar: do nível dela até o triplo (as próximas regiões).
       const L = Number(jogo.eu.level) || 0;
-      const alvo = (jogo.hunts || []).filter((h) => { const n = Number(h.nivel) || 0; return n >= L * 0.8 && n <= Math.max(L * 3, L + 3000) && Array.isArray(h.especies) && h.especies.length; });
-      const tiposH = alvo.map((h) => tiposDe(map.get(h.especies[0].pokeId) || {}));
+      const alvo = huntsDoHorizonte(map, L, nivelDepoisDe(L, 30 * 12, xpHoraDaConta()));
+      const nivelUso = ind ? Math.max(ind.level, L) : L;
+      const metaT = (Array.isArray(o0.meta) ? o0.meta : []).map((m) => ({ t: tiposDe(map.get(Number(m.id)) || {}), w: Number(m.n) || 1 })).filter((m) => m.t.length);
+      const metaW = metaT.reduce((a2, m) => a2 + m.w, 0);
+      const xPvp = (atks, defs) => Math.max(0, ...atks.map((t) => fxTipo(t, defs)));
       const avalia = (c, mega) => {
         const t = tiposDe(c);
-        let x25 = 0, x55 = 0;
-        for (const th of tiposH) { const x = melhorX(t, th); if (x >= 5) x55++; else if (x >= 2.4) x25++; }
-        return { pokeId: c.pokeId, nome: c.name, tipos: t, stats: statsBase(c), bst: bst(c), ataque: Math.max(Number(c.baseAtk) || 0, Number(c.baseSpAtk) || 0), fisico: (Number(c.baseAtk) || 0) >= (Number(c.baseSpAtk) || 0), x25, x55, huntsAlvo: tiposH.length, mega };
+        const { x25, x55, sc } = coberturaHunts(t, alvo);
+        const fisico = (Number(c.baseAtk) || 0) >= (Number(c.baseSpAtk) || 0);
+        const r0 = { pokeId: c.pokeId, nome: c.name, tipos: t, stats: statsBase(c), bst: bst(c), ataque: Math.max(Number(c.baseAtk) || 0, Number(c.baseSpAtk) || 0), fisico, x25, x55, sc: Math.round(sc * 100) / 100, huntsAlvo: alvo.length, mega };
+        if (metaW) {
+          // Contra os times do top 50: em quantos ela bate forte (×2+) e quantos batem forte nela.
+          let vant = 0, risco = 0;
+          for (const m of metaT) { if (xPvp(t, m.t) >= 2) vant += m.w; if (xPvp(m.t, t) >= 2) risco += m.w; }
+          r0.pvpVant = Math.round((vant / metaW) * 100); r0.pvpRisco = Math.round((risco / metaW) * 100);
+        }
+        if (ind) {
+          let st = null; try { st = gi.statsNoNivel({ ...ind, speciesId: c.pokeId }, c, nivelUso); } catch {}
+          if (st) {
+            const real = {}; for (const [k] of STATS_K) real[k] = Math.round(Number(st[k]) || 0);
+            // Encaixe: a média dos IVs pesada pela base desta forma, contra a média simples dos IVs.
+            // Acima de 0: os IVs altos caem nos stats em que esta forma é forte.
+            const b = statsBase(c); const sb = Object.values(b).reduce((a2, v) => a2 + (Number(v) || 0), 0) || 1;
+            const ivMed = STATS_K.reduce((a2, [k]) => a2 + (Number(ind.ivs[k]) || 0), 0) / 6 || 1;
+            const ivPes = STATS_K.reduce((a2, [k]) => a2 + (Number(ind.ivs[k]) || 0) * (Number(b[k]) || 0), 0) / sb;
+            r0.real = real;
+            r0.ataqueReal = fisico ? real.atk : real.spAtk;
+            r0.resist = Math.round(Math.sqrt(real.hp * (real.def + real.spDef) / 2));
+            r0.encaixe = Math.round((ivPes / ivMed - 1) * 1000) / 10;
+          }
+        }
+        return r0;
       };
       const megasDe = (c) => { const vistos = new Set(); return [...map.values()].sort((x, y) => x.pokeId - y.pokeId).filter((m) => m && m.name && (m.name === `Mega ${c.name}` || m.name.startsWith(`Mega ${c.name} `)) && !vistos.has(m.name) && vistos.add(m.name)); };
       const opcoes = finais.map((f) => ({ passos: f.passos, final: avalia(f.final, false), megas: megasDe(f.final).map((m) => avalia(m, true)) }));
-      return { base: { pokeId: base.pokeId, nome: base.name, tipos: tiposDe(base), stats: statsBase(base), bst: bst(base) }, L, opcoes };
+      const regs = [...new Set(alvo.map((h) => h.regiao))];
+      return { base: { pokeId: base.pokeId, nome: base.name, tipos: tiposDe(base), stats: statsBase(base), bst: bst(base) }, L, opcoes, regioes: regs, huntsAlvo: alvo.length,
+        ind: ind ? { ivs: ind.ivs, level: ind.level, potencia: ind.potencia || 1, shiny: ind.shiny, nivelUso, colada: !!o0.texto } : null };
     }
     // Comprar no Market para FARMAR: as espécies que mais rendem nas próximas hunts da conta, as ofertas mais
     // baratas delas agora (consulta escondida do jogo, como a do PvP) e o ataque REAL de cada pokémon à venda.
     let pveBuscando = false;
-    async function pveMercado(moeda) {
+    async function pveMercado(moeda, dias) {
       if (pveBuscando) return { erro: 'Já estou procurando. Espere terminar.' };
       if (!jogo.hunts || !jogo.tabelaTipos) return { erro: 'A conta precisa estar logada no jogo.' };
       if (!sock || sock.readyState !== 1) return { erro: 'Sem conexão com o jogo agora.' };
@@ -316,9 +423,12 @@ contextBridge.executeInMainWorld({
       try {
         const { map, gi } = await catalogoNota();
         const L = Number(jogo.eu.level) || 0;
-        const alvo = jogo.hunts.filter((h) => { const n = Number(h.nivel) || 0; return n >= L * 0.8 && n <= Math.max(L * 3, L + 3000) && Array.isArray(h.especies) && h.especies.length; });
-        const tiposH = alvo.map((h) => tiposDe(map.get(h.especies[0].pokeId) || {}));
-        const cobertura = (t) => { let x25 = 0, x55 = 0; for (const th of tiposH) { const x = melhorX(t, th); if (x >= 5) x55++; else if (x >= 2.4) x25++; } return { x25, x55 }; };
+        // Horizonte: quantos dias a pessoa pretende ficar com o pokémon (12 h de farm por dia) e o XP/h da conta.
+        const nDias = Math.min(365, Math.max(1, Number(dias) || 30));
+        const xpH = xpHoraDaConta();
+        const Lh = nivelDepoisDe(L, nDias * 12, xpH);
+        const alvo = huntsDoHorizonte(map, L, Lh);
+        const cobertura = (t) => coberturaHunts(t, alvo);
         // Candidatas: espécies com arte, capturáveis (sem Mega), que mais rendem nessas hunts pelo tipo e pelo ataque-base.
         const cand = [];
         for (const c of map.values()) {
@@ -326,7 +436,7 @@ contextBridge.executeInMainWorld({
           const t = tiposDe(c); if (!t.length) continue;
           const cv = cobertura(t);
           const atkB = Math.max(Number(c.baseAtk) || 0, Number(c.baseSpAtk) || 0);
-          const sc = (cv.x55 * 2 + cv.x25) * atkB;
+          const sc = cv.sc * atkB;
           if (sc > 0) cand.push({ id: c.pokeId, sc });
         }
         cand.sort((a, b) => b.sc - a.sc);
@@ -353,12 +463,13 @@ contextBridge.executeInMainWorld({
               const ataque = st ? Math.max(Number(st.atk) || 0, Number(st.spAtk) || 0) : 0;
               out.push({ anuncio: a.id, speciesId: f.speciesId, nome: f.nome || c.name, level: pk.level, shiny: pk.shiny, aoe: f.tmAoe === true || f.tmAoe === 1, el: f.tmElemental || null, potencia: f.potencia ?? null,
                 preco: Number(a.preco) || 0, qtd: Number(a.qtd) || 1, moeda: a.moeda, vendedor: a.vendedor || '', retido: !!(a.compravelEm && a.compravelEm > Date.now()),
-                tipos: tiposDe(c), x25: cv.x25, x55: cv.x55, ataque, farm: (cv.x55 * 2 + cv.x25) * ataque * ((f.tmAoe === true || f.tmAoe === 1) ? 1.5 : 1) });
+                tipos: tiposDe(c), x25: cv.x25, x55: cv.x55, ataque, farm: Math.round(cv.sc * ataque * ((f.tmAoe === true || f.tmAoe === 1) ? 1.1 : 1)) });
             }
           }
           await espera(2500);
         }
-        return { lista: out, L, huntsAlvo: tiposH.length, em: Date.now() };
+        const regs = [...new Set(alvo.map((h) => h.regiao))];
+        return { lista: out, L, Lh, dias: nDias, xpH: Math.round(xpH), regioes: regs, huntsAlvo: alvo.length, em: Date.now() };
       } finally { pveBuscando = false; }
     }
     async function pveBuscar(texto) {
@@ -567,12 +678,13 @@ contextBridge.executeInMainWorld({
         const porOnda = Math.min(ha.MAX_MOBS || 16, pontos);
         const M = medido[h.slug] || null;
         // Bando que nasce junto (medido no campo, quadrado 11×11 do AoE). O AoE pega o bando inteiro de uma vez.
-        const bandoSpawn = act.aoe ? Math.min(porOnda, mediana((M && M.bando) || []) || BANDO_PADRAO) : 1;
+        const bandoMedido = act.aoe ? Math.min(porOnda, mediana((M && M.bando) || []) || 0) : 0;
+        const bandoSpawn = act.aoe ? (bandoMedido || BANDO_PADRAO) : 1;
         let xp = 0, gold = 0;
         try { const r = ha.mediaPorKill(h, esp, 0); xp = r.xp; gold = r.gold; } catch {}
         const med = M && M.pk && M.pk[act.id];
         const golpe = Object.entries(golpeUso).sort((a, b) => b[1] - a[1])[0];
-        out.push({ slug: h.slug || null, nome: String(h.nome || h.name || h.slug || '?'), nivel, tAbate, bandoSpawn, porOnda, xp, gold, selvagemDoDia,
+        out.push({ slug: h.slug || null, nome: String(h.nome || h.name || h.slug || '?'), nivel, regiao: REGIOES[regiaoDe(h)][0], tAbate, bandoSpawn, bandoMedido, porOnda, xp, gold, selvagemDoDia,
           medido: med && med.ms >= MEDIDO_MIN_MS && med.ab >= 20 ? med : null,
           seg: Math.round(tAbate / 100) / 10, bando: Math.round(bandoSpawn * 10) / 10, golpe: golpe ? golpe[0] : null,
           risco: Math.round(risco * 100) / 100, eff: Math.round(effMed * 100) / 100, effH: Math.round(effH * 100) / 100, effMax });
@@ -580,17 +692,19 @@ contextBridge.executeInMainWorld({
 
       // Teto do ritmo calibrado pelo que a conta MEDIU — só nas hunts em que a luta é bem mais rápida que o tempo
       // medido (senão a luta é que manda e a medida não diz nada do teto). Sem medida assim, o padrão.
-      const pisoMedido = mediana(out.filter((h) => h.medido && h.tAbate < 0.6 * (h.medido.ms / h.medido.ab) * h.bandoSpawn)
-        .map((h) => (h.medido.ms / h.medido.ab) * h.bandoSpawn * (1 + vel)));
+      // (O teto é POR ABATE: o simulador do jogo dá ~3,4 s por abate mesmo matando num golpe, e o AoE só
+      // encurta ~10% — a onda é que segura. Medido: 934/h e 847/h com AoE.)
+      const pisoMedido = mediana(out.filter((h) => h.medido && h.tAbate < 0.6 * (h.medido.ms / h.medido.ab))
+        .map((h) => (h.medido.ms / h.medido.ab) * (1 + vel)));
       const ritmo = Math.min(9000, Math.max(2500, pisoMedido || PISO_PADRAO_MS));
       const pisoParada = ritmo / (1 + vel); // a bike encurta só a caminhada
-      // Tempo por abate: a parada leva o MAIOR entre a luta e o teto. Com AoE o golpe pega o bando inteiro, e
-      // quando a luta é mais lenta que o teto os selvagens das próximas ondas se juntam e o bando cresce
-      // (até o máximo da onda).
+      // Tempo por abate = o MAIOR entre o teto e a luta. Na luta lenta o AoE divide o tempo só pelo bando que
+      // a conta já viu nascer junto NAQUELA hunt (sem medida: 2) — nunca passa do teto: matar devagar não
+      // rende mais abates que matar na hora.
       const msPorAbate = (h) => {
-        const bandoEf = act.aoe ? Math.min(h.porOnda, h.bandoSpawn * Math.max(1, h.tAbate / pisoParada)) : 1;
+        const bandoEf = act.aoe ? Math.max(1, h.bandoMedido || 2) : 1;
         h.bando = Math.round(bandoEf * 10) / 10;
-        return Math.max(h.tAbate, pisoParada) / bandoEf;
+        return Math.max(pisoParada, h.tAbate / bandoEf);
       };
       for (const h of out) {
         const m = h.medido;
@@ -604,7 +718,8 @@ contextBridge.executeInMainWorld({
         h.goldLiq = Math.round(h.goldH / (1 + Math.max(0, h.risco - 1) * 0.6));
         h.medidoMin = m ? Math.round(m.ms / 60000) : 0;
         h.teto = h.tAbate <= pisoParada; // mata mais rápido que o teto: ×5,5 ou ×2,5 tanto faz aqui
-        delete h.medido; delete h.tAbate; delete h.bandoSpawn; delete h.porOnda; delete h.xp; delete h.gold;
+        h.lenta = !m && h.tAbate > pisoParada * 1.5; // luta bem mais lenta que o teto: estimativa menos certa
+        delete h.medido; delete h.tAbate; delete h.bandoSpawn; delete h.bandoMedido; delete h.porOnda; delete h.xp; delete h.gold;
       }
       out.sort((a, b) => b.xpH - a.xpH);
       const atualEst = out.find((h) => h.slug && h.slug === atualSlug) || null;
@@ -839,7 +954,7 @@ contextBridge.executeInMainWorld({
         canais() { return JSON.parse(JSON.stringify(canais)); },
         // Aba PvE do app (só leitura).
         pve(o, arg) {
-          const f = o === 'proximas' ? pveProximas : o === 'evolucoes' ? () => pveEvolucoes(arg) : o === 'meus' ? pveMeus : o === 'buscar' ? () => pveBuscar(arg) : o === 'mercado' ? () => pveMercado(arg) : null;
+          const f = o === 'proximas' ? pveProximas : o === 'evolucoes' ? () => pveEvolucoes(arg) : o === 'meus' ? pveMeus : o === 'buscar' ? () => pveBuscar(arg) : o === 'mercado' ? () => (arg && typeof arg === 'object' ? pveMercado(arg.moeda, arg.dias) : pveMercado(arg)) : null;
           return f ? f().catch((e) => ({ erro: String(e && e.message || e) })) : null;
         },
         // Comércio: nota, stats e espécie da ficha de um anúncio (mesma conta da ficha do jogo).

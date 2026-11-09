@@ -883,7 +883,7 @@ function huntSugg(hr, f) {
   const est = (v, k) => (k ? `≈ ${(v * k / 1e6).toFixed(1).replace('.', ',')}M` : '');
   const risco = (h) => (h.risco >= 2 ? 'gasta muita poção' : h.risco >= 1.3 ? 'gasta poção' : 'pouca poção');
   const x = (v) => String(v).replace('.', ',');
-  const como = (h) => (h.medidoMin ? `medido em ${h.medidoMin} min` : `${x(h.seg)} s por abate${h.golpe ? ` com ${h.golpe}` : ''} · dano ×${x(h.effH)}`);
+  const como = (h) => (h.medidoMin ? `medido em ${h.medidoMin} min · ${h.kph}/h` : `${h.regiao ? `${h.regiao} · ` : ''}${x(h.seg)} s por selvagem${h.golpe ? ` com ${h.golpe}` : ''} · dano ×${x(h.effH)} · ~${h.kph} abates/h${h.lenta ? ' (luta lenta: teste 10 min antes)' : ''}`);
   const tip = [
     `Pokémon em campo: ${hr.pokemon} (${(hr.tipos || []).join('/')})${hr.aoe ? ' · AoE' : ' · sem AoE'} · ${hr.bike ? `bike ${hr.bike} (+${Math.round(hr.vel * 100)}%)` : 'a pé'}`,
     '⚡ Mais XP:',
@@ -892,7 +892,7 @@ function huntSugg(hr, f) {
     ...(hr.topOuro || []).slice(0, 4).map((h, i) => `${i + 1}. ${h.nome} (Nv ${h.nivel}) ${est(h.goldLiq, kg)} ouro/h${cur ? ` · ${ganho(h.goldLiq, cur.goldLiq) >= 0 ? '+' : ''}${ganho(h.goldLiq, cur.goldLiq)}%` : ''} · ${risco(h)}`),
     cur ? `Hunt atual: ${cur.nome} (${como(cur)}, ${risco(cur)})` : '',
     hr.calibrado ? `Acertado pelo que esta conta mediu em ${hr.calibrado} hunt${hr.calibrado > 1 ? 's' : ''} com este pokémon.` : 'Ainda sem medição com este pokémon: fique 10 min numa hunt para o número se acertar.',
-    'Conta: stats e golpes do pokémon contra a vida e a defesa de cada selvagem, com a efetividade da hunt (×2 vira ×2,5; ×4 vira ×5,5), AoE no bando inteiro e a bicicleta na caminhada. Muda quando você troca o pokémon em campo.',
+    `Conta: todas as hunts do Mapa até o seu nível. Stats e golpes do pokémon contra a vida e a defesa de cada selvagem, com a efetividade da hunt (×2 vira ×2,5; ×4 vira ×5,5). A onda segura a hunt em ~${Math.round(3600000 / ((hr.ritmo || 3900) / (1 + (hr.vel || 0))))} abates/h: quem mata mais rápido que isso empata nos abates e ganha a hunt de mais XP por selvagem; quem mata devagar perde abates. Muda quando você troca o pokémon em campo.`,
   ].filter(Boolean).join('\n');
   const opt = (h, campo) => {
     const g = cur ? ganho(h[campo], cur[campo]) : null;
