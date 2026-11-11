@@ -180,6 +180,8 @@ ctx.applyExtensions = (partition) => extensions.applyTo(partition);
 const diario = require('./diario')(ctx, poke);
 // #comércio da guild no Discord: anúncios do Market postados sozinhos (webhook do canal).
 const comercio = require('./comercio')(ctx, poke);
+// "Levar para o celular": as contas do PokeIdle vão para o Idleterino Android por QR Code + PIN.
+require('./celular')(ctx, poke);
 ctx.comercioAtivo = () => comercio.ativo();
 ctx.refreshMarket = () => poke.refreshMarket();
 ctx.onPokeRead = (id, r) => { diario.onRead(id, r); comercio.onRead(id, r).catch(() => {}); };

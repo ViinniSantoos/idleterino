@@ -709,6 +709,13 @@ module.exports = function createPokeIdle(ctx) {
     noteOutside,
     // Para o diário (modo noite e painel): ler as contas e trocar o modo / o otimizar sozinho.
     accounts: () => config.accounts.map((a) => ({ ...a, isPoke: isPokeIdle(urlOf(a)) })),
+    // "Levar para o celular": o login do PokeIdle desta conta (o `sessao` da página), só a pedido da pessoa.
+    lerSessao: async (id) => {
+      const v = views.get(id);
+      if (!v || v.webContents.isDestroyed()) return null;
+      const txt = await v.webContents.executeJavaScript("localStorage.getItem('sessao')").catch(() => null);
+      try { return txt ? JSON.parse(txt) : null; } catch { return null; }
+    },
     infoOf: (id) => info.get(id) || null,
     setModes: (map) => { for (const [id, m] of Object.entries(map || {})) { const a = account(id); if (a && MODES[m] && a.mode !== m) { a.mode = m; applyMode(id); } } saveConfig(); send('status', snapshot()); },
     getOptimizeEvery: () => config.optimizeEvery || 0,

@@ -807,3 +807,24 @@ body.foco .glow { display: none; }
 .pp-tag { font-size: 11px; font-weight: 800; color: #f7d774; }
 /* Botão com o atributo hidden nunca aparece (o display dos botões do menu passava por cima). */
 [hidden] { display: none !important; }
+.celular { display: grid; gap: 12px; max-width: 760px; }
+.cel-lista { display: grid; gap: 8px; }
+.cel-conta { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 10px; background: rgba(255,255,255,.05); }
+.cel-conta.off { opacity: .5; }
+.cel-meio { display: flex; gap: 22px; flex-wrap: wrap; align-items: center; }
+.cel-qr { width: 300px; height: 300px; background: #fff; border-radius: 14px; padding: 10px; image-rendering: pixelated; }
+.cel-lado { flex: 1; min-width: 260px; display: grid; gap: 8px; }
+.cel-pin { font-size: 40px; font-weight: 900; letter-spacing: 6px; }
+.cel-tempo { font-weight: 700; color: #f7d774; }
+.cel-lado ol { margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.6; }
+.cel-qr { width: 380px; height: 380px; background: #fff; border-radius: 10px; padding: 0; image-rendering: auto; }
+.cel-qr svg { width: 100%; height: 100%; display: block; shape-rendering: crispEdges; }
+.celular { max-width: 1100px; }
+.cel-tela { position: fixed; inset: 0; z-index: 9999; background: rgba(8, 7, 16, .97); display: flex; align-items: center; justify-content: center; gap: 32px; padding: 24px; overflow: auto; }
+.cel-tela.estreita { flex-direction: column; justify-content: flex-start; }
+.cel-tela .cel-qr { flex: none; background: #fff; border-radius: 10px; padding: 0; }
+.cel-tela .cel-qr svg { width: 100%; height: 100%; display: block; shape-rendering: crispEdges; }
+.cel-tela .cel-lado { flex: 0 1 360px; min-width: 260px; display: grid; gap: 10px; align-content: center; }
+.cel-tela h2 { margin: 0; }
+.celular .cel-qr { width: 260px; height: 260px; flex: none; background: #fff; border-radius: 10px; padding: 0; }
+.celular .cel-qr svg { width: 100%; height: 100%; display: block; shape-rendering: crispEdges; }

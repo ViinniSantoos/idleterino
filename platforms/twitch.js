@@ -1022,9 +1022,13 @@ const isShown = (slug) => { const w = watchers.get(slug); return !!w && !w.isDes
 // A página da Twitch acumula memória com as horas: a live oculta recarrega a cada 3 h.
 const RECYCLE_MS = 3 * 60 * 60 * 1000;
 
+const celularAtivo = () => !!(ctx.celularAtivo && ctx.celularAtivo('twitch'));
+ctx.aoCelular = ctx.aoCelular || {};
+ctx.aoCelular.twitch = () => { try { reconcileWatchers(); send('status', snapshot()); } catch {} };
 function reconcileWatchers() {
   const now = Date.now();
-  const canFarm = config.farming && (loggedIn || process.env.TWITCHTERINO_ALLOW_ANON);
+  // Farmando no celular (aviso pelo Wi-Fi de casa): o PC para as lives desta plataforma até o celular sair.
+  const canFarm = config.farming && (loggedIn || process.env.TWITCHTERINO_ALLOW_ANON) && !celularAtivo();
   for (const slug of [...watchers.keys()]) {
     const s = status.get(slug);
     if (isShown(slug)) continue;
@@ -1134,6 +1138,7 @@ function limitTestSnapshot() {
 function snapshot() {
   const now = Date.now();
   return {
+    noCelular: celularAtivo(),
     farming: config.farming, maxWatchers: config.maxWatchers, lowQuality: config.lowQuality, rotation: config.rotation,
     bonusTarget: config.bonusTarget, bonusOptions: bonusOptions(), limitTest: limitTestSnapshot(), limitResult: config.limitResult || null,
     openAtLogin: isOpenAtLogin(), platform: process.platform,

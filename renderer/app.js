@@ -64,7 +64,7 @@ function renderHome() {
     const card = el('div', `card pcard ${ns}${on ? '' : ' disabled'}`);
     const head = el('div', 'pcard-head');
     head.append(el('span', 'badge', P[ns].letter), el('b', null, P[ns].name));
-    const state = el('span', 'state', !on ? 'desligado' : !s ? 'carregando…' : !s.loggedIn ? 'sem login' : s.farming ? 'juntando pontos' : 'pausado');
+    const state = el('span', 'state', !on ? 'desligado' : !s ? 'carregando…' : !s.loggedIn ? 'sem login' : s.noCelular ? '📱 no celular' : s.farming ? 'juntando pontos' : 'pausado');
     head.append(state);
     card.append(head);
     if (on && s) {
@@ -320,7 +320,7 @@ function sideCol(ns, s) {
   section('Tocando agora', 'As lives que estão rendendo pontos neste momento, escondidas e em 160p.');
   const playing = s.channels.filter((c) => c.watching);
   if (!s.loggedIn) list.append(el('div', 'side-empty', `Entre na ${P[ns].name} para começar.`));
-  else if (!playing.length) list.append(el('div', 'side-empty', s.farming ? 'Nenhum canal ao vivo agora. As lives entram sozinhas quando alguém abrir.' : 'Juntar pontos está desligado.'));
+  else if (!playing.length) list.append(el('div', 'side-empty', s.noCelular ? '📱 Farmando no Idleterino do celular agora (aviso pelo Wi-Fi de casa). O PC volta a farmar sozinho quando o celular fechar ou sair do Wi-Fi.' : s.farming ? 'Nenhum canal ao vivo agora. As lives entram sozinhas quando alguém abrir.' : 'Juntar pontos está desligado.'));
   for (const c of playing) {
     const card = el('div', 'now');
     const thumb = el('div', 'now-thumb');
@@ -509,6 +509,9 @@ async function renderSettings() {
   box.append(rowOpt('Kick', 'Lives, pontos e chat da Kick.', sw(a.platforms.kick, (v) => setPlatform('kick', v))));
   box.append(rowOpt(a.platform === 'linux' ? 'Iniciar com o sistema' : 'Iniciar com o Windows', 'Abre direto na bandeja, perto do relógio.', sw(a.openAtLogin, async (v) => { S.app = await call('app:autostart', v); renderSettings(); })));
   box.append(rowOpt('Versão', `Idleterino ${a.version}`, button('Sair do app', null, () => call('app:quit'))));
+  const cel = el('div', 'card');
+  cel.append(el('h3', null, '📱 Idleterino no celular'), el('p', 'sub', 'Leve as suas contas do PokeIdle para o Idleterino Android com um QR Code: o celular abre já logado, sem senha.'), button('Levar contas para o celular', 'primary', () => abrirLevarCelular()));
+  box.append(cel);
   // Segurança: o que o app faz para proteger os logins, e como apagar tudo.
   const sec = el('div', 'card security');
   sec.append(el('h3', null, '🔒 Segurança das suas contas'));
