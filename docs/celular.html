@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Idleterino no celular</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #f1eefc;
+    background: radial-gradient(600px 400px at 80% 0%, rgba(255,92,214,.25), transparent 60%), radial-gradient(600px 500px at 0% 100%, rgba(124,92,255,.3), transparent 60%), #0b0a16;
+    display: grid; place-items: center; padding: 24px 16px; }
+  main { max-width: 440px; width: 100%; display: grid; gap: 16px; text-align: center; }
+  img { width: 84px; height: 84px; border-radius: 22px; margin: 0 auto; }
+  h1 { margin: 0; font-size: 26px; }
+  p { margin: 0; color: #cfc8f5; line-height: 1.5; }
+  a.bt { display: block; padding: 15px; border-radius: 14px; font-weight: 800; font-size: 17px; text-decoration: none; color: #141024; background: linear-gradient(90deg, #ff5cd6, #9b7bff 55%, #33d6ff); }
+  a.bt2 { display: block; padding: 13px; border-radius: 14px; font-weight: 700; color: #f1eefc; border: 1px solid rgba(255,255,255,.2); text-decoration: none; }
+  .aviso { font-size: 13px; color: #a9a2d4; }
+</style>
+</head>
+<body>
+<main>
+  <img src="icon.png" alt="">
+  <h1>Idleterino no celular</h1>
+  <p id="msg">Abrindo o Idleterino com as suas contas…</p>
+  <a class="bt" id="abrir" href="#">Abrir no Idleterino</a>
+  <a class="bt2" href="https://github.com/ViinniSantoos/idleterino-android/releases/latest">Ainda não tenho o app: baixar</a>
+  <p class="aviso">Os dados das contas vêm criptografados no próprio link e só abrem com o PIN que aparece no PC. Esta página não envia nada para servidor nenhum.</p>
+</main>
+<script>
+(function () {
+  var d = location.hash.slice(1);
+  var ok = /^c2\.[A-Za-z0-9_-]{60,8000}$/.test(d);
+  var msg = document.getElementById('msg');
+  var bt = document.getElementById('abrir');
+  // Os dados não ficam no histórico do navegador.
+  try { history.replaceState(null, '', location.pathname); } catch (e) {}
+  if (!ok) { msg.textContent = 'Este link não tem contas para importar. No PC, abra Idleterino > Ajustes > "Levar contas para o celular" e gere o QR Code.'; bt.style.display = 'none'; return; }
+  if (!/Android/i.test(navigator.userAgent)) { msg.textContent = 'Abra este QR Code no celular Android que tem o Idleterino.'; bt.style.display = 'none'; return; }
+  var baixar = 'https://github.com/ViinniSantoos/idleterino-android/releases/latest';
+  var intent = 'intent://importar#Intent;scheme=idleterino;package=io.github.viinnisantoos.idleterino;S.d=' + d +
+    ';S.browser_fallback_url=' + encodeURIComponent(baixar) + ';end';
+  bt.href = intent;
+  msg.textContent = 'Toque no botão para abrir o Idleterino. Ele vai pedir o PIN de 8 números que está na tela do PC.';
+  setTimeout(function () { location.href = intent; }, 400);
+})();
+</script>
+</body>
+</html>
