@@ -627,7 +627,98 @@ contextBridge.executeInMainWorld({
       return { dps: total / (T / 1000), golpe: lista[top].g.name };
     }
 
+    // MELHOR HUNT PELO /hunt: quando a extensão /hunt está ligada nesta conta, a referência é o MOTOR DELA (o mesmo
+    // cálculo da tabela "Onde caçar?", com o pokémon em campo, os bônus, o Dia Sazonal e o AoE dela). O Idleterino só
+    // acrescenta o que o /hunt não conta: a BICICLETA (ele calcula a pé). A bike encurta só a caminhada de cada abate,
+    // com as mesmas constantes do /hunt (caminhada = 83% do tempo do mapa, piso 1,41 s, que cai com a luta).
+    async function huntRankPeloHunt(opts) {
+      const PIH = window.__pokeidleHunt;
+      if (!PIH || !PIH.engine || !PIH.engine.analisar || !PIH.on || !PIH.carregarJogo) return null;
+      let welcome = null, eu = null;
+      PIH.on('welcome', (m) => { welcome = m; })();
+      PIH.on('estado', (e) => { eu = e; })();
+      if (!welcome || !eu) return null;
+      let pk = (eu.pokemons || []).find((x) => x.id === eu.activeId);
+      if (!pk) return { pronto: true, semPokemon: true };
+      if (opts && opts.testeAoe) pk = { ...pk, tmAoe: true }; // só para teste
+      const J = await PIH.carregarJogo();
+      const chave = PIH.geo && PIH.geo.chaveDoPokemon ? PIH.geo.chaveDoPokemon(pk) : null;
+      const ctx = {
+        mod: J.mod, especies: J.especies, hunts: welcome.hunts || [],
+        consts: { tabelaTipos: welcome.tabelaTipos, ampliacaoHunt: welcome.ampliacaoHunt, multHpSelvagem: welcome.multHpSelvagem, multDanoSelvagem: welcome.multDanoSelvagem,
+          tiposBoost: welcome.tiposBoost, catalogoBolas: welcome.catalogoBolas, captura: welcome.captura, chanceShiny: welcome.chanceShiny, shinyLooks: welcome.shinyLooks },
+        eu, ritmo: PIH.ritmo || null,
+        mapaVisto: (slug) => (PIH.geo && PIH.geo.mapaDa ? PIH.geo.mapaDa(slug) : null),
+        ritmoMedido: (slug) => (chave && PIH.geo && PIH.geo.ritmoMedido ? PIH.geo.ritmoMedido(slug, chave) : null),
+      };
+      const tipoDia = eu.diaSazonal && eu.diaSazonal.tipo && (!eu.diaSazonal.fim || Number(eu.diaSazonal.fim) > Date.now()) ? eu.diaSazonal.tipo : null;
+      const r = PIH.engine.analisar(pk, ctx, { ordem: 'xp', soLiberadas: true, comPocao: true, tipoDoDia: tipoDia });
+      const M = PIH.engine.MEDIDO || {};
+      const I = PIH.engine._interno || {};
+      const rar = eu.bicicleta && (eu.bicicleta.equipadaRar || null);
+      const vel = VEL_BIKE[rar] || 0;
+      const aoe = !!pk.tmAoe;
+      const porGolpe = aoe ? (M.aoeAlvosPorGolpe || 2) : 1;
+      const atualSlug = eu.huntSlug || (eu.hunt && eu.hunt.slug) || huntAtualSlug();
+      const nomeReg = (x) => (x && typeof x === 'object' ? x.rotulo || x.nome || x.id : x) || null;
+      const out = [];
+      for (const l of r.linhas || []) {
+        if (l.inviavel || !(l.kph > 0)) continue;
+        let kph = l.kph;
+        // AoE MEDIDO: o /hunt chuta 2 selvagens por golpe em toda hunt (faixa 1,5–3). Onde esta conta já viu os
+        // bandos nascerem (quadrado 11×11, medido no campo), usa a medida dela — dentro da mesma faixa do /hunt.
+        let pg = porGolpe, bandoMed = null;
+        const Mh = l.slug && medido[l.slug];
+        if (aoe && Mh && Array.isArray(Mh.bando) && Mh.bando.length >= 3 && I.tempoMorto && I.tempoDoMapa && l.hunt && Number(l.ttk) > 0.02) {
+          bandoMed = mediana(Mh.bando);
+          const faixa = M.aoeAlvosFaixa || [1.5, 3];
+          const novo = Math.min(faixa[1], Math.max(faixa[0], bandoMed));
+          if (Math.abs(novo - porGolpe) > 0.05) {
+            const mp0 = I.tempoDoMapa(l.hunt, ctx.ritmo, ctx.mapaVisto);
+            const t = Number(l.ttk);
+            const porAbate = (k) => I.tempoMorto(mp0.sAoe, t / k) + t / k;
+            const uptime = l.kph / (3600 / porAbate(porGolpe)); // o /hunt já desconta as mortes: mantém
+            kph = (3600 / porAbate(novo)) * uptime;
+            pg = novo;
+          }
+        }
+        // Bicicleta: só a caminhada encolhe.
+        if (vel > 0 && I.tempoDoMapa && l.hunt) {
+          const mp = I.tempoDoMapa(l.hunt, ctx.ritmo, ctx.mapaVisto);
+          const sB = aoe ? mp.sAoe : mp.s;
+          const F = (Number(l.ttk) || 0) / pg;
+          const andar1 = (M.caminhadaDoMapa || 0.83) * sB;
+          const andar = andar1 - Math.max(0, andar1 - (M.caminhadaPisoS || 1.41)) * (1 - Math.exp(-F / (M.caminhadaTauS || 2.8)));
+          const T = 3600 / kph;
+          const T2 = Math.max(0.5, T - andar + andar / (1 + vel));
+          kph = 3600 / T2;
+        }
+        const f = kph / l.kph;
+        const hit = Number(l.hitPct) || 0;
+        out.push({ slug: l.slug || null, nome: String(l.nome || l.slug || '?'), nivel: Number(l.nivel) || 0, regiao: nomeReg(l.regiao),
+          kph: Math.round(kph), kphHunt: Math.round(l.kph), xpH: Math.round((l.xpTreinadorH || 0) * f), xpPkH: Math.round((l.xpPokemonH || 0) * f),
+          goldH: Math.round((l.ouroH || 0) * f), goldLiq: Math.round((l.ouroH || 0) * f),
+          seg: Math.round((Number(l.ttk) || 0) * 10) / 10, golpe: l.melhorGolpe ? l.melhorGolpe.nome : null, effH: Math.round((Number(l.efetividade) || 0) * 100) / 100,
+          risco: hit < 0.25 ? 1 : hit < 0.5 ? 1.5 : 2.5, riscoPct: Math.round(hit * 100), medidoMin: 0, kphMedido: l.kphMedido || null,
+          teto: false, lenta: !!(l.aoe && l.aoe.estimado) && bandoMed == null, bando: Math.round(pg * 10) / 10, bandoMedido: bandoMed != null ? Math.round(bandoMed * 10) / 10 : null });
+      }
+      out.sort((a, b) => b.xpH - a.xpH);
+      const atualEst = out.find((h) => h.slug && h.slug === atualSlug) || null;
+      const tipos = [...new Set([...(pk.tipos || []), pk.tmElemental ? String(pk.tmElemental).toUpperCase() : null].filter(Boolean))];
+      return {
+        pronto: true, fonte: 'hunt', L: Number(eu.level) || 0, pokemon: (r.especie && r.especie.name) || pk.nome || '?', tipos, aoe, bike: rar, vel,
+        bonus: r.bonusXp && r.bonusXp.treinador ? r.bonusXp.treinador : 1, tipoDia, seuDoDia: !!(tipoDia && tipos.includes(tipoDia)),
+        calibrado: 0, ritmo: 0, top: out.slice(0, 8), atual: atualSlug, atualEst,
+        topOuro: [...out].sort((a, b) => b.goldLiq - a.goldLiq).slice(0, 8),
+      };
+    }
+
     async function huntRank() {
+      // Primeiro o /hunt (a referência); sem ele nesta conta, o cálculo próprio.
+      try { const r = await huntRankPeloHunt(arguments[0]); if (r) return r; } catch {}
+      return huntRankProprio();
+    }
+    async function huntRankProprio() {
       if (!jogo.hunts || !jogo.tabelaTipos) return { pronto: false };
       let ha, gi, cdm, tm;
       try {
@@ -814,7 +905,8 @@ contextBridge.executeInMainWorld({
       for (const p of Object.values(pvp.perfis)) for (const k of p.time) anota(k.speciesId);
       for (const id of Array.isArray(extraIds) ? extraIds.slice(0, 400) : []) anota(id);
       const meus = {};
-      for (const k of jogo.pks.values()) { anota(k.speciesId); const cur = meus[k.speciesId]; if (!cur || k.level > cur.level) meus[k.speciesId] = { ...k }; }
+      // Cada pokémon da conta (pelo id): dois Charizards são dois — o PvP pode levar os dois.
+      for (const k of jogo.pks.values()) { anota(k.speciesId); meus[k.id] = { ...k }; }
       const eu = pvp.eu ? pvp.eu.dados : null;
       return { euPvp: jogo.eu.pvp ? JSON.parse(JSON.stringify(jogo.eu.pvp)) : null, nivel: Number(jogo.eu.level) || 0, at: pvp.at, coletando: pvp.coletando, feitos: pvp.feitos, total: pvp.total, erro: pvp.erro, linhas, perfis: pvp.perfis, info, meus, tabelaTipos: jogo.tabelaTipos, eu, nick: jogo.eu.nick || null, euKeys: jogo.keys.slice(0, 80) };
     }
@@ -1011,7 +1103,7 @@ contextBridge.executeInMainWorld({
           try { fn(I); return true; } catch (e) { extras.instalados.delete(nome); return String(e && e.message || e); }
         },
         bonusXp() { return bonusXp ? JSON.parse(JSON.stringify(bonusXp)) : null; },
-        huntRank() { return huntRank().then((r) => JSON.parse(JSON.stringify(r))).catch((e) => ({ pronto: false, erro: String(e) })); },
+        huntRank(o) { return huntRank(o && o.testeAoe ? { testeAoe: true } : undefined).then((r) => JSON.parse(JSON.stringify(r))).catch((e) => ({ pronto: false, erro: String(e) })); },
         pvpColetar(n, passo) { return pvpColetar(n, passo).catch((e) => ({ ok: false, motivo: String(e) })); },
         treinador() { const t = treinador(); return t ? { ...t } : null; },
         pvpEu() { return jogo.eu.pvp ? { ...JSON.parse(JSON.stringify(jogo.eu.pvp)), nick: jogo.eu.nick || null } : null; },

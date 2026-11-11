@@ -802,3 +802,8 @@ body.foco .glow { display: none; }
 .apoio-txt p { margin: 0; line-height: 1.5; }
 .nav.nav-apoio svg { fill: none; stroke: #ff5c8a; }
 .nav.nav-apoio:hover svg { fill: color-mix(in srgb, #ff5c8a 35%, transparent); }
+.pp-sug { display: grid; gap: 6px; margin-top: 12px; }
+.pp-item.sug { border: 1px dashed color-mix(in srgb, #f5c542 55%, transparent); background: color-mix(in srgb, #f5c542 6%, transparent); cursor: default; }
+.pp-tag { font-size: 11px; font-weight: 800; color: #f7d774; }
+/* Botão com o atributo hidden nunca aparece (o display dos botões do menu passava por cima). */
+[hidden] { display: none !important; }

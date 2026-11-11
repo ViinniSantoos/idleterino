@@ -28,10 +28,10 @@ let pvpBudget = '';      // orçamento: começa vazio, a pessoa diz quanto quer 
 let pvpMoeda = 'orb';
 let pvpBuscaMk = null;   // { carregando, lista, em, erro }
 const pvpSimCache = new Map();
-// Regra do jogo (podeUsarPokemon): a conta só usa pokémon com nível até o do treinador + 5; o inicial, sempre.
-const FOLGA_NIVEL = 5;
+// No PvP (ranqueado, Mundial e Amador) NÃO existe trava de nível: o "treinador + 5" é regra de hunt. Acima do
+// teto da arena o nível só é comprimido pela régua dela ("conta como Nv X" na ficha) — o duelo do jogo já faz isso.
 let pvpTrainerLv = 0;
-const podeUsar = (m) => !pvpTrainerLv || (m.pk && m.pk.starter) || (m.level || 0) <= pvpTrainerLv + FOLGA_NIVEL;
+const podeUsar = () => true;
 
 function pvpEff(tabela, atq, def1, def2) {
   const one = (a, d) => { if (!d) return 1; if (a === d) return PVP_DIAG[a] ?? 1; return ((tabela || {})[a] || {})[d] ?? 1; };
@@ -83,11 +83,12 @@ function pvpScore(c, entries, tab, refLevel) {
 
 function pvpMine(live, info) {
   if (!live) return [];
-  return Object.entries(live.meus || {}).map(([sid, m]) => {
+  return Object.values(live.meus || {}).map((m) => {
+    const sid = m.speciesId;
     const inf = info[sid] || {};
     const tipos = inf.tipos || [];
     const el2 = m.el || m.tmElemental || null;
-    const r = { speciesId: Number(sid), nome: inf.nome || `#${sid}`, tipos, atk: [...new Set([...tipos, el2].filter(Boolean))], el: el2, aoe: !!m.aoe, level: m.level, alcance: inf.alcance || 1, stats: inf.stats, pk: m };
+    const r = { id: m.id, speciesId: Number(sid), nome: inf.nome || `#${sid}`, tipos, atk: [...new Set([...tipos, el2].filter(Boolean))], el: el2, aoe: !!m.aoe, level: m.level, alcance: inf.alcance || 1, stats: inf.stats, pk: m };
     r.usavel = podeUsar(r);
     return r;
   }).sort((a, b) => b.level - a.level);
@@ -376,7 +377,7 @@ function renderPvpTime(root, c) {
   const { meta, entries, tab, refLevel, mine, arqs } = c;
   const sug = pvpSuggest(mine, entries, tab, refLevel);
   if (!pvpPlan) { try { pvpPlan = JSON.parse(localStorage.getItem(`pvpPlan:${pvpAcc}`) || 'null'); } catch {} }
-  const team = (pvpPlan && pvpPlan.length ? pvpPlan.map((id) => mine.find((m) => m.speciesId === id)).filter(Boolean) : sug.map((x) => x.c));
+  const team = (pvpPlan && pvpPlan.length ? pvpPlan.map((id) => mine.find((m) => m.id === id)).filter(Boolean) : sug.map((x) => x.c));
   const temPreco = (x) => !!priceRow(meta, x.nome).r;
   const candAll = (meta.candidatos || []).filter((x) => !pvpSemLend || !x.lend);
   const cand = pvpSoVenda && candAll.some(temPreco) ? candAll.filter(temPreco) : candAll;
@@ -408,7 +409,7 @@ function renderPvpTime(root, c) {
 
   const sc = el('div', 'card');
   const sh = el('div', 'pvp-sh'); sh.append(el('div', 'ext-sec', 'Com o que você tem'));
-  if (sug.length) sh.append(button('Usar no planejador', 'mini', () => { pvpPlan = sug.map((x) => x.c.speciesId); try { localStorage.setItem(`pvpPlan:${pvpAcc}`, JSON.stringify(pvpPlan)); } catch {} pvpTab = 'plan'; renderPvp(); }));
+  if (sug.length) sh.append(button('Usar no planejador', 'mini', () => { pvpPlan = sug.map((x) => x.c.id); try { localStorage.setItem(`pvpPlan:${pvpAcc}`, JSON.stringify(pvpPlan)); } catch {} pvpTab = 'plan'; renderPvp(); }));
   sc.append(sh);
   if (!mine.length) sc.append(el('div', 'mempty', 'Não consegui ler os pokémon desta conta ainda. Abra a conta no PokeIdle e volte aqui.'));
   else { const row = el('div', 'pvp-team'); for (const x of sug) row.append(pvpMemberCard(x.c, x.s)); sc.append(row); if (mine.length < 5) sc.append(el('div', 'mempty', `Esta conta tem só ${mine.length} espécie${mine.length === 1 ? '' : 's'}: o time completo tem 5.`)); }
@@ -420,7 +421,7 @@ function renderPvpTime(root, c) {
     const opts = cand.filter((x) => !team.some((m) => m.speciesId === x.speciesId)).slice(0, 4);
     const uc = el('div', 'card');
     uc.append(el('div', 'ext-sec', 'Upgrade: o que mais melhora o seu time'));
-    uc.append(el('div', 'sub up-lead', `O mais fraco contra o meta hoje: ${fraco.nome} (Nv ${fmt(fraco.level)}). Troque por um destes (contas no nível do top, ~Nv ${fmt(meta.ref ? meta.ref.level : refLevel)}). ${pvpTrainerLv ? `Lembrete: com o treinador Nv ${fmt(pvpTrainerLv)}, esta conta usa pokémon até Nv ${fmt(pvpTrainerLv + FOLGA_NIVEL)}.` : ''}`));
+    uc.append(el('div', 'sub up-lead', `O mais fraco contra o meta hoje: ${fraco.nome} (Nv ${fmt(fraco.level)}). Troque por um destes (contas no nível do top, ~Nv ${fmt(meta.ref ? meta.ref.level : refLevel)}).`));
     const row = el('div', 'cand-list');
     for (const x of opts) row.append(candRow(meta, x, top));
     uc.append(row);
@@ -442,7 +443,7 @@ function renderPvpTime(root, c) {
     const lv = el('label', 'chk'); const cv = el('input'); cv.type = 'checkbox'; cv.checked = pvpSoVenda; cv.onchange = () => { pvpSoVenda = cv.checked; try { localStorage.setItem('pvpSoVenda', pvpSoVenda ? '1' : '0'); } catch {} renderPvp(true); }; lv.append(cv, ' só o que está à venda');
     const opts2 = el('div', 'actions'); opts2.style.margin = '0'; opts2.append(lv, lg);
     ah.append(opts2);
-    ac.append(ah, el('div', 'sub up-lead', `No nível/potência típicos do top (Nv ~${fmt(meta.ref ? meta.ref.level : refLevel)}, potência ${meta.ref ? meta.ref.potencia : 2}), este time tem duelo favorável contra ${wins} dos ${top.length} arquétipos do topo. É o caminho para montar do zero ou comprar no Market.${pvpTrainerLv && pvpTrainerLv + FOLGA_NIVEL < (meta.ref ? meta.ref.level : refLevel) ? ` Esta conta (treinador Nv ${fmt(pvpTrainerLv)}) ainda só usa pokémon até Nv ${fmt(pvpTrainerLv + FOLGA_NIVEL)}: para chegar no nível do top, suba o treinador.` : ''}`));
+    ac.append(ah, el('div', 'sub up-lead', `No nível/potência típicos do top (Nv ~${fmt(meta.ref ? meta.ref.level : refLevel)}, potência ${meta.ref ? meta.ref.potencia : 2}), este time tem duelo favorável contra ${wins} dos ${top.length} arquétipos do topo. É o caminho para montar do zero ou comprar no Market.`));
     const row = el('div', 'cand-list');
     for (const x of pick) row.append(candRow(meta, x, top));
     ac.append(row);
@@ -453,7 +454,7 @@ function renderPvpTime(root, c) {
   // bons no PvP, avaliando cada pokémon à venda no duelo do jogo contra o top.
   const bk = el('div', 'card');
   bk.append(el('div', 'ext-sec', 'Comprar no Market com o seu orçamento'));
-  bk.append(el('div', 'sub up-lead', `${pvpTrainerLv ? `Treinador Nv ${fmt(pvpTrainerLv)}: esta conta usa pokémon até Nv ${fmt(pvpTrainerLv + FOLGA_NIVEL)}, e a sugestão só inclui o que ela pode usar. ` : ''}Diga quanto quer gastar. O app procura agora as ofertas mais baratas dos pokémon mais fortes contra o meta e avalia cada pokémon à venda (nível, IV, shiny, AoE, Z-Move) no duelo do jogo contra o top. Os preços mudam o tempo todo: a busca é sempre na hora.`));
+  bk.append(el('div', 'sub up-lead', `No PvP não há trava de nível (acima do teto da arena o nível só é comprimido). Diga quanto quer gastar. O app procura agora as ofertas mais baratas dos pokémon mais fortes contra o meta e avalia cada pokémon à venda (nível, IV, shiny, AoE, Z-Move) no duelo do jogo contra o top. Os preços mudam o tempo todo: a busca é sempre na hora.`));
   const form = el('div', 'budget');
   const inp = el('input'); inp.type = 'number'; inp.min = '0'; inp.step = '100'; inp.placeholder = 'Quanto quer gastar?'; inp.value = pvpBudget;
   inp.oninput = () => { pvpBudget = inp.value; };
@@ -478,7 +479,7 @@ function renderPvpTime(root, c) {
     const nm = moeda === 'gold' ? 'coins' : 'gemas';
     const noValor = (lista || []).filter((o) => o.moeda === moeda && o.preco > 0 && o.preco <= valor && !o.retido);
     // Só entra na sugestão quem vence pelo menos alguns duelos contra o top (pokémon fraco não é compra de PvP).
-    const usa = (o) => !pvpTrainerLv || o.level <= pvpTrainerLv + FOLGA_NIVEL;
+    const usa = () => true; // PvP: sem trava de nível
     const cabe = noValor.filter((o) => o.win >= 0.03 && usa(o));
     // Sugestão: os mais fortes que cabem juntos no valor, um de cada espécie, até 5.
     const ord = [...cabe].sort((x, y) => y.win - x.win || x.preco - y.preco);
@@ -488,7 +489,6 @@ function renderPvpTime(root, c) {
     const linha = (o) => {
       const r = el('div', 'cand');
       const l = el('div', 'pu-n'); l.append(el('b', null, `${o.nome} · Nv ${fmt(o.level)}${o.shiny ? ' ✨' : ''}`), el('span', 'sub', `vence ${pct(o.win)} dos duelos contra o top · vendedor ${o.vendedor || '—'}`));
-      if (!usa(o)) l.append(el('span', 'lvl-warn', `precisa de treinador Nv ${fmt(o.level - FOLGA_NIVEL)} (o seu é ${fmt(pvpTrainerLv)})`));
       const tg = el('div', 'pm-tags'); for (const tt of o.tipos || []) tg.append(tipoChip(tt)); if (o.el) tg.append(zChip(o.el)); if (o.aoe) tg.append(el('span', 'aoechip', 'AoE')); if (o.potencia) tg.append(el('span', 'pn-p', `P${o.potencia}`));
       const pr = el('div', 'price'); pr.append(fmtP(o), el('span', 'sub', o.qtd > 1 ? `${o.qtd} un.` : 'no Market agora'));
       r.append(l, tg, pr, watchBtn(o.nome));
@@ -498,7 +498,7 @@ function renderPvpTime(root, c) {
     else {
       bk.append(el('div', 'sub up-lead', pick.length
         ? `Com ${fmt(valor)} ${nm}, a melhor compra agora (${new Date(pvpBuscaMk.em || Date.now()).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}): ${pick.length} pokémon por ${fmt(gasto)} ${nm}, sobram ${fmt(valor - gasto)}.`
-        : (() => { const m2 = [...noValor].filter(usa).sort((x, y) => y.win - x.win || y.level - x.level)[0]; return `Com ${fmt(valor)} ${nm}, nada à venda agora vence duelos contra o top: os pokémon do top 50 são Nv ~${fmt(meta.ref ? meta.ref.level : refLevel)}${meta.ref && meta.ref.shiny ? ' e shiny' : ''}.${m2 ? ` O mais forte que cabe no valor e que esta conta pode usar é ${m2.nome} Nv ${fmt(m2.level)} (${fmt(m2.preco)} ${nm}): ajuda a subir de tier, mas não chega no topo.` : ` Nada do que cabe no valor esta conta pode usar ainda (até Nv ${fmt(pvpTrainerLv + FOLGA_NIVEL)}).`} Abaixo, as ofertas mais fortes à venda.`; })()));
+        : (() => { const m2 = [...noValor].filter(usa).sort((x, y) => y.win - x.win || y.level - x.level)[0]; return `Com ${fmt(valor)} ${nm}, nada à venda agora vence duelos contra o top: os pokémon do top 50 são Nv ~${fmt(meta.ref ? meta.ref.level : refLevel)}${meta.ref && meta.ref.shiny ? ' e shiny' : ''}.${m2 ? ` O mais forte que cabe no valor é ${m2.nome} Nv ${fmt(m2.level)} (${fmt(m2.preco)} ${nm}): ajuda a subir de tier, mas não chega no topo.` : ''} Abaixo, as ofertas mais fortes à venda.`; })()));
       const l1 = el('div', 'cand-list'); for (const o of pick) l1.append(linha(o)); bk.append(l1);
       const resto = [...(lista || [])].filter((o) => o.moeda === moeda && !pick.includes(o)).sort((x, y) => y.win - x.win).slice(0, 8);
       if (resto.length) { bk.append(el('div', 'ext-sec mk-sub', 'Outras ofertas fortes (algumas acima do seu valor)')); const l2 = el('div', 'cand-list'); for (const o of resto) l2.append(linha(o)); bk.append(l2); }
@@ -538,10 +538,10 @@ function candRow(meta, x, top) {
 function renderPvpPlan(root, c) {
   const { meta, entries, tab, refLevel, mine, mineAll, arqs } = c;
   if (!pvpPlan) { try { pvpPlan = JSON.parse(localStorage.getItem(`pvpPlan:${pvpAcc}`) || 'null'); } catch {} }
-  if (!pvpPlan) pvpPlan = pvpSuggest(mine, entries, tab, refLevel).map((x) => x.c.speciesId);
-  pvpPlan = pvpPlan.filter((id) => mine.some((m) => m.speciesId === id)).slice(0, 5);
+  if (!pvpPlan) pvpPlan = pvpSuggest(mine, entries, tab, refLevel).map((x) => x.c.id);
+  pvpPlan = pvpPlan.filter((id) => mine.some((m) => m.id === id)).slice(0, 5); // plano antigo (por espécie) cai fora e vira sugestão nova
   const savePlan = () => { try { localStorage.setItem(`pvpPlan:${pvpAcc}`, JSON.stringify(pvpPlan)); } catch {} };
-  const team = pvpPlan.map((id) => mine.find((m) => m.speciesId === id)).filter(Boolean).sort((a, b) => a.alcance - b.alcance);
+  const team = pvpPlan.map((id) => mine.find((m) => m.id === id)).filter(Boolean).sort((a, b) => a.alcance - b.alcance);
   const top = arqs.filter((a) => a.tier !== 'U');
   if (pvpArqSel == null || !arqs.some((a) => a.id === pvpArqSel)) pvpArqSel = top[0] ? top[0].id : (arqs[0] ? arqs[0].id : null);
   const arq = arqs.find((a) => a.id === pvpArqSel);
@@ -565,14 +565,34 @@ function renderPvpPlan(root, c) {
   left.append(q);
   const list = el('div', 'pp-list');
   for (const m of mineAll.filter((x) => !pvpBusca || x.nome.toLowerCase().includes(pvpBusca.toLowerCase())).slice(0, 80)) {
-    const on = pvpPlan.includes(m.speciesId);
+    const on = pvpPlan.includes(m.id);
     const b = el('button', `pp-item${on ? ' on' : ''}${m.usavel ? '' : ' off'}`);
     b.append(el('b', null, m.nome), el('span', null, `Nv ${fmt(m.level)} · ${alcIcon(m.alcance)}${m.aoe ? ' · AoE' : ''}${m.el ? ` · Z ${TIPO_PT[String(m.el).toUpperCase()] || m.el}` : ''}`));
-    if (!m.usavel) { b.append(el('span', 'lvl-warn', `precisa de treinador Nv ${fmt(m.level - FOLGA_NIVEL)}`)); b.disabled = true; b.title = `A conta só usa pokémon até Nv ${fmt(pvpTrainerLv + FOLGA_NIVEL)} (treinador Nv ${fmt(pvpTrainerLv)} + 5).`; }
-    b.onclick = () => { if (on) pvpPlan = pvpPlan.filter((x) => x !== m.speciesId); else if (pvpPlan.length < 5) pvpPlan.push(m.speciesId); else return toast('O time tem no máximo 5. Tire um antes.'); savePlan(); renderPvp(true); };
+    b.onclick = () => { if (on) pvpPlan = pvpPlan.filter((x) => x !== m.id); else if (pvpPlan.length < 5) pvpPlan.push(m.id); else return toast('O time tem no máximo 5. Tire um antes.'); savePlan(); renderPvp(true); };
     list.append(b);
   }
   left.append(list);
+  // Time com menos de 5: sugestões do meta que você NÃO tem, para completar (com a tag), pelo mesmo placar do time.
+  if (team.length < 5 && enemy.length) {
+    const tenho = new Set(mineAll.map((m) => m.speciesId));
+    const vistosS = new Set();
+    const cands = [];
+    for (const e of entries) {
+      if (tenho.has(e.speciesId) || vistosS.has(e.speciesId)) continue;
+      vistosS.add(e.speciesId);
+      cands.push({ c: e, s: pvpScore(e, enemy.map((x) => ({ ...x, w: 1 })), tab, refLevel) });
+    }
+    cands.sort((a, b) => b.s.score - a.s.score);
+    const sg = el('div', 'pp-sug');
+    sg.append(el('div', 'ext-sec', `Para completar o time (${5 - team.length} vaga${5 - team.length > 1 ? 's' : ''})`));
+    for (const { c: e, s: sc } of cands.slice(0, 4)) {
+      const it = el('div', 'pp-item sug');
+      it.append(el('b', null, e.nome), el('span', 'pp-tag', '💡 sugestão — você não tem'),
+        el('span', null, `usado no top 50 · Nv ~${fmt(e.level)}${e.aoe ? ' · AoE' : ''}${sc.forte.length ? ` · bate forte em ${sc.forte.slice(0, 2).map(([n]) => shortName(n)).join(', ')}` : ''}`));
+      sg.append(it);
+    }
+    if (cands.length) { sg.append(el('span', 'sub', 'Procure em "Meu time" > comprar no Market com o seu orçamento.')); left.append(sg); }
+  }
   const mid = el('div', 'pp-mid');
   const enemyPlaces = pvpPlace(enemy);
   const boardBox = el('div');
