@@ -45,7 +45,7 @@ async function renderPve() {
   act.append(sel);
   head.append(t, act);
   const tabs = el('div', 'pvp-tabs');
-  for (const [k, l] of [['agora', '🎯 Hunt agora'], ['proximas', '🗺️ Próximas hunts'], ['evo', '🧬 Evoluir para qual?'], ['mercado', '🛒 Comprar para farmar']]) {
+  for (const [k, l] of [['agora', '🎯 Hunt agora'], ['proximas', '🗺️ Próximas hunts'], ['evo', '🧬 Evoluir para qual?'], ['casas', '🏠 Casas'], ['mercado', '🛒 Comprar para farmar']]) {
     tabs.append(button(l, pveTab === k ? 'on' : '', () => { pveTab = k; try { localStorage.setItem('pveTab', k); } catch {} renderPve(); }));
   }
   root.append(head, tabs);
@@ -54,7 +54,102 @@ async function renderPve() {
   if (pveTab === 'agora') pveAgora(corpo, accs.find((a) => a.id === pveAcc));
   else if (pveTab === 'proximas') await pveProximas(corpo);
   else if (pveTab === 'mercado') pveMercado(corpo, accs.find((a) => a.id === pveAcc));
+  else if (pveTab === 'casas') await pveCasas(corpo);
   else await pveEvo(corpo);
+}
+
+// ---------- 🏠 Casas: em quanto tempo o pokémon da casa chega no nível que você quer ----------
+const casasLer = (k, d) => { try { const v = JSON.parse(localStorage.getItem(k) || 'null'); return v == null ? d : v; } catch { return d; } };
+const casasGravar = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
+const RAR_CASA = { comum: 'Comum', incomum: 'Incomum', rara: 'Rara', mitica: 'Mítica', lendaria: 'Lendária' };
+function tempoCasa(ms) {
+  if (ms == null) return 'mais de 1 ano';
+  if (ms <= 0) return 'já chegou';
+  const min = Math.round(ms / 60000);
+  const d = Math.floor(min / 1440), h = Math.floor((min % 1440) / 60), m = min % 60;
+  if (d >= 1) return `${d}d${h ? ` ${h}h` : ''}`;
+  if (h >= 1) return `${h}h${m ? ` ${m}min` : ''}`;
+  return `${Math.max(1, m)}min`;
+}
+const quandoCasa = (ms) => new Date(Date.now() + ms).toLocaleString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+async function pveCasas(box) {
+  const kAlvos = `casasAlvos:${pveAcc}`;
+  const alvos = casasLer(kAlvos, {});
+  const opc = casasLer('casasOpc', { renovar: false, subir: true, horasDia: 24 });
+  box.append(el('p', 'sub', 'Calculando as casas…'));
+  const r = await call('poke:pve', pveAcc, 'casas', { alvos, ...opc });
+  if (page !== 'pve' || pveTab !== 'casas') return;
+  box.replaceChildren();
+  if (!r || r.erro) { box.append(emptyBox('Não deu para calcular', (r && r.erro) || 'A conta precisa estar logada no jogo. Tente de novo em instantes.')); return; }
+  if (!r.pronto) { box.append(emptyBox('Abra as suas casas uma vez', 'No jogo, toque no botão Casa (no Centro Pokémon) uma vez. Depois disso o app lê as suas casas sozinho.')); return; }
+  if (!r.total) { box.append(emptyBox('Esta conta ainda não tem casa', 'A casa sai do Professor Carvalho, no Centro Pokémon, com os Fragmentos de Chave que caem na Outland. Quando tiver uma, ela aparece aqui sozinha.')); return; }
+  if (!r.casas.length) { box.append(emptyBox('Nenhuma casa em uso', 'Só as casas EM USO (até 5) repartem XP. Ponha uma casa em uso no botão Casa do jogo.')); return; }
+
+  // Buffs de agora e o XP do pokémon de batalha.
+  const topo = el('div', 'card');
+  topo.append(el('h3', null, '⚡ Buffs de XP de pokémon agora'));
+  const pct = (m) => `+${String(Math.round((m - 1) * 1000) / 10).replace('.', ',')}%`;
+  const ativos = (r.partes || []).filter((x) => x.pk !== 1);
+  if (!ativos.length) topo.append(el('p', 'sub', 'Nenhum buff de XP de pokémon ligado agora.'));
+  for (const x of ativos) {
+    const ln = el('div', 'casa-buff');
+    const prazo = x.id === 'atrasados' ? `até o treinador chegar no Nv ${fmt(x.alvo)}` : x.permanente ? 'permanente' : `acaba em ${tempoCasa(x.ate - Date.now())}`;
+    ln.append(el('b', null, x.nome), el('span', 'up', pct(x.pk)), el('span', 'sub', prazo));
+    topo.append(ln);
+  }
+  if (ativos.length) topo.append(el('p', 'small', `Juntos: ×${String(Math.round(r.multPk * 100) / 100).replace('.', ',')} no XP dos pokémon (os buffs multiplicam um ao outro). A casa recebe o XP já com os buffs.`));
+  if (r.huntAgora) {
+    const linha = `Hunt agora: ${r.huntAgora.nome} (Nv ${fmt(r.huntAgora.nivel)}) · ~${fmt(r.kph)} abates/h · seu pokémon de batalha ganha ~${fmt(r.xpPkAgoraH || 0)} XP/h`;
+    topo.append(el('p', 'sub', linha + (r.xpPkMedidoH ? ` (placar real da sessão: ${fmt(r.xpPkMedidoH)} XP/h)` : '')));
+  }
+  // Opções da estimativa.
+  const ops = el('div', 'casa-ops');
+  const chk = (rot, k, dica) => { const l = el('label', 'casa-chk'); const c = el('input'); c.type = 'checkbox'; c.checked = !!opc[k]; c.onchange = () => { opc[k] = c.checked; casasGravar('casasOpc', opc); renderPve(); }; l.title = dica; l.append(c, el('span', null, rot)); return l; };
+  ops.append(chk('Vou renovar os boosts', 'renovar', 'Ligado: o app considera que os boosts com prazo não acabam (você recompra). Desligado: cada um vale só até acabar.'),
+    chk('Subir de hunt quando liberar', 'subir', 'Ligado: quando o treinador liberar um nível de hunt maior, a conta passa a usar o XP dela.'));
+  const hs = el('select'); hs.title = 'Quantas horas por dia a conta fica farmando';
+  for (const h of [24, 20, 16, 12, 8, 4]) { const op = el('option', null, h === 24 ? 'farmando 24h por dia' : `farmando ${h}h por dia`); op.value = String(h); hs.append(op); }
+  hs.value = String(opc.horasDia || 24);
+  hs.onchange = () => { opc.horasDia = Number(hs.value) || 24; casasGravar('casasOpc', opc); renderPve(); };
+  ops.append(hs);
+  topo.append(ops);
+  box.append(topo);
+
+  if (r.semHunt) box.append(el('div', 'tip warn', 'Para estimar o tempo, a conta precisa estar caçando (o app usa o ritmo de abates da hunt de agora). Ponha a conta para caçar e volte aqui.'));
+  if (!r.pokemons.length) box.append(emptyBox('Casas sem pokémon', 'Escolha um pokémon para o posto da casa no jogo (botão Casa › Escolher pokémon).'));
+
+  const grade = el('div', 'casa-grade');
+  for (const p of r.pokemons) {
+    const c = el('div', `card casa-pk rar-${p.rar}`);
+    const cab = el('div', 'casa-cab');
+    cab.append(el('b', null, `${p.shiny ? '✨ ' : ''}${p.nome}`), el('span', 'sub', `Casa ${RAR_CASA[p.rar] || p.rar} · recebe ${Math.round(p.pct * 100)}%`));
+    c.append(cab);
+    if (p.batalha) { c.append(el('p', 'warn', `Nv ${fmt(p.level)} · é o seu pokémon de batalha: na casa ele não recebe nada.`)); grade.append(c); continue; }
+    const linhaAlvo = el('div', 'casa-alvo');
+    const inp = el('input'); inp.type = 'number'; inp.min = String(p.level + 1); inp.step = '100'; inp.value = String(p.alvo);
+    const salvar = (v) => { const n = Math.floor(Number(v) || 0); if (n > p.level) alvos[p.id] = n; else delete alvos[p.id]; casasGravar(kAlvos, alvos); renderPve(); };
+    inp.onchange = () => salvar(inp.value);
+    linhaAlvo.append(el('span', null, `Nv ${fmt(p.level)} →`), inp);
+    for (const [rot, v] of [['+100', p.level + 100], ['próx. 500', (Math.floor(p.level / 500) + 1) * 500], ['próx. 1000', (Math.floor(p.level / 1000) + 1) * 1000]]) linhaAlvo.append(button(rot, 'ghost', () => salvar(v)));
+    c.append(linhaAlvo);
+    if (p.semDados) c.append(el('p', 'sub', 'O jogo ainda não mandou o XP deste pokémon. Abra a ficha dele no jogo ou espere um pouco.'));
+    else if (!r.semHunt) {
+      const res = el('div', 'casa-res');
+      res.append(el('b', 'casa-tempo', p.ms == null ? 'mais de 1 ano' : p.ms <= 0 ? 'já está nesse nível' : `≈ ${tempoCasa(p.ms)}`));
+      if (p.ms > 0) res.append(el('span', 'sub', `chega ~ ${quandoCasa(p.ms)}`));
+      res.append(el('span', 'sub', `faltam ${fmt(Math.round(p.falta))} XP · agora ele ganha ~${fmt(p.xpH)} XP/h`));
+      c.append(res);
+    }
+    grade.append(c);
+  }
+  box.append(grade);
+  if (r.eventos && r.eventos.length) {
+    const ev = el('div', 'card');
+    ev.append(el('h3', null, '🔮 O que muda no caminho (está dentro da conta)'));
+    for (const e of r.eventos) ev.append(el('p', 'sub', `em ${tempoCasa(e.ms)}: ${e.tipo === 'hunt' ? `o treinador libera a hunt ${e.nome} (Nv ${fmt(e.nivel)}) e o XP sobe` : `acaba o ${e.nome}`}`));
+    box.append(ev);
+  }
+  box.append(el('p', 'small', `Estimativa: vale se a conta continuar farmando assim (mesmo ritmo, ${r.horasDia}h por dia${r.subir ? ', subindo de hunt quando liberar' : ', na mesma hunt'}${r.renovar ? ', renovando os boosts' : ', com cada boost acabando no prazo dele'}). Muda quando você troca de hunt, de pokémon de batalha ou de buffs. Só as casas em uso contam; o Exp. Share segurado (5%) fica de fora.${r.guardadas ? ` Você tem ${r.guardadas} casa${r.guardadas > 1 ? 's' : ''} guardada${r.guardadas > 1 ? 's' : ''} (não repartem XP).` : ''}`));
 }
 
 // ---------- 🎯 Hunt agora (a Melhor hunt que o app já calcula, mais completa) ----------
@@ -66,7 +161,7 @@ function pveAgora(box, a) {
   const pk = el('div', 'pve-pk');
   pk.append(el('b', null, hr.pokemon), el('span', 'tipos'));
   for (const tp of hr.tipos || []) pk.lastChild.append(tipoChip(tp));
-  const extras = [hr.aoe ? '💥 AoE' : null, hr.bike ? `🚲 bike ${hr.bike}` : null, hr.bonus > 1 ? `bônus de XP ×${String(hr.bonus).replace('.', ',')}` : null].filter(Boolean).join(' · ');
+  const extras = [hr.aoe ? '💥 AoE' : null, hr.bike ? `🚲 bike ${hr.bike}` : null, hr.bonus > 1 ? `bônus de XP ×${String(Math.round(hr.bonus * 100) / 100).replace('.', ',')}` : null].filter(Boolean).join(' · ');
   if (extras) pk.append(el('span', 'sub', extras));
   top.append(el('h3', null, 'Pokémon em campo'), pk);
   const da = diaAviso(hr.tipoDia, hr.seuDoDia); if (da) top.append(da);

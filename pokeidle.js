@@ -622,7 +622,7 @@ module.exports = function createPokeIdle(ctx) {
   ipcMain.handle('poke:anuncio:abrir', async (_e, id) => { const r = await api.abrirAnuncio(id).catch(() => ({ erro: 'Não deu para abrir o anúncio.' })); return r; });
   // Aba PvE: as contas leem os dados do próprio jogo (próximas hunts, evoluções).
   ipcMain.handle('poke:pve', async (_e, accId, o, arg) => {
-    if (!['proximas', 'evolucoes', 'meus', 'buscar', 'mercado'].includes(o)) return null;
+    if (!['proximas', 'evolucoes', 'meus', 'buscar', 'mercado', 'casas'].includes(o)) return null;
     const v = views.get(accId) || views.get(mainAccId());
     if (!v || v.webContents.isDestroyed()) return { erro: 'Conta do PokeIdle fechada.' };
     return v.webContents.executeJavaScript(`window.__idleterinoMercado && window.__idleterinoMercado.pve ? window.__idleterinoMercado.pve(${JSON.stringify(o)}, ${JSON.stringify(arg == null ? null : arg)}) : null`).catch(() => null);

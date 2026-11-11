@@ -38,12 +38,16 @@ contextBridge.executeInMainWorld({
       id: k.id, speciesId: k.speciesId, level: Number(k.level) || 0, shiny: !!k.shiny, starter: !!k.starter,
       aoe: k.tmAoe === true || k.tmAoe === 1 || k.tmAoe === 'true' || k.tm_aoe === true,
       el: k.tmElemental || k.tm_elemental || null, apelido: k.apelido || null, poder: Number(k.poder || k.power) || 0,
+      xp: Number(k.xp) || 0, xpNivel: Number(k.xpNivel) || 0, // aba Casas: quanto falta para o nível pedido
     });
     function aplicarEstado(p, cheioForcado) {
       if (!p || typeof p !== 'object') return;
       const { cheio, pokemons, pkMud, pkFora } = p;
       if (cheio || cheioForcado) jogo.keys = Object.keys(p);
       for (const k of CAMPOS_EU) if (k in p) jogo.eu[k] = p[k];
+      // Casas (aba Casas): junta por cima, porque o jogo pode mandar só o pedaço que mudou (ex.: só "dentro").
+      if (p.casa && typeof p.casa === 'object') jogo.eu.casa = { ...(jogo.eu.casa || {}), ...p.casa };
+      if (p.bonusXp && Array.isArray(p.bonusXp.partes)) jogo.eu.bonusXpBruto = p.bonusXp;
       // Shiny Secret Lure da Loja: só o fim dele (o resto da Loja não interessa ao app).
       if (p.loja && p.loja.boosts && 'shiny' in p.loja.boosts) jogo.eu.lureAte = Number(p.loja.boosts.shiny) || 0;
       if ('nick' in p || 'xp' in p || 'level' in p) jogo.at = Date.now();
@@ -324,7 +328,146 @@ contextBridge.executeInMainWorld({
       });
       return { pronto: true, L, grupos, tipoDia: tipoDoDia() };
     }
-    const STATS_K = [['hp', 'HP'], ['atk', 'ATK'], ['def', 'DEF'], ['spAtk', 'SP.ATK'], ['spDef', 'SP.DEF'], ['speed', 'SPD']];
+
+    // ---- aba Casas: em quanto tempo o pokémon da casa chega no nível que a pessoa quer ----
+    // A casa repassa ao pokémon do posto uma parte do XP do pokémon de BATALHA, já com os buffs (Comum 25%,
+    // Incomum 40%, Rara 75%, Mítica/Lendária 100%; a Lendária tem 2 postos). Só as casas EM USO repartem. O Exp.
+    // Share segurado (5%) fica de fora desta conta. É uma ESTIMATIVA, simulada de 10 em 10 minutos:
+    //  · XP limpo por abate = o da hunt (depende só do nível da hunt) × abates/h (medidos quando dá);
+    //  · cada buff vale até acabar (ou para sempre, se a pessoa diz que renova); o dos Atrasados vale até o
+    //    TREINADOR chegar no alvo dele, e o treinador sobe junto na simulação;
+    //  · "subir de hunt": quando o treinador libera um nível de hunt maior, o XP passa a ser o dela.
+    const PCT_CASA = { comum: 0.25, incomum: 0.4, rara: 0.75, mitica: 1, lendaria: 1 };
+    const NOME_BUFF = { vip: 'VIP', boostXp: 'XP Boost (só treinador)', boostPokexp: 'XP Boost Pokémon', guildBoost: 'Boost da Guild', twitch: 'Bônus Twitch', kick: 'Bônus Kick', atrasados: 'Boost dos Atrasados', guild: 'Guild no ranking', evento: 'Evento', raid: 'Raid Gigantamax', outros: 'Outro bônus' };
+    async function pveCasas(arg) {
+      const o = arg && typeof arg === 'object' ? arg : {};
+      const lista = jogo.eu.casa && Array.isArray(jogo.eu.casa.lista) ? jogo.eu.casa.lista : null;
+      if (!lista) return { pronto: false, motivo: 'casas' };
+      let pctDe = (r) => PCT_CASA[r] || 0;
+      try { const cs = await import('/shared/casas.mjs'); if (cs.xpShareDaRaridade) pctDe = (r) => Number(cs.xpShareDaRaridade(r)) || PCT_CASA[r] || 0; } catch {}
+      const emUso = lista.filter((c) => c && !c.anunciada && c.emUso !== false);
+      const ativo = jogo.eu.activeId;
+      const postos = [];
+      for (const c of emUso) {
+        (Array.isArray(c.postos) ? c.postos : []).forEach((id, slot) => {
+          if (id == null) return;
+          const k = jogo.pks.get(id);
+          postos.push({ casaId: c.id, rar: c.rar, pct: pctDe(c.rar), slot, id, k, batalha: id === ativo });
+        });
+      }
+      const base = { pronto: true, casas: emUso.map((c) => ({ id: c.id, rar: c.rar, pct: pctDe(c.rar), postos: (c.postos || []).length, ocupados: (c.postos || []).filter((x) => x != null).length })), guardadas: lista.length - emUso.length, total: lista.length };
+      if (!postos.length) return { ...base, pokemons: [] };
+
+      // Hunt de agora e o ritmo (abates/h) da Melhor hunt — medido quando a conta já caçou ali.
+      const hr = await huntRank().catch(() => null);
+      const at = hr && hr.atualEst;
+      const esp = await especies();
+      let ha = null; try { ha = await import('/hunt-analyser.mjs'); } catch {}
+      const xpPorAbate = (h) => { try { return ha ? ha.mediaPorKill(h, esp, 0).xp : 0; } catch { return 0; } };
+      // Melhor XP por abate de cada nível de hunt (para quando o treinador liberar a próxima).
+      const porNivel = new Map();
+      for (const h of jogo.hunts || []) {
+        const n = Number(h.nivel) || 0;
+        if (!n || !Array.isArray(h.especies) || !h.especies.length) continue;
+        const x = xpPorAbate(h);
+        const cur = porNivel.get(n);
+        if (x > 0 && (!cur || x > cur.xp)) porNivel.set(n, { nivel: n, xp: x, nome: String(h.nome || h.name || h.slug || '?') });
+      }
+      const niveis = [...porNivel.values()].sort((a, b) => a.nivel - b.nivel);
+      const huntAgora = at && (jogo.hunts || []).find((h) => h.slug && h.slug === at.slug);
+      const xpAbAgora = huntAgora ? xpPorAbate(huntAgora) : 0;
+      const kph = at ? Number(at.kph) || 0 : 0;
+
+      // Buffs de agora (o servidor manda cada parte com o fator do treinador, do pokémon e o fim).
+      const agora = Date.now();
+      const bx = jogo.eu.bonusXpBruto;
+      let partes = [];
+      if (bx && Array.isArray(bx.partes)) {
+        partes = bx.partes.map((x) => ({ id: String(x.id || ''), tr: Number(x.tr) || 1, pk: Number(x.pk) || 1, ate: Number(x.ate) || 0, alvo: Number(x.alvo) || 0 }))
+          .filter((x) => !(x.ate > 0) || x.ate > agora);
+        const prod = (k) => partes.reduce((m, x) => m * x[k], 1);
+        const resto = (k) => { const r = (Number(bx[k]) || 1) / prod(k); return Math.abs(r - 1) < 1e-4 ? 1 : r; };
+        if (resto('tr') !== 1 || resto('pk') !== 1) partes.push({ id: 'outros', tr: resto('tr'), pk: resto('pk'), ate: 0, alvo: 0 });
+      }
+      // VIP "permanente": o jogo guarda uma data muito distante.
+      const PERMANENTE = agora + 5 * 365 * 86400000;
+      const renovar = !!o.renovar;
+      const subir = o.subir !== false;
+      const horasDia = Math.min(24, Math.max(1, Number(o.horasDia) || 24));
+      const f = horasDia / 24;
+      const vale = (x, t, Ltr) => {
+        if (x.id === 'atrasados') return !(x.alvo > 0) || Ltr < x.alvo;
+        if (!(x.ate > 0) || x.ate >= PERMANENTE || renovar) return true;
+        return agora + t < x.ate;
+      };
+      const multEm = (k, t, Ltr) => partes.reduce((m, x) => (vale(x, t, Ltr) ? m * x[k] : m), 1);
+
+      // Pokémon de cada posto, com o alvo pedido (padrão: o próximo múltiplo de 500).
+      const alvos = o.alvos && typeof o.alvos === 'object' ? o.alvos : {};
+      const pks = postos.map((p) => {
+        const k = p.k || {};
+        const lv = Number(k.level) || 0;
+        const c = esp.get(k.speciesId) || {};
+        const pedido = Math.floor(Number(alvos[p.id]) || 0);
+        const alvo = pedido > lv ? pedido : (Math.floor(lv / 500) + 1) * 500;
+        // A curva do pokémon é a mesma do treinador; se o jogo mandar outra escala, acerta pela que ele mandou.
+        const esc = lv > 1 && k.xpNivel > 0 ? k.xpNivel / xpTotalNv(lv) : 1;
+        const xpAlvo = xpTotalNv(alvo) * (esc > 0.5 && esc < 2 ? esc : 1);
+        const xp = Number(k.xp) || (k.xpNivel || 0);
+        return { id: p.id, nome: (k.apelido || c.name || '?'), especie: c.name || '?', shiny: !!k.shiny, level: lv, alvo, pedido: pedido > lv,
+          casaId: p.casaId, rar: p.rar, pct: p.pct, batalha: p.batalha, semDados: !(k.xp > 0 || k.xpNivel > 0),
+          falta: Math.max(0, xpAlvo - xp), _xp: xp, _alvo: xpAlvo, ms: null };
+      });
+
+      const out = { ...base, kph, horasDia, renovar, subir, huntAgora: at ? { nome: at.nome, nivel: Number(at.nivel) || 0 } : null,
+        partes: partes.map((x) => ({ ...x, nome: NOME_BUFF[x.id] || x.id, permanente: x.id !== 'atrasados' && (!(x.ate > 0) || x.ate >= PERMANENTE) })),
+        multPk: multEm('pk', 0, Number(jogo.eu.level) || 0), multTr: multEm('tr', 0, Number(jogo.eu.level) || 0) };
+      // XP do pokémon de batalha: o placar real da sessão (para conferir o cálculo).
+      try {
+        const nick = String(jogo.eu.nick || '').toLowerCase();
+        const s = nick && JSON.parse(localStorage.getItem('sessao-hunt:' + nick) || 'null');
+        if (s && s.ms > 10 * 60000 && s.xpPokemon > 0) out.xpPkMedidoH = Math.round(s.xpPokemon / (s.ms / 3600000));
+      } catch {}
+      if (!(kph > 0) || !(xpAbAgora > 0)) {
+        out.semHunt = true;
+        out.pokemons = pks.map(({ _xp, _alvo, ...r }) => r);
+        return out;
+      }
+      out.xpPkAgoraH = Math.round(kph * xpAbAgora * out.multPk);
+      for (const p of pks) p.xpH = p.batalha ? 0 : Math.round(kph * xpAbAgora * out.multPk * p.pct);
+
+      // Simulação: o treinador e os pokémon das casas sobem juntos; buffs e hunt mudam no caminho.
+      const PASSO = 10 * 60000, HORIZ = 366 * 86400000;
+      let Ltr = Number(jogo.eu.level) || 1;
+      let xpTr = Number(jogo.eu.xp) || xpTotalNv(Ltr);
+      let nvHunt = Number(at.nivel) || 0, xpAb = xpAbAgora;
+      const eventos = [];
+      const ativos = new Set(partes.filter((x) => vale(x, 0, Ltr)).map((x) => x.id));
+      const pend = pks.filter((p) => !p.batalha && p.falta > 0);
+      for (const p of pks) if (!p.batalha && p.falta <= 0) p.ms = 0;
+      for (let t = 0; t < HORIZ && pend.length; t += PASSO) {
+        const mTr = multEm('tr', t, Ltr), mPk = multEm('pk', t, Ltr);
+        const ganho = kph * xpAb * (PASSO / 3600000) * f;
+        xpTr += ganho * mTr;
+        while (xpTr >= xpTotalNv(Ltr + 1)) Ltr++;
+        for (let i = pend.length - 1; i >= 0; i--) {
+          const p = pend[i];
+          p._xp += ganho * mPk * p.pct;
+          if (p._xp >= p._alvo) { p.ms = t + PASSO; pend.splice(i, 1); }
+        }
+        const anota = (e) => { if (eventos.length < 12) eventos.push(e); };
+        for (const x of partes) if (ativos.has(x.id) && !vale(x, t + PASSO, Ltr)) { ativos.delete(x.id); anota({ ms: t + PASSO, tipo: 'buff', nome: NOME_BUFF[x.id] || x.id }); }
+        if (subir) {
+          let prox = null;
+          for (const h of niveis) { if (h.nivel > nvHunt && h.nivel <= Ltr) prox = h; }
+          if (prox && prox.xp > xpAb) { nvHunt = prox.nivel; xpAb = prox.xp; anota({ ms: t + PASSO, tipo: 'hunt', nome: prox.nome, nivel: prox.nivel }); }
+        }
+      }
+      out.eventos = eventos;
+      out.pokemons = pks.map(({ _xp, _alvo, ...r }) => r);
+      return out;
+    }
+    const STATS_K =[['hp', 'HP'], ['atk', 'ATK'], ['def', 'DEF'], ['spAtk', 'SP.ATK'], ['spDef', 'SP.DEF'], ['speed', 'SPD']];
     const numTxt = (v) => Number(String(v || '').replace(/[^\d.]/g, '')) || 0;
     function lerFichaColada(txt, map) {
       const t = String(txt || '');
@@ -1079,7 +1222,7 @@ contextBridge.executeInMainWorld({
         canais() { return JSON.parse(JSON.stringify(canais)); },
         // Aba PvE do app (só leitura).
         pve(o, arg) {
-          const f = o === 'proximas' ? pveProximas : o === 'evolucoes' ? () => pveEvolucoes(arg) : o === 'meus' ? pveMeus : o === 'buscar' ? () => pveBuscar(arg) : o === 'mercado' ? () => (arg && typeof arg === 'object' ? pveMercado(arg.moeda, arg.dias, arg.valor) : pveMercado(arg)) : null;
+          const f = o === 'proximas' ? pveProximas : o === 'evolucoes' ? () => pveEvolucoes(arg) : o === 'meus' ? pveMeus : o === 'buscar' ? () => pveBuscar(arg) : o === 'casas' ? () => pveCasas(arg) : o === 'mercado' ? () => (arg && typeof arg === 'object' ? pveMercado(arg.moeda, arg.dias, arg.valor) : pveMercado(arg)) : null;
           return f ? f().catch((e) => ({ erro: String(e && e.message || e) })) : null;
         },
         // Comércio: nota, stats e espécie da ficha de um anúncio (mesma conta da ficha do jogo).
