@@ -146,6 +146,25 @@ module.exports = function createExtensions(ctx) {
     }
   }
 
+  // ATUALIZAR SEM PERDER AS CONFIGURAÇÕES: extensão carregada de uma pasta ganha o ID pelo CAMINHO da pasta
+  // (o .crx da loja não traz a "key"). Se a versão nova fosse para outra pasta, o ID mudava e o navegador a
+  // tratava como outra extensão — as configurações (chrome.storage) ficavam para trás. Por isso a versão nova
+  // entra NA MESMA pasta: descarrega, troca os arquivos e carrega de novo, com o mesmo ID.
+  function unloadDir(dir) {
+    for (const [partition, loaded] of loadedIn) {
+      const xid = loaded.get(dir);
+      if (!xid) continue;
+      try { extApi(session.fromPartition(partition)).removeExtension(xid); } catch {}
+      loaded.delete(dir);
+    }
+  }
+  function replaceInPlace(cur, newDir) {
+    unloadDir(cur.dir);
+    const novos = new Set(fs.readdirSync(newDir));
+    fs.cpSync(newDir, cur.dir, { recursive: true, force: true });
+    for (const n of fs.readdirSync(cur.dir)) if (!novos.has(n)) fs.rmSync(path.join(cur.dir, n), { recursive: true, force: true });
+  }
+
   // Instala ou atualiza as extensões padrão direto da Chrome Web Store.
   let ensuring = false;
   async function ensureBuiltins(force = null) {
@@ -169,9 +188,10 @@ module.exports = function createExtensions(ctx) {
           const info = readManifest(dir);
           if (cur && !newerVersion(info.version, cur.version)) { fs.rmSync(dest, { recursive: true, force: true }); continue; }
           if (cur) {
-            const oldDir = cur.dir;
-            Object.assign(cur, info, { dir, error: null });
-            setTimeout(() => { const top = path.relative(root(), oldDir).split(path.sep)[0]; if (top && !list.some((e) => e.dir.startsWith(path.join(root(), top)))) fs.rmSync(path.join(root(), top), { recursive: true, force: true }); }, 60 * 1000);
+            // Mesma pasta = mesmo ID = as configurações da extensão continuam (ver replaceInPlace).
+            try { replaceInPlace(cur, dir); } catch { fs.rmSync(dest, { recursive: true, force: true }); continue; }
+            fs.rmSync(dest, { recursive: true, force: true });
+            Object.assign(cur, info, { error: null });
           } else {
             list.push({ id, ...info, dir, enabled: true, cws: b.cws });
           }
@@ -284,17 +304,22 @@ module.exports = function createExtensions(ctx) {
     const s = staged.get(token);
     if (!s) return { ok: false, error: 'O tempo para confirmar passou. Cole o link de novo.' };
     staged.delete(token);
+    const old = list.find((e) => (e.src && e.src.store === s.src.store && e.src.id === s.src.id) || (s.src.store === 'cws' && e.cws === s.src.id));
+    if (old) {
+      // Atualização: a versão nova entra na MESMA pasta, para a extensão manter o ID e as configurações.
+      try { replaceInPlace(old, s.dir); } catch (err) { fs.rmSync(s.top, { recursive: true, force: true }); return { ok: false, error: `Não consegui atualizar agora (${String(err.message || err).slice(0, 80)}). Feche o app e tente de novo.` }; }
+      fs.rmSync(s.top, { recursive: true, force: true });
+      Object.assign(old, s.info, { error: null, update: null });
+      if (!old.cws) old.src = s.src;
+      save();
+      await applyAll();
+      return { ok: true };
+    }
     const id = Math.random().toString(36).slice(2, 10);
     const dest = path.join(root(), id);
     fs.renameSync(s.top, dest);
     const dir = path.join(dest, path.relative(s.top, s.dir));
-    const old = list.find((e) => (e.src && e.src.store === s.src.store && e.src.id === s.src.id) || (s.src.store === 'cws' && e.cws === s.src.id));
-    if (old) {
-      const oldTop = path.relative(root(), old.dir).split(path.sep)[0];
-      Object.assign(old, s.info, { dir, error: null, update: null });
-      if (!old.cws) old.src = s.src;
-      setTimeout(() => { if (oldTop && !list.some((e) => e.dir.startsWith(path.join(root(), oldTop)))) fs.rmSync(path.join(root(), oldTop), { recursive: true, force: true }); }, 60 * 1000);
-    } else list.push({ id, ...s.info, dir, enabled: true, src: s.src, ...(s.src.store === 'cws' && VERIFIED.has(s.src.id) ? { cws: s.src.id } : {}) });
+    list.push({ id, ...s.info, dir, enabled: true, src: s.src, ...(s.src.store === 'cws' && VERIFIED.has(s.src.id) ? { cws: s.src.id } : {}) });
     save();
     await applyAll();
     return { ok: true };

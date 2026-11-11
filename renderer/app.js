@@ -46,6 +46,7 @@ function go(p) {
   if (p === 'ext') renderExt();
   if (p === 'pvp' && typeof renderPvp === 'function') renderPvp();
   if (p === 'pve' && typeof renderPve === 'function') renderPve();
+  if (p === 'trader' && typeof renderTrader === 'function') renderTrader();
   if (p === 'help') renderHelp();
 }
 for (const b of document.querySelectorAll('.nav')) b.onclick = () => go(b.dataset.page);
@@ -119,9 +120,32 @@ function timers(ns, s) {
 }
 
 // ---------- Página de plataforma ----------
+// Rolagens da página (lista de canais, colunas, chat) guardadas antes de redesenhar e devolvidas depois:
+// sem isso, cada status da Twitch/Kick jogava tudo de volta para o topo.
+function rolagensDe(root) {
+  const out = new Map();
+  const cont = {};
+  for (const e of [root, ...root.querySelectorAll('*')]) {
+    if (!(e.scrollHeight > e.clientHeight + 2) && !(e.scrollTop > 0)) continue;
+    const k = `${e.tagName}.${e.className}`; const i = (cont[k] = (cont[k] || 0) + 1);
+    out.set(`${k}#${i}`, { top: e.scrollTop, fim: e.scrollHeight - e.scrollTop - e.clientHeight < 60 });
+  }
+  return out;
+}
+function devolverRolagens(root, antes) {
+  const cont = {};
+  for (const e of [root, ...root.querySelectorAll('*')]) {
+    if (!(e.scrollHeight > e.clientHeight + 2)) continue;
+    const k = `${e.tagName}.${e.className}`; const i = (cont[k] = (cont[k] || 0) + 1);
+    const r = antes.get(`${k}#${i}`);
+    if (e.classList.contains('msgs')) { e.scrollTop = !r || r.fim ? e.scrollHeight : r.top; continue; }
+    if (r) e.scrollTop = r.top;
+  }
+}
 function renderPlatform(ns) {
   const root = $(`#page-${ns}`);
   const s = S[ns];
+  const rol = rolagensDe(root);
   root.replaceChildren();
   const on = S.app && S.app.platforms[ns];
   const top = el('div', 'ptop');
@@ -152,8 +176,11 @@ function renderPlatform(ns) {
   const body = el('div', 'pbody');
   body.append(channelCol(ns, s), chatCol(ns, s), sideCol(ns, s));
   root.append(top, body);
-  const box = $('.msgs', root);
-  if (box) box.scrollTop = box.scrollHeight;
+  // Trocou de canal: o chat novo abre no fim.
+  const ativo = String((view[ns] && view[ns].active) || '');
+  if (root.dataset.ativo !== ativo) for (const k of [...rol.keys()]) if (k.includes('msgs')) rol.delete(k);
+  root.dataset.ativo = ativo;
+  devolverRolagens(root, rol);
 }
 function emptyBox(title, text, ...extra) {
   const e = el('div', 'empty'); e.append(el('b', null, title), el('span', null, text));
@@ -950,8 +977,12 @@ function renderHomePoke() {
   const big = (n) => { n = Number(n) || 0; const a = Math.abs(n); return a >= 1e9 ? `${(n / 1e9).toFixed(a >= 1e10 ? 0 : 1)}B` : a >= 1e6 ? `${(n / 1e6).toFixed(a >= 1e7 ? 0 : 1)}M` : a >= 1e4 ? `${Math.round(n / 1e3)}k` : fmt(n); };
   const farmOf = (a) => { const x = a.info && a.info.sess; if (!x) return null; return { ms: x.ms, xp: rate(x.xpTreinador, x.ms), pxp: rate(x.xpPokemon, x.ms), gold: rate(x.gold, x.ms), ab: rate(x.abates, x.ms), cap: x.capturas, capH: rate(x.capturas, x.ms), lucroH: x.lucroH, shV: x.shVistos || 0, shC: x.shCapt || 0 }; };
   const lvl = (a) => { const i = a.info || {}; return i.logged && i.level ? `Nv ${i.level.replace(/\D+/g, '')}` : ''; };
-  // Previsão de shiny: o jogo sorteia shiny a cada encontro (≈ abate), com a mesma chance em toda hunt.
-  // Bônus que multiplicam: Shiny Secret Lure da Loja ×2, bônus de shiny da live na Kick e na Twitch +15% cada.
+  // Previsão de shiny — regra do jogo (wiki interna): o brilho é sorteado NO ARREMESSO da bola (1 em ~24 mil, igual para
+  // toda espécie) e o shiny só fica com você se a bola FECHAR (captura entre 0,3% e 10%). Então:
+  //  · ver um shiny  ≈ arremessos/h × chance (aqui: abates/h, o teto se a bola vai em todo abate);
+  //  · capturar um   = capturas/h × chance (as capturas que a sessão MEDIU já trazem a bola e a espécie da hunt).
+  // Bônus que multiplicam a chance: Shiny Secret Lure da Loja ×2, bônus de shiny da live na Kick e na Twitch +15% cada.
+  // Outland não tem shiny.
   const shinyPrev = (a, f) => {
     const x = (a.info && a.info.shiny) || {};
     if (!f || !(f.ab > 0)) return null;
@@ -959,12 +990,24 @@ function renderHomePoke() {
     const chance = x.chance > 0 ? x.chance : 1 / 24000;
     const lure = x.lure > agora, kick = x.kick > agora, tw = x.twitch > agora;
     const mult = (lure ? 2 : 1) * (kick ? 1.15 : 1) * (tw ? 1.15 : 1);
-    const h = 1 / (f.ab * chance * mult);
-    const hLure = lure ? null : h / 2;
-    const dur = (hh) => (hh < 1 ? `${Math.max(1, Math.round(hh * 60))} min` : hh < 10 ? `${hh.toFixed(1).replace('.', ',')} h` : hh < 48 ? `${Math.round(hh)} h` : `${(hh / 24).toFixed(1).replace('.', ',')} dias`);
+    const dur = (hh) => (hh < 1 ? `${Math.max(1, Math.round(hh * 60))} min` : hh < 10 ? `${hh.toFixed(1).replace('.', ',')} h` : hh < 48 ? `${Math.round(hh)} h` : hh < 24 * 60 ? `${Math.round(hh / 24)} dias` : `${(hh / 24 / 30).toFixed(1).replace('.', ',')} meses`);
+    const hVer = 1 / (f.ab * chance * mult);
+    const hCap = f.capH > 0 ? 1 / (f.capH * chance * mult) : null;
+    const fecha = f.capH > 0 ? f.capH / f.ab : 0;
     const bonus = [lure && 'Lure ×2', kick && 'Kick +15%', tw && 'Twitch +15%'].filter(Boolean);
-    return { txt: `~1 a cada ${dur(h)}`, lure: hLure ? `com Lure: ~${dur(hLure)}` : null, bonus,
-      tip: `Chance por encontro: 1 em ${fmt(Math.round(1 / chance))}${x.chance > 0 ? '' : ' (padrão do jogo)'} · ${fmt(f.ab)} abates/h${bonus.length ? ` · bônus: ${bonus.join(', ')} (×${mult.toFixed(2).replace('.', ',')})` : ' · sem bônus de shiny'}. É uma média: o shiny é sorteio, pode vir antes ou depois. Conta shiny visto (ainda precisa capturar).` };
+    const pctTxt = (v) => `${(v * 100).toFixed(v < 0.1 ? 2 : 1).replace('.', ',')}%`;
+    return {
+      txt: hCap ? `capturar ~1 a cada ${dur(hCap)}` : 'capturar: sem capturas nesta sessão',
+      ver: `ver ~1 a cada ${dur(hVer)}`,
+      lure: !lure && hCap ? `com Lure: ~${dur(hCap / 2)}` : null, bonus,
+      tip: [
+        `O shiny é sorteado no ARREMESSO da bola: 1 em ${fmt(Math.round(1 / chance))}${x.chance > 0 ? '' : ' (padrão do jogo)'} por tentativa${bonus.length ? ` (com ${bonus.join(', ')}: ×${mult.toFixed(2).replace('.', ',')})` : ''}.`,
+        `Ver um shiny: ~1 a cada ${dur(hVer)} (${fmt(f.ab)} abates/h, se a bola for em todo abate).`,
+        hCap ? `Capturar um shiny: ~1 a cada ${dur(hCap)}. A bola está fechando em ${pctTxt(fecha)} dos abates (${fmt(f.capH)} capturas/h): o shiny só é seu se ela fechar.` : 'Capturar: nenhuma captura nesta sessão — sem bola fechando, o shiny visto vai embora.',
+        'Para melhorar: a melhor bola que der (multiplica a chance de fechar); hunt de FORMA BÁSICA (captura ~56% mais fácil que a forma final); Shiny Secret Lure (×2); bônus de Lure da Kick/Twitch. Na Outland não existe shiny.',
+        'É uma média: shiny é sorteio, pode vir antes ou depois.',
+      ].join('\n'),
+    };
   };
   const statBox = (v, l, cls) => { const d = el('div', `fstat${cls ? ' ' + cls : ''}`); d.append(el('b', null, v), el('span', null, l)); return d; };
 
@@ -986,7 +1029,7 @@ function renderHomePoke() {
     const sp = shinyPrev(main, mf);
     if (sp) {
       const pv = el('span', 'sh-prev');
-      pv.append(el('span', 'sep', '·'), el('span', null, 'previsão'), el('b', null, sp.txt));
+      pv.append(el('span', 'sep', '·'), el('span', null, 'previsão:'), el('span', null, sp.ver), el('span', 'sep', '·'), el('b', null, sp.txt));
       if (sp.bonus.length) pv.append(el('span', 'sh-bx', sp.bonus.join(' · ')));
       if (sp.lure) pv.append(el('span', 'l', `(${sp.lure})`));
       pv.title = sp.tip; sh.title = sp.tip;
@@ -1050,7 +1093,7 @@ function renderHomePoke() {
       if (am) { const t = el('i', 'meta', am.hunt ? `🎯 ${am.hunt.nome} (Nv ${fmt(am.hunt.nivel)}) em ${longDur(am.hunt.ms)}` : `🎯 Nv ${am.L + 1} em ${longDur(am.nextMs)}`); t.title = [`Próximo nível (Nv ${am.L + 1}) em ${longDur(am.nextMs)}`, am.boost != null ? (am.boost > 0 ? `Bônus de XP agora: +${am.boost}%` : 'Sem bônus de XP agora') : '', ...am.ending, 'Já conta quando cada bônus acaba.'].filter(Boolean).join('\n'); n.append(t); }
       r.append(n, el('span', null, f ? big(f.xp) : '—'), el('span', 'gold', f ? big(f.gold) : '—'), el('span', null, f ? big(f.ab) : '—'), el('span', null, f ? fmt(f.cap) : '—'), el('span', f && (f.shV || f.shC) ? 'shiny' : null, f ? `${fmt(f.shV)} / ${fmt(f.shC)}` : '—'));
       const sp = shinyPrev(a, f);
-      if (sp) { const t3 = el('i', 'shp', `✨ ${sp.txt}${sp.bonus.length ? ` (${sp.bonus.join(', ')})` : ''}`); t3.title = sp.tip; n.append(t3); }
+      if (sp) { const t3 = el('i', 'shp', `✨ ${sp.ver} · ${sp.txt}${sp.bonus.length ? ` (${sp.bonus.join(', ')})` : ''}`); t3.title = sp.tip; n.append(t3); }
       r.onclick = () => openAcc(a);
       tbl.append(r);
     });
@@ -1233,12 +1276,23 @@ function refreshAll() {
   // Ajustes: não redesenhar enquanto a pessoa digita (ex.: o link do webhook).
   if (page === 'settings' && $('#modal').hidden) settingsDeFundo();
   if (page === 'poke' && $('#drawer').hidden && $('#modal').hidden) renderPoke();
-  if (P[page]) {
-    // Não redesenhar enquanto a pessoa digita no chat ou na busca.
-    const focus = document.activeElement;
-    if (focus && focus.tagName === 'INPUT' && $(`#page-${page}`).contains(focus)) return;
-    renderPlatform(page);
+  if (P[page]) platformDeFundo(page);
+}
+// Twitch/Kick: o status chega toda hora. Não redesenhar enquanto a pessoa digita, rola ou clica na página
+// (até 3 s depois); passado isso, redesenha uma vez só, mantendo as rolagens.
+let platMexeu = 0, platTimer = null;
+for (const ev of ['pointerdown', 'wheel', 'keydown', 'touchstart']) document.addEventListener(ev, (e) => { if (e.target && e.target.closest && e.target.closest('#page-twitch, #page-kick')) platMexeu = Date.now(); }, { passive: true, capture: true });
+function platformDeFundo(ns) {
+  const focus = document.activeElement;
+  const digitando = focus && (focus.tagName === 'INPUT' || focus.tagName === 'TEXTAREA' || focus.tagName === 'SELECT') && $(`#page-${ns}`).contains(focus);
+  const espera = 3000 - (Date.now() - platMexeu);
+  if (digitando || espera > 0) {
+    clearTimeout(platTimer);
+    platTimer = setTimeout(() => { if (page === ns) platformDeFundo(ns); }, Math.max(espera, 1500));
+    return;
   }
+  clearTimeout(platTimer); platTimer = null;
+  renderPlatform(ns);
 }
 for (const ns of ['twitch', 'kick']) {
   window.idle.on(`${ns}:status`, (snap) => { S[ns] = snap; refreshAll(); });

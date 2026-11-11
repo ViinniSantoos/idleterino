@@ -23,6 +23,9 @@ contextBridge.executeInMainWorld({
     let hunts = [];      // [{ nome, nivel }] uma por nível (meta de XP)
     let bonusXp = null;  // { tr, pk, partes: [{ id, tr, ate, alvo }] }
     let sock = null;
+    // ENCAIXE para ferramentas que só existem num PC (ex.: o Trader do dono, que não vai no app público): quem se
+    // encaixa recebe as peças do núcleo e pode ouvir o socket e esconder do jogo as respostas das consultas dele.
+    const extras = { filtros: [], ouvintes: [], api: {}, instalados: new Set() };
     const ABAS = { meus: 1, historico: 1, historicoGlobal: 1 };
     const SEQ = 987654321;
 
@@ -60,6 +63,7 @@ contextBridge.executeInMainWorld({
       if (d.indexOf('"pvpTabela"') >= 0 && recente(nossos.tabela)) return true;
       if (d.indexOf('"especies"') >= 0 && d.indexOf('"market"') >= 0 && Date.now() - nossos.especies < 8000) return true;
       if (d.indexOf('"vitrine"') >= 0 && d.indexOf('"market"') >= 0 && Date.now() - nossos.lista < 8000) return true;
+      for (const f of extras.filtros) { try { if (f(d)) return true; } catch {} }
       if (d.indexOf('"perfil"') >= 0 && nossos.perfis.size) {
         try { const m = JSON.parse(d); if (m.t === 'perfil' && m.perfil && recente(nossos.perfis.get(String(m.perfil.nick || '').toLowerCase()))) return true; } catch {}
       }
@@ -92,6 +96,7 @@ contextBridge.executeInMainWorld({
           ws.addEventListener('message', (e) => {
             const d = e.data;
             if (typeof d !== 'string') return;
+            for (const f of extras.ouvintes) { try { f(d); } catch {} }
             const welcome = d.indexOf('"welcome"') >= 0 && d.indexOf('"welcome"') < 40;
             const estado = !welcome && d.indexOf('"estado"') >= 0 && d.indexOf('"t":"estado"') >= 0;
             if (welcome || estado) {
@@ -109,6 +114,7 @@ contextBridge.executeInMainWorld({
                   if (m.ampliacaoHunt) jogo.amp = Number(m.ampliacaoHunt) || 1.5;
                   if (m.multHpSelvagem) jogo.multHp = Number(m.multHpSelvagem) || 5;
                   if (m.chanceShiny) jogo.chanceShiny = Number(m.chanceShiny) || 0;
+                  if (m.mercado && typeof m.mercado === 'object') jogo.mercado = m.mercado;
                 }
                 aplicarEstado(est, m.t === 'welcome');
                 const bx = est && est.bonusXp;
@@ -729,7 +735,9 @@ contextBridge.executeInMainWorld({
       for (const h of out) {
         const m = h.medido;
         const horas = m ? m.ms / 3600000 : 0;
-        const kph = m ? m.ab / horas : (3600000 / msPorAbate(h)) * fator;
+        // O acerto pela medida nunca leva a estimativa acima do teto da onda (nem do melhor ritmo que a conta já mediu).
+        const tetoKph = Math.max(3600000 / pisoParada, ...out.filter((x) => x.medido).map((x) => x.medido.ab / (x.medido.ms / 3600000)));
+        const kph = m ? m.ab / horas : Math.min(tetoKph, (3600000 / msPorAbate(h)) * fator);
         if (m) msPorAbate(h);
         h.kph = Math.round(kph);
         // XP e ouro: sempre abates/h × o que cada selvagem dá × os bônus de AGORA — a medida entra só no ritmo.
@@ -990,6 +998,18 @@ contextBridge.executeInMainWorld({
           return { chance: jogo.chanceShiny || 0, lure: jogo.eu.lureAte || 0, kick: fim('kick'), twitch: fim('twitch') };
         },
         hunts() { return hunts.slice(); },
+        // Encaixe: `__plug('nome', function (I) { ... })` instala uma vez; o que ela expõe fica em `extra`.
+        extra: extras.api,
+        __plug(nome, fn) {
+          if (typeof fn !== 'function' || extras.instalados.has(nome)) return extras.instalados.has(nome);
+          extras.instalados.add(nome);
+          const I = {
+            get sock() { return sock; }, get ultimaLista() { return ultimaLista; },
+            jogo, keep, nossos, espera, catalogoNota, huntsDoHorizonte, nivelDepoisDe, xpHoraDaConta, coberturaHunts, tiposDe,
+            filtro: (f) => extras.filtros.push(f), ouvir: (f) => extras.ouvintes.push(f), expor: (o) => Object.assign(extras.api, o),
+          };
+          try { fn(I); return true; } catch (e) { extras.instalados.delete(nome); return String(e && e.message || e); }
+        },
         bonusXp() { return bonusXp ? JSON.parse(JSON.stringify(bonusXp)) : null; },
         huntRank() { return huntRank().then((r) => JSON.parse(JSON.stringify(r))).catch((e) => ({ pronto: false, erro: String(e) })); },
         pvpColetar(n, passo) { return pvpColetar(n, passo).catch((e) => ({ ok: false, motivo: String(e) })); },

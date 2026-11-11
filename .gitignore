@@ -5,3 +5,10 @@ dist/
 dist-linux/
 segredo.js
 dist-teste/
+# Trader: só no PC do dono (não vai para o GitHub nem para o app público)
+trader-main.js
+trader-preload.js
+renderer/trader.js
+electron-builder-trader.js
+dist-trader/
+dist-local/

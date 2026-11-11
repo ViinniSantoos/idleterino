@@ -678,12 +678,19 @@ module.exports = function createPokeIdle(ctx) {
     return true;
   });
 
+  // ---------- TRADER (escondido, só no app do dono): o Market de 5 em 5 min pela conta principal ----------
+  // A conta principal varre as ofertas novas, compara com a Tabela de preços do jogo e avisa as pechinchas.
+  // Compra sozinha só em COINS e só dentro dos limites daqui (gema: só avisa). Tudo desligado por padrão.
+  // TRADER: só no PC do dono (trader-main.js fica fora do Git e do app público). Sem o arquivo, nada existe.
+  let trader = null;
+  try { trader = require('./trader-main')({ ipcMain, views, mainAccId, config, saveConfig, send, ctx, app, path, fs }); } catch {}
   const timers = [];
   function start() {
     loadConfig();
     for (const a of config.accounts) createView(a);
     timers.push(setInterval(readAll, READ_MS));
     timers.push(setInterval(autoOptimize, 60 * 1000));
+    if (trader) timers.push(setInterval(() => trader.tick().catch(() => {}), 30 * 1000));
     setTimeout(askMarket, 60 * 1000);
     // PvP: confere de hora em hora se o meta tem mais de um dia; a primeira, 3 min depois de abrir.
     setTimeout(() => pvpCollect().catch(() => {}), 3 * 60 * 1000);
