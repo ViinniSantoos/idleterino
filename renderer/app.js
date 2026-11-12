@@ -254,6 +254,7 @@ function row(ns, s, ch) {
   if (ch.earning === 'earning') sub.append(el('span', 'earn', `● ganhando · ${clock(tm * 60000)}`));
   else if (ch.earning === 'warming') { const w = el('span', 'warm', `◌ aquecendo · ${Math.min(tm, first)} de ${first} min`); w.title = `A primeira contagem de pontos chega ~${first} min depois que a live abre.`; sub.append(w); }
   else if (ch.earning === 'idle') { const w = el('span', 'idle', `○ sem pontos há ${clock(tm * 60000)}`); w.title = 'Tocando sem o saldo subir: o app troca para outra live sozinho.'; sub.append(w); }
+  else if (ch.live && !ch.watching && ch.coolMin > 0) { const w = el('span', 'idle', `⏸ sem pontos · volta em ${ch.coolMin} min`); w.title = 'Tocou 13 min sem o saldo subir: fica fora da fila por um tempo e o app vai para o próximo. Volta sozinho.'; sub.append(w); }
   else if (ch.live) { const q = el('span', null, ch.watching ? `${fmt(ch.viewers)} assistindo` : `na fila · ${fmt(ch.viewers)} assistindo`); if (!ch.watching) q.title = 'Na fila: entra quando abrir uma vaga (o foco põe primeiro quem está mais perto do bônus).'; sub.append(q); }
   else sub.append('offline');
   const eta = ch.watching && ch.goalLeft > 0 && ch.earning !== 'idle' ? el('div', 'ch-eta', `próx. bônus em ${clock((ch.goalLeft / (P[ns].rate * (ch.multiplier || 1))) * 60000)}`) : null;
@@ -319,6 +320,8 @@ function sideCol(ns, s) {
   // 1) Tocando agora: miniatura de cada live escondida + anel até o próximo +10.
   section('Tocando agora', 'As lives que estão rendendo pontos neste momento, escondidas e em 160p.');
   const playing = s.channels.filter((c) => c.watching);
+  // Todas as lives do app sem pontos ao mesmo tempo: é a conta (a Kick conta só ~2 lives por conta).
+  if (s.contaSemPontosMin > 0) list.append(el('div', 'tip warn', `⚠ Há ${s.contaSemPontosMin} min nenhuma live do app ganha pontos. A ${P[ns].name} só conta 2 lives por conta: se você está assistindo em outro lugar (celular, navegador, Idleterino do celular sem o QR novo), as daqui ficam sem pontos. O app segura as lives mais perto da meta e volta a contar sozinho.`));
   if (!s.loggedIn) list.append(el('div', 'side-empty', `Entre na ${P[ns].name} para começar.`));
   else if (!playing.length) list.append(el('div', 'side-empty', s.noCelular ? '📱 Farmando no Idleterino do celular agora (aviso pelo Wi-Fi de casa). O PC volta a farmar sozinho quando o celular fechar ou sair do Wi-Fi.' : s.farming ? 'Nenhum canal ao vivo agora. As lives entram sozinhas quando alguém abrir.' : 'Juntar pontos está desligado.'));
   for (const c of playing) {

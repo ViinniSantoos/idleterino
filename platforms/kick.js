@@ -678,6 +678,8 @@ function logHistory() {
 // Canal com sub rende o dobro: entra na frente de todos e fica enquanto estiver ao vivo, sem meta.
 const SWITCH_MARGIN = 50;
 const IDLE_COOLDOWN_MS = 30 * 60 * 1000;
+const CONTA_SEM_PONTOS_MAX_MS = 60 * 60 * 1000;
+let contaSemPontosDesde = 0; // desde quando TODAS as lives do app estão sem render (ver reconcileWatchers)
 
 function goalRank(points) {
   const p = points || 0;
@@ -734,9 +736,18 @@ function reconcileWatchers() {
 
   // Vaga não pode ficar parada: com o limite de 2 lives, quem não rende cede o lugar.
   // Com mais vagas que isso, ficar sem ganhar é esperado, então não mexe.
+  // EXCEÇÃO: TODAS as lives do app pararam de render juntas → o problema é a CONTA, não o canal (a Kick só conta ~2
+  // lives por conta: se a pessoa assiste em outro lugar — celular, navegador —, as do app ficam sem pontos). Aí não
+  // põe ninguém de castigo (senão o canal mais perto da meta some da fila) e avisa na tela. Passada 1 h assim, volta
+  // a trocar (pode ser problema dos próprios canais).
+  const tocando = [...watchers.keys()].filter((slug) => !isShown(slug));
+  const todasParadas = loggedIn && !limitTest && config.maxWatchers <= 2 && tocando.length >= 2
+    && tocando.every((slug) => earningState(slug, now) === 'idle');
+  if (todasParadas) { if (!contaSemPontosDesde) contaSemPontosDesde = now; } else contaSemPontosDesde = 0;
+  const segurar = todasParadas && now - contaSemPontosDesde < CONTA_SEM_PONTOS_MAX_MS;
   for (const slug of [...watchers.keys()]) {
     if (isShown(slug)) continue;
-    const idle = loggedIn && !limitTest && config.maxWatchers <= 2 && earningState(slug, now) === 'idle';
+    const idle = !segurar && loggedIn && !limitTest && config.maxWatchers <= 2 && earningState(slug, now) === 'idle';
     const s = status.get(slug);
     if (idle && s) s.cooldownUntil = now + IDLE_COOLDOWN_MS; // senão voltaria na mesma hora
     if (idle || turnTime(slug, now) >= RECYCLE_MS) stopWatcher(slug);
@@ -887,8 +898,12 @@ function snapshot() {
         watchedMin: Math.floor(watchedMs / 60000), error: s.error || null,
         turnMin: s.watchingSince ? Math.floor((now - s.watchingSince) / 60000) : null,
         lastGainAt: s.lastGainAt || null, thumb: s.thumb || null, avatar: s.avatar || null,
+        // De castigo (tocou 13 min sem o saldo subir): fica fora da fila por um tempo. A tela mostra em vez de "na fila".
+        coolMin: !watchers.has(slug) && (s.cooldownUntil || 0) > now ? Math.ceil((s.cooldownUntil - now) / 60000) : 0,
       };
     }),
+    // Todas as lives do app sem render ao mesmo tempo (a conta, não os canais): a tela avisa.
+    contaSemPontosMin: contaSemPontosDesde ? Math.floor((now - contaSemPontosDesde) / 60000) : 0,
     memoryMB: Math.round(app.getAppMetrics().reduce((t, m) => t + m.memory.workingSetSize, 0) / 1024),
     loggedIn,
   };
