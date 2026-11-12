@@ -338,7 +338,9 @@ contextBridge.executeInMainWorld({
     //    TREINADOR chegar no alvo dele, e o treinador sobe junto na simulação;
     //  · "subir de hunt": quando o treinador libera um nível de hunt maior, o XP passa a ser o dela.
     const PCT_CASA = { comum: 0.25, incomum: 0.4, rara: 0.75, mitica: 1, lendaria: 1 };
-    const NOME_BUFF = { vip: 'VIP', boostXp: 'XP Boost (só treinador)', boostPokexp: 'XP Boost Pokémon', guildBoost: 'Boost da Guild', twitch: 'Bônus Twitch', kick: 'Bônus Kick', atrasados: 'Boost dos Atrasados', guild: 'Guild no ranking', evento: 'Evento', raid: 'Raid Gigantamax', outros: 'Outro bônus' };
+    const NOME_BUFF = { vip: 'VIP', boostXp: 'XP Boost (só treinador)', boostPokexp: 'XP Boost Pokémon', guildBoost: 'Boost da Guild', twitch: 'Bônus Twitch', kick: 'Bônus Kick', atrasados: 'Boost dos Atrasados', guild: 'Guild no ranking', evento: 'Evento', raid: 'Raid Gigantamax', sacrificio: 'Sacrifício', outros: 'Outro bônus' };
+    // Só dá para renovar o que a pessoa compra ou resgata de novo. Evento, Raid, ranking da guild e Atrasados não.
+    const RENOVAVEL = { vip: 1, boostXp: 1, boostPokexp: 1, guildBoost: 1, twitch: 1, kick: 1, sacrificio: 1 };
     async function pveCasas(arg) {
       const o = arg && typeof arg === 'object' ? arg : {};
       const lista = jogo.eu.casa && Array.isArray(jogo.eu.casa.lista) ? jogo.eu.casa.lista : null;
@@ -391,13 +393,15 @@ contextBridge.executeInMainWorld({
       }
       // VIP "permanente": o jogo guarda uma data muito distante.
       const PERMANENTE = agora + 5 * 365 * 86400000;
-      const renovar = !!o.renovar;
+      // Renovar é escolhido buff por buff: { boostPokexp: true, ... } (o antigo `true` = todos os renováveis).
+      const renovar = o.renovar === true ? { ...RENOVAVEL } : o.renovar && typeof o.renovar === 'object' ? o.renovar : {};
+      const renova = (id) => !!(RENOVAVEL[id] && renovar[id]);
       const subir = o.subir !== false;
       const horasDia = Math.min(24, Math.max(1, Number(o.horasDia) || 24));
       const f = horasDia / 24;
       const vale = (x, t, Ltr) => {
         if (x.id === 'atrasados') return !(x.alvo > 0) || Ltr < x.alvo;
-        if (!(x.ate > 0) || x.ate >= PERMANENTE || renovar) return true;
+        if (!(x.ate > 0) || x.ate >= PERMANENTE || renova(x.id)) return true;
         return agora + t < x.ate;
       };
       const multEm = (k, t, Ltr) => partes.reduce((m, x) => (vale(x, t, Ltr) ? m * x[k] : m), 1);
@@ -419,8 +423,8 @@ contextBridge.executeInMainWorld({
           falta: Math.max(0, xpAlvo - xp), _xp: xp, _alvo: xpAlvo, ms: null };
       });
 
-      const out = { ...base, kph, horasDia, renovar, subir, huntAgora: at ? { nome: at.nome, nivel: Number(at.nivel) || 0 } : null,
-        partes: partes.map((x) => ({ ...x, nome: NOME_BUFF[x.id] || x.id, permanente: x.id !== 'atrasados' && (!(x.ate > 0) || x.ate >= PERMANENTE) })),
+      const out = { ...base, kph, horasDia, renovando: Object.keys(RENOVAVEL).filter(renova).length, subir, huntAgora: at ? { nome: at.nome, nivel: Number(at.nivel) || 0 } : null,
+        partes: partes.map((x) => ({ ...x, nome: NOME_BUFF[x.id] || x.id, permanente: x.id !== 'atrasados' && (!(x.ate > 0) || x.ate >= PERMANENTE), renovavel: !!RENOVAVEL[x.id], renovar: renova(x.id) })),
         multPk: multEm('pk', 0, Number(jogo.eu.level) || 0), multTr: multEm('tr', 0, Number(jogo.eu.level) || 0) };
       // XP do pokémon de batalha: o placar real da sessão (para conferir o cálculo).
       try {

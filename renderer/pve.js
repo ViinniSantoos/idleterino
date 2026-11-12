@@ -89,12 +89,23 @@ async function pveCasas(box) {
   const topo = el('div', 'card');
   topo.append(el('h3', null, '⚡ Buffs de XP de pokémon agora'));
   const pct = (m) => `+${String(Math.round((m - 1) * 1000) / 10).replace('.', ',')}%`;
-  const ativos = (r.partes || []).filter((x) => x.pk !== 1);
-  if (!ativos.length) topo.append(el('p', 'sub', 'Nenhum buff de XP de pokémon ligado agora.'));
+  // Também os que só mexem no treinador: ele subindo libera hunt nova, e isso muda o XP da casa.
+  const ativos = (r.partes || []).filter((x) => x.pk !== 1 || x.tr !== 1);
+  if (!ativos.length) topo.append(el('p', 'sub', 'Nenhum buff de XP ligado agora.'));
+  // "Vou renovar" buff por buff (só nos que dá para comprar ou resgatar de novo).
+  const renovarDe = () => { if (!opc.renovar || typeof opc.renovar !== 'object') opc.renovar = opc.renovar === true ? Object.fromEntries(ativos.filter((y) => y.renovavel).map((y) => [y.id, true])) : {}; return opc.renovar; };
   for (const x of ativos) {
     const ln = el('div', 'casa-buff');
     const prazo = x.id === 'atrasados' ? `até o treinador chegar no Nv ${fmt(x.alvo)}` : x.permanente ? 'permanente' : `acaba em ${tempoCasa(x.ate - Date.now())}`;
-    ln.append(el('b', null, x.nome), el('span', 'up', pct(x.pk)), el('span', 'sub', prazo));
+    ln.append(el('b', null, x.nome), el('span', 'up', x.pk !== 1 ? pct(x.pk) : `${pct(x.tr)} só no treinador`), el('span', 'sub', prazo));
+    if (!x.permanente && x.id !== 'atrasados') {
+      if (x.renovavel) {
+        const l = el('label', 'casa-chk'); const c = el('input'); c.type = 'checkbox'; c.checked = !!x.renovar;
+        c.onchange = () => { const m = renovarDe(); if (c.checked) m[x.id] = true; else delete m[x.id]; casasGravar('casasOpc', opc); renderPve(); };
+        l.title = 'Marcado: o app conta que você vai comprar ou resgatar de novo, e este buff não acaba. Desmarcado: vale só até acabar.';
+        l.append(c, el('span', null, 'vou renovar')); ln.append(l);
+      } else ln.append(el('span', 'sub', 'não dá para renovar'));
+    }
     topo.append(ln);
   }
   if (ativos.length) topo.append(el('p', 'small', `Juntos: ×${String(Math.round(r.multPk * 100) / 100).replace('.', ',')} no XP dos pokémon (os buffs multiplicam um ao outro). A casa recebe o XP já com os buffs.`));
@@ -105,8 +116,7 @@ async function pveCasas(box) {
   // Opções da estimativa.
   const ops = el('div', 'casa-ops');
   const chk = (rot, k, dica) => { const l = el('label', 'casa-chk'); const c = el('input'); c.type = 'checkbox'; c.checked = !!opc[k]; c.onchange = () => { opc[k] = c.checked; casasGravar('casasOpc', opc); renderPve(); }; l.title = dica; l.append(c, el('span', null, rot)); return l; };
-  ops.append(chk('Vou renovar os boosts', 'renovar', 'Ligado: o app considera que os boosts com prazo não acabam (você recompra). Desligado: cada um vale só até acabar.'),
-    chk('Subir de hunt quando liberar', 'subir', 'Ligado: quando o treinador liberar um nível de hunt maior, a conta passa a usar o XP dela.'));
+  ops.append(chk('Subir de hunt quando liberar', 'subir', 'Ligado: quando o treinador liberar um nível de hunt maior, a conta passa a usar o XP dela.'));
   const hs = el('select'); hs.title = 'Quantas horas por dia a conta fica farmando';
   for (const h of [24, 20, 16, 12, 8, 4]) { const op = el('option', null, h === 24 ? 'farmando 24h por dia' : `farmando ${h}h por dia`); op.value = String(h); hs.append(op); }
   hs.value = String(opc.horasDia || 24);
@@ -149,7 +159,7 @@ async function pveCasas(box) {
     for (const e of r.eventos) ev.append(el('p', 'sub', `em ${tempoCasa(e.ms)}: ${e.tipo === 'hunt' ? `o treinador libera a hunt ${e.nome} (Nv ${fmt(e.nivel)}) e o XP sobe` : `acaba o ${e.nome}`}`));
     box.append(ev);
   }
-  box.append(el('p', 'small', `Estimativa: vale se a conta continuar farmando assim (mesmo ritmo, ${r.horasDia}h por dia${r.subir ? ', subindo de hunt quando liberar' : ', na mesma hunt'}${r.renovar ? ', renovando os boosts' : ', com cada boost acabando no prazo dele'}). Muda quando você troca de hunt, de pokémon de batalha ou de buffs. Só as casas em uso contam; o Exp. Share segurado (5%) fica de fora.${r.guardadas ? ` Você tem ${r.guardadas} casa${r.guardadas > 1 ? 's' : ''} guardada${r.guardadas > 1 ? 's' : ''} (não repartem XP).` : ''}`));
+  box.append(el('p', 'small', `Estimativa: vale se a conta continuar farmando assim (mesmo ritmo, ${r.horasDia}h por dia${r.subir ? ', subindo de hunt quando liberar' : ', na mesma hunt'}${r.renovando ? `, renovando ${r.renovando === 1 ? 'o buff marcado' : `os ${r.renovando} buffs marcados`} e os outros acabando no prazo` : ', com cada buff acabando no prazo dele'}). Muda quando você troca de hunt, de pokémon de batalha ou de buffs. Só as casas em uso contam; o Exp. Share segurado (5%) fica de fora.${r.guardadas ? ` Você tem ${r.guardadas} casa${r.guardadas > 1 ? 's' : ''} guardada${r.guardadas > 1 ? 's' : ''} (não repartem XP).` : ''}`));
 }
 
 // ---------- 🎯 Hunt agora (a Melhor hunt que o app já calcula, mais completa) ----------
