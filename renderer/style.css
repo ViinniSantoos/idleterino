@@ -849,3 +849,27 @@ body.foco .glow { display: none; }
 .pp-time { display: flex; flex-direction: column; gap: 4px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
 .pp-mid .pvp-tabs { flex-wrap: wrap; justify-content: center; }
 .pp-tips .tip.ok { border-left: 3px solid var(--ok); } .pp-tips .tip.bad { border-left: 3px solid #ff8a8a; } .pp-tips .tip.meh { border-left: 3px solid #ffcf66; }
+
+/* precificação */
+.tr-explica { margin: 0 0 12px; padding: 10px 12px; border-radius: 10px; background: var(--s2); }
+.tr-explica summary { cursor: pointer; font-weight: 800; }
+.tr-explica p { margin: 6px 0 0; line-height: 1.45; }
+.tr-niveis { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.tr-nivel { display: flex; flex-direction: column; gap: 2px; padding: 6px 10px; border-radius: 9px; background: var(--s2); min-width: 110px; font-size: 12.5px; }
+.tr-nivel b { font-size: 13px; }
+
+/* procura por faixa de level */
+.tr-faixas { display: grid; gap: 4px; margin-top: 8px; padding: 8px 10px; border-radius: 10px; background: var(--s2); }
+.tr-faixa { display: grid; grid-template-columns: 130px minmax(80px, 1fr) 120px minmax(0, 1.2fr); gap: 10px; align-items: center; font-size: 12.5px; }
+.tr-faixa.aqui { color: var(--text); font-weight: 700; }
+.tr-faixa-barra { height: 8px; border-radius: 6px; background: rgba(255,255,255,.08); overflow: hidden; }
+.tr-faixa-barra i { display: block; height: 100%; background: var(--ok); }
+.tr-nivel.procura-facil { border-left: 3px solid var(--ok); } .tr-nivel.procura-media { border-left: 3px solid #ffcf66; } .tr-nivel.procura-pouca, .tr-nivel.procura-nenhuma { border-left: 3px solid #ff8a8a; }
+.tr-escada { display: grid; gap: 6px 10px; margin: 6px 0; padding: 8px 10px; border-radius: 10px; background: var(--s2); font-size: 12.5px; align-items: center; }
+.cand.tr-prec { grid-template-columns: minmax(0, 1fr) auto !important; align-items: start; }
+
+/* dica de venda */
+.tr-dica-res { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
+.tr-dica-res > b { font-size: 16px; }
+.tr-dica-res .tip { font-size: 14px; padding: 10px 12px; }
+

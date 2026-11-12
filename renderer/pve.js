@@ -45,7 +45,7 @@ async function renderPve() {
   act.append(sel);
   head.append(t, act);
   const tabs = el('div', 'pvp-tabs');
-  for (const [k, l] of [['agora', '🎯 Hunt agora'], ['proximas', '🗺️ Próximas hunts'], ['evo', '🧬 Evoluir para qual?'], ['casas', '🏠 Casas'], ['mercado', '🛒 Comprar para farmar']]) {
+  for (const [k, l] of [['agora', '🎯 Hunt agora'], ['proximas', '🗺️ Próximas hunts'], ['evo', '🧬 Evoluir para qual?'], ['casas', '🏠 Casas'], ['shiny', '✨ Procurar shiny'], ['mercado', '🛒 Comprar para farmar']]) {
     tabs.append(button(l, pveTab === k ? 'on' : '', () => { pveTab = k; try { localStorage.setItem('pveTab', k); } catch {} renderPve(); }));
   }
   root.append(head, tabs);
@@ -55,6 +55,7 @@ async function renderPve() {
   else if (pveTab === 'proximas') await pveProximas(corpo);
   else if (pveTab === 'mercado') pveMercado(corpo, accs.find((a) => a.id === pveAcc));
   else if (pveTab === 'casas') await pveCasas(corpo);
+  else if (pveTab === 'shiny') pveShiny(corpo);
   else await pveEvo(corpo);
 }
 
@@ -451,3 +452,135 @@ function pveMercado(box, a) {
   c.append(el('div', 'mempty', '"Ver no Market" abre o anúncio no jogo, nesta conta. Confira o nível e o vendedor antes de comprar. A compra é sempre sua.'));
 }
 function go2Poke() { if (typeof go === 'function') go('poke'); }
+
+// ---------- ✨ Procurar shiny: quais shiny caçar com o pokémon em campo ----------
+// Regras do jogo: o brilho é sorteado a CADA arremesso (1 em 24.000; o Lure dobra; Kick e Twitch +15% cada) e só vale
+// se a bola fechar — e a bola fecha mais no 1º estágio da evolução. O app junta isso com os abates/h do seu pokémon
+// em cada hunt, o preço dos shiny no Market (vendas de verdade) e o quanto a forma final serve no PvP e no PvE.
+let pveShinyOpc = casasLer('shinyOpc', { horas: 24, moeda: 'gold', bola: null, lure: null, kick: null, twitch: null, captura: null, kickCap: null, twitchCap: null });
+let pveShinyRes = null, pveShinyRodando = false, pveShinyVer = casasLer('shinyVer', 'raros');
+const shinyMoedaTxt = (v, m) => {
+  if (v == null) return '—';
+  if (m === 'orb') return `💎 ${fmt(Math.round(v))}`;
+  const a = Math.abs(v);
+  return a >= 1e9 ? `${(v / 1e9).toFixed(2).replace('.', ',')} bi` : a >= 1e6 ? `${(v / 1e6).toFixed(1).replace('.', ',')} mi` : a >= 1e4 ? `${Math.round(v / 1e3)} mil` : fmt(Math.round(v));
+};
+const shinyHoras = (h) => (h == null ? '—' : h < 48 ? `${fmt(Math.round(h))} h` : h < 24 * 60 ? `${fmt(Math.round(h / 24))} dias` : `${fmt(Math.round(h / 24 / 30))} meses`);
+function pveShiny(box) {
+  const o = pveShinyOpc;
+  const grava = () => casasGravar('shinyOpc', pveShinyOpc);
+  const c = el('div', 'card');
+  c.append(el('div', 'ext-sec', '✨ Procurar shiny — quais caçar com o seu pokémon em campo'));
+  c.append(el('div', 'sub up-lead', 'No jogo o brilho é sorteado a CADA arremesso de bola (1 em 24.000), antes de saber se ela fecha: shiny que escapa vai embora. Por isso o que conta é quantos arremessos você faz em cada espécie (os abates/h do seu pokémon em campo, com "Lançar sem parar" ligado), os bônus de shiny e a chance da bola fechar — maior no 1º estágio da evolução (ex.: Charmander fecha mais que Charizard). O app cruza isso com o preço dos shiny no Market e com o quanto a forma final serve no PvP e no PvE.'));
+  const form = el('div', 'budget');
+  const sel = (pares, v, fn, titulo) => { const s = el('select'); if (titulo) s.title = titulo; for (const [k, l] of pares) { const op = el('option', null, l); op.value = String(k); s.append(op); } s.value = String(v); s.onchange = () => fn(s.value); return s; };
+  form.append(
+    sel([[6, 'vou caçar 6 h'], [12, 'vou caçar 12 h'], [24, 'vou caçar 24 h'], [48, 'vou caçar 2 dias'], [72, 'vou caçar 3 dias'], [168, 'vou caçar 1 semana']], o.horas, (v) => { o.horas = Number(v); grava(); }, 'Quantas horas vai ficar caçando'),
+    sel([['gold', 'preço em coins'], ['orb', 'preço em gemas 💎']], o.moeda, (v) => { o.moeda = v; grava(); }),
+  );
+  const bolas = (pveShinyRes && pveShinyRes.bolas) || [{ id: 4, nome: 'Ultra Ball', rate: 4, tem: true }];
+  form.append(sel([['', 'bola: a melhor que eu tenho'], ...bolas.map((b) => [b.id, `${b.nome} (×${b.rate})${b.tem ? '' : ' — não tenho'}`])], o.bola == null ? '' : o.bola, (v) => { o.bola = v || null; grava(); }, 'A bola que você vai usar'));
+  c.append(form);
+  // Bônus: o padrão é o que está ligado agora; marque o que vai ligar na hora de caçar (ex.: daqui a 2 dias).
+  const bx = el('div', 'tr-chks');
+  const r0 = pveShinyRes;
+  const chk = (k, txt) => {
+    const l = el('label', 'tr-chk'); const ck = el('input'); ck.type = 'checkbox';
+    ck.checked = o[k] != null ? !!o[k] : !!(r0 && r0.bonus && r0.bonus[k]);
+    ck.onchange = () => { o[k] = ck.checked; grava(); };
+    l.append(ck, el('span', null, txt)); return l;
+  };
+  bx.append(el('span', 'tr-rot', 'Bônus que vão estar ligados (marque o que você vai ativar para caçar):'),
+    chk('lure', '✨ Shiny Secret Lure (dobra o shiny)'), chk('kick', '🟩 Bônus Kick de shiny (+15%)'), chk('twitch', '🟪 Bônus Twitch de shiny (+15%)'),
+    chk('captura', '🎯 Capture Boost (dobra a captura)'), chk('kickCap', '🟩 Bônus Kick de captura (+15%)'), chk('twitchCap', '🟪 Bônus Twitch de captura (+15%)'));
+  const auto = button('↺ usar o que está ligado agora', 'mini', () => { for (const k of ['lure', 'kick', 'twitch', 'captura', 'kickCap', 'twitchCap']) o[k] = null; grava(); renderPve(); });
+  bx.append(auto);
+  c.append(bx);
+  const go = button(pveShinyRodando ? 'Calculando… (lendo o preço dos shiny no Market, ~30 s)' : '✨ Sugerir os melhores shiny', 'primary', async () => {
+    pveShinyRodando = true; renderPve();
+    const pvp = await call('poke:pvp:get', pveAcc).catch(() => null);
+    const cont = {};
+    for (const p of (pvp && pvp.meta && pvp.meta.perfis ? Object.values(pvp.meta.perfis) : [])) { const vs = new Set(); for (const k of p.time || []) if (k.speciesId != null && !vs.has(k.speciesId)) { vs.add(k.speciesId); cont[k.speciesId] = (cont[k.speciesId] || 0) + 1; } }
+    const meta = Object.entries(cont).map(([id, n]) => ({ id: Number(id), n }));
+    // Força de cada espécie no duelo contra o top 50 (calculada na aba PvP, com as Megas).
+    const forca = (pvp && pvp.meta && Array.isArray(pvp.meta.candidatos) ? pvp.meta.candidatos : []).filter((x) => x && x.speciesId != null).map((x) => ({ id: x.speciesId, win: x.win }));
+    const arg = { horas: o.horas, moeda: o.moeda, bola: o.bola, meta, forca };
+    for (const k of ['lure', 'kick', 'twitch', 'captura', 'kickCap', 'twitchCap']) if (o[k] != null) arg[k] = o[k];
+    const r = await call('poke:pve', pveAcc, 'shiny', arg).catch(() => null);
+    pveShinyRodando = false;
+    pveShinyRes = r && !r.erro ? { ...r, acc: pveAcc, temMeta: meta.length > 0, temForca: forca.length > 0 } : null;
+    if (!r || r.erro || r.pronto === false) toast(`⚠ ${(r && r.erro) || 'A conta precisa estar aberta e logada.'}`);
+    if (page === 'pve' && pveTab === 'shiny') renderPve();
+  });
+  go.disabled = pveShinyRodando;
+  c.append(go);
+  box.append(c);
+  const r = pveShinyRes;
+  if (!r || r.acc !== pveAcc) { box.append(emptyBox('Procurar shiny', 'Coloque em campo o pokémon com que vai caçar (ex.: o seu Glaceon), marque os bônus que vai ligar e clique em "Sugerir". O app mostra os melhores shiny para vender, para o PvP, para o PvE e os mais fáceis de achar.')); return; }
+  if (r.semPokemon) { box.append(emptyBox('Sem pokémon em campo', 'Coloque um pokémon em campo no jogo (o que vai caçar) e calcule de novo.')); return; }
+  const m = r.moeda;
+  const res = el('div', 'card');
+  const umEm = Math.round(1 / (r.chanceS * r.multS));
+  res.append(el('div', 'sub up-lead', `Com o seu ${r.pokemon} em campo, em ${fmt(r.lista.length)} espécies com shiny que ele consegue caçar. Shiny: 1 em ${fmt(umEm)} arremessos (×${String(r.multS).replace('.', ',')} pelos bônus) · captura ×${String(r.multC).replace('.', ',')} · bola ${r.bola.nome} (×${r.bola.rate}) · ${shinyHoras(r.horas)} caçando. Estimativa: o jogo sorteia, então pode vir antes ou depois.`));
+  if (r.multS < 2) res.append(el('div', 'tip warn', '💡 Sem o Shiny Secret Lure a chance é a metade. Para uma caçada longa, vale ligar o Lure e os bônus de shiny da Kick e da Twitch juntos.'));
+  if (r.lista.some((x) => x.precoErro === 'mercado-aberto')) res.append(el('div', 'tip warn', 'Feche o Market dentro do jogo para o app ler os preços (com ele aberto, a consulta apareceria na sua tela).'));
+  // As listas por objetivo, cada uma com a sua conta (de todas as espécies que o seu pokémon caça).
+  const L0 = r.L || 0;
+  const soma = (x) => x.notaPvp + x.notaPve;
+  const listas = {
+    raros: r.lista.filter((x) => (x.raro === 'nenhum' || x.raro === 'poucos') && Math.max(x.notaPvp, x.notaPve) >= 45)
+      .sort((a, b) => soma(b) - soma(a) || b.hunt.nivel - a.hunt.nivel),
+    pvp: [...r.lista].sort((a, b) => b.notaPvp - a.notaPvp || b.porH - a.porH),
+    pve: [...r.lista].sort((a, b) => b.notaPve - a.notaPve || b.porH - a.porH),
+    vender: r.lista.filter((x) => x.valorH > 0).sort((a, b) => b.valorH - a.valorH),
+    facil: [...r.lista].sort((a, b) => b.porH - a.porH),
+  };
+  // Pacote: o melhor de cada objetivo, SEM repetir espécie (se o 1º já foi escolhido em outro, vai o próximo).
+  const usados = new Set();
+  const prox = (arr) => { const x = arr.find((y) => !usados.has(y.pokeId)); if (x) usados.add(x.pokeId); return x; };
+  const pac = el('div', 'tr-faixas');
+  pac.append(el('span', 'tr-rot', `🎁 Pacote para ${shinyHoras(r.horas)} de caçada (um shiny diferente para cada objetivo)`));
+  const linhaPac = (ico, txt, x, extra) => { if (!x) return; const d = el('div', 'tip ok'); d.textContent = `${ico} ${txt}: ${x.nome}${x.final ? ` → ${x.final.nome}` : ''}${x.mega ? ` (tem ${x.mega})` : ''} — hunt ${x.hunt.nome} (Nv ${fmt(x.hunt.nivel)}), ${Math.round(x.chance * 100)}% em ${shinyHoras(r.horas)}${extra ? ` · ${extra}` : ''}.`; pac.append(d); };
+  const pRaro = prox(listas.raros), pPvp = prox(listas.pvp), pPve = prox(listas.pve), pVend = prox(listas.vender), pFac = prox(listas.facil);
+  linhaPac('💎', 'Raro e bom', pRaro, pRaro ? `${pRaro.raro === 'nenhum' ? 'nenhum shiny vendido em 30 dias' : 'quase ninguém vende o shiny'}` : '');
+  linhaPac('⚔️', 'Para o PvP', pPvp, pPvp && pPvp.pvp.win != null ? `vence ${pPvp.pvp.win}% dos duelos contra o top 50${pPvp.pvp.forma ? ` (como ${pPvp.pvp.forma})` : ''}` : '');
+  linhaPac('🌿', 'Para o PvE', pPve, pPve ? `a forma final tira ×5,5 em ${pPve.pve.x55} das suas ${pPve.pve.huntsAlvo} próximas hunts` : '');
+  linhaPac('💰', 'Para vender', pVend, pVend && pVend.preco ? `vale ~${shinyMoedaTxt(pVend.preco.v, m)} (${pVend.preco.n7} venda(s) em 7 dias)` : '');
+  linhaPac('🎯', 'Mais fácil de achar', pFac, pFac ? `1 a cada ~${shinyHoras(pFac.umEmH)}` : '');
+  if (!r.temForca) pac.append(el('span', 'sub', 'PvP: abra a aba PvP e clique em atualizar o meta do top 50 — com ele o app mede a força de verdade (duelo contra os times do top, com as Megas).'));
+  res.append(pac);
+  const abas = el('div', 'pvp-tabs');
+  for (const [k, l] of [['raros', `💎 Raros e bons (${listas.raros.length})`], ['pvp', '⚔️ Para o PvP'], ['pve', '🌿 Para o PvE'], ['vender', '💰 Para vender'], ['facil', '🎯 Mais fáceis de achar']]) abas.append(button(l, pveShinyVer === k ? 'on' : '', () => { pveShinyVer = k; casasGravar('shinyVer', k); renderPve(); }));
+  res.append(abas);
+  const DICA = {
+    raros: 'Shiny que quase ninguém tem (poucas ou nenhuma venda no Market em 30 dias) e que é bom no PvP ou no PvE — como o Mawile. As hunts mais perto do seu nível vêm primeiro no empate (menos gente caçando lá).',
+    pvp: 'Pela força de verdade: quanto a melhor forma da linha (a evolução final ou a Mega) vence no duelo do jogo contra os times do top 50.',
+    pve: 'Pela forma final: em quantas das suas próximas hunts ela tira ×5,5 e ×2,5, e o ataque base dela.',
+    vender: 'Pelo valor esperado: preço do shiny no Market × chance de achar no seu tempo de caçada.',
+    facil: 'Pela chance de achar: abates/h do seu pokémon na hunt × chance da bola fechar (1º estágio fecha mais).',
+  };
+  res.append(el('p', 'sub', DICA[pveShinyVer] || ''));
+  const lista = listas[pveShinyVer] || listas.raros;
+  const rarTxt = { nenhum: '💎 nenhum shiny vendido em 30 dias (raríssimo)', poucos: '💎 poucos vendidos em 30 dias (raro)', alguns: 'alguns vendidos em 30 dias', muitos: 'muitos vendidos em 30 dias (comum)' };
+  const lc = el('div', 'cand-list');
+  for (const x of lista.slice(0, 12)) {
+    const row = el('div', 'cand');
+    const l = el('div', 'pu-n');
+    l.append(el('b', null, `✨ ${x.nome}${x.estagio ? ` · ${x.estagio}` : ''}${x.final ? ` → ${x.final.nome}` : ''}${x.mega ? ` · tem ${x.mega}` : ''}${x.temShiny ? ' · ✅ você já tem' : ''}`));
+    l.append(el('span', 'sub', `Nota PvP ${x.notaPvp} · Nota PvE ${x.notaPve}${x.raro ? ` · ${rarTxt[x.raro]}` : ''}`));
+    l.append(el('span', 'sub', `Hunt: ${x.hunt.nome} (Nv ${fmt(x.hunt.nivel)}${L0 && x.hunt.nivel >= L0 * 0.6 ? ', perto do seu nível' : ''}) · ~${fmt(x.hunt.kph)} abates/h${x.hunt.fatia < 100 ? ` (${x.hunt.fatia}% são ${x.nome})` : ''} · a bola fecha ${(x.fecha * 100).toFixed(1).replace('.', ',')}% · 1 shiny a cada ~${shinyHoras(x.umEmH)}`));
+    if (x.pvp && x.pvp.win != null) l.append(el('span', 'sub', `PvP: vence ${x.pvp.win}% dos duelos contra o top 50${x.pvp.forma ? ` como ${x.pvp.forma}` : ''}${x.pvp.uso ? ` · ${x.pvp.uso} time(s) do top usam a linha` : ''}`));
+    else if (x.pvp && x.pvp.vant != null) l.append(el('span', 'sub', `PvP${x.final ? ` (${x.final.nome})` : ''}: bate forte em ${x.pvp.vant}% do meta · apanha forte de ${x.pvp.risco}%${x.pvp.uso ? ` · ${x.pvp.uso} time(s) do top usam` : ''}`));
+    if (x.pve) l.append(el('span', 'sub', `PvE${x.final ? ` (${x.final.nome})` : ''}: ×5,5 em ${x.pve.x55} e ×2,5 em ${x.pve.x25} das suas ${x.pve.huntsAlvo} próximas hunts · shiny dá ×3 nos status`));
+    if (x.preco && x.preco.v) l.append(el('span', 'sub', `Market: ~${shinyMoedaTxt(x.preco.v, m)} o shiny${x.preco.nvBaixo ? ' de Nv baixo' : ''} (${x.preco.n} venda(s) em 30 dias, ${x.preco.n7} em 7)`));
+    else if (x.preco) l.append(el('span', 'sub', 'Market: nenhum shiny dele vendido em 30 dias — preço livre, quem tiver dita o valor'));
+    const tg = el('div', 'pm-tags'); for (const tt of (x.final ? x.final.tipos : x.tipos) || []) tg.append(tipoChip(tt));
+    const pr = el('div', 'price'); pr.append(el('b', null, `${Math.round(x.chance * 100)}%`), el('span', 'sub', `em ${shinyHoras(r.horas)}`));
+    row.append(l, tg, pr);
+    lc.append(row);
+  }
+  if (!lista.length) lc.append(el('div', 'mempty', pveShinyVer === 'raros' ? 'Nenhum shiny raro e bom nas hunts que o seu pokémon faz agora (ou o Market estava aberto e o app não leu os preços).' : pveShinyVer === 'vender' ? 'Nenhum preço de shiny encontrado no Market para essas espécies agora.' : 'Nada para mostrar.'));
+  res.append(lc);
+  res.append(el('p', 'small', `Calculado ${new Date(r.em).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} com ${fmt(r.lista.length)} espécies. Market e raridade: das 20 mais fortes no PvP/PvE e mais fáceis (${r.consultas} consulta(s) agora; o resto fica guardado 45 min). Notas de 0 a 100.`));
+  box.append(res);
+}

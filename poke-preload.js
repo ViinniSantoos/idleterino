@@ -28,6 +28,8 @@ contextBridge.executeInMainWorld({
     const extras = { filtros: [], ouvintes: [], api: {}, instalados: new Set() };
     const ABAS = { meus: 1, historico: 1, historicoGlobal: 1 };
     const SEQ = 987654321;
+    const SEQ_SHINY = 987654555; // consultas da aba Procurar shiny na Tabela de preços (o jogo descarta seq que não é dele)
+    let shinyHist = null;
 
     // ---- estado leve do jogador: o que a sugestão de hunt e o PvP precisam ----
     const jogo = { hunts: null, tabelaTipos: null, amp: 1.5, multHp: 5, eu: {}, pks: new Map(), keys: [] };
@@ -50,6 +52,10 @@ contextBridge.executeInMainWorld({
       if (p.bonusXp && Array.isArray(p.bonusXp.partes)) jogo.eu.bonusXpBruto = p.bonusXp;
       // Shiny Secret Lure da Loja: só o fim dele (o resto da Loja não interessa ao app).
       if (p.loja && p.loja.boosts && 'shiny' in p.loja.boosts) jogo.eu.lureAte = Number(p.loja.boosts.shiny) || 0;
+      // Capture Boost da Loja (aba Procurar shiny: o shiny só conta se a bola fechar).
+      if (p.loja && p.loja.boosts && 'captura' in p.loja.boosts) jogo.eu.capturaAte = Number(p.loja.boosts.captura) || 0;
+      // As bolas da mochila (quantas de cada): a aba Procurar shiny usa a melhor que a pessoa tem.
+      if (p.balls && typeof p.balls === 'object') jogo.eu.balls = { ...p.balls };
       if ('nick' in p || 'xp' in p || 'level' in p) jogo.at = Date.now();
       if (Array.isArray(pokemons)) jogo.pks = new Map(pokemons.map((k) => [k.id, slimPk(k)]));
       for (const k of pkMud || []) jogo.pks.set(k.id, slimPk(k));
@@ -67,6 +73,7 @@ contextBridge.executeInMainWorld({
       if (d.indexOf('"pvpTabela"') >= 0 && recente(nossos.tabela)) return true;
       if (d.indexOf('"especies"') >= 0 && d.indexOf('"market"') >= 0 && Date.now() - nossos.especies < 8000) return true;
       if (d.indexOf('"vitrine"') >= 0 && d.indexOf('"market"') >= 0 && Date.now() - nossos.lista < 8000) return true;
+      if (d.indexOf('"seq":' + SEQ_SHINY) >= 0 && d.indexOf('"market"') >= 0) return true;
       for (const f of extras.filtros) { try { if (f(d)) return true; } catch {} }
       if (d.indexOf('"perfil"') >= 0 && nossos.perfis.size) {
         try { const m = JSON.parse(d); if (m.t === 'perfil' && m.perfil && recente(nossos.perfis.get(String(m.perfil.nick || '').toLowerCase()))) return true; } catch {}
@@ -118,7 +125,17 @@ contextBridge.executeInMainWorld({
                   if (m.ampliacaoHunt) jogo.amp = Number(m.ampliacaoHunt) || 1.5;
                   if (m.multHpSelvagem) jogo.multHp = Number(m.multHpSelvagem) || 5;
                   if (m.chanceShiny) jogo.chanceShiny = Number(m.chanceShiny) || 0;
+                  // Procurar shiny: quem tem forma shiny (dex), as bolas e a conta de captura do jogo.
+                  if (m.shinyLooks && typeof m.shinyLooks === 'object') jogo.shinyDex = new Set(Object.keys(m.shinyLooks).map(Number));
+                  if (Array.isArray(m.catalogoBolas)) jogo.bolas = m.catalogoBolas.map((b) => ({ id: b.id, nome: b.nome, rate: Number(b.catchRate) || 1 }));
+                  if (m.captura && typeof m.captura === 'object') jogo.captura = m.captura;
                   if (m.mercado && typeof m.mercado === 'object') jogo.mercado = m.mercado;
+                  // Pedras: de evolução por tipo, a Shiny Stone por tipo e as de Mega (com os fragmentos e o custo de fabricar).
+                  if (m.mega && typeof m.mega === 'object') jogo.mega = m.mega;
+                  if (m.shinyStone && typeof m.shinyStone === 'object') jogo.shinyStone = m.shinyStone;
+                  if (m.pedrasEvolucao && typeof m.pedrasEvolucao === 'object') jogo.pedrasEvolucao = m.pedrasEvolucao;
+                  // TM Researcher: fragmentos de AoE e de Z-Move (pieceAoe/pieceElemental) e quantos fazem um (custoAoe/custoElemental).
+                  if (m.tmResearcher && typeof m.tmResearcher === 'object') jogo.tmResearcher = m.tmResearcher;
                 }
                 aplicarEstado(est, m.t === 'welcome');
                 const bx = est && est.bonusXp;
@@ -178,6 +195,7 @@ contextBridge.executeInMainWorld({
               const m = JSON.parse(d);
               if (m && m.t === 'market' && m.aba === 'especies' && Date.now() - nossos.especies < 8000) { ultimaEspecies = { em: Date.now(), m }; return; }
               if (m && m.t === 'market' && m.aba === 'vitrine' && Date.now() - nossos.lista < 8000) { ultimaLista = { em: Date.now(), m }; return; }
+              if (m && m.t === 'market' && m.seq === SEQ_SHINY) { shinyHist = { em: Date.now(), m }; return; }
               if (!m || m.t !== 'market' || !ABAS[m.aba]) return;
               if (m.aba !== 'meus' && m.seq != null && m.seq !== SEQ) return;
               const key = m.aba === 'historicoGlobal' ? `historicoGlobal:${m.pagina || 0}` : m.aba;
@@ -576,6 +594,173 @@ contextBridge.executeInMainWorld({
       return { base: { pokeId: base.pokeId, nome: base.name, tipos: tiposDe(base), stats: statsBase(base), bst: bst(base) }, L, opcoes, regioes: regs, huntsAlvo: alvo.length,
         ind: ind ? { ivs: ind.ivs, level: ind.level, potencia: ind.potencia || 1, shiny: ind.shiny, nivelUso, colada: !!o0.texto } : null };
     }
+    // ---- aba PROCURAR SHINY: quais shiny caçar com o pokémon em campo (regras do próprio jogo) ----
+    // · O brilho é sorteado a CADA ARREMESSO (1 em 24.000), antes da bola fechar: shiny que escapa vai embora.
+    //   Então shiny/h de uma espécie = arremessos/h nela (≈ abates/h × fatia dela na hunt, com "Lançar sem parar")
+    //   × chance de shiny (com Lure e os bônus da live) × chance da bola fechar.
+    // · A chance da bola fechar depende do ESTÁGIO da evolução (1º estágio fecha mais) e da bola.
+    // · Valor: vendas de shiny da espécie na Tabela de preços (Nv baixo, como sai da captura), 1 consulta a cada
+    //   1,5 s, escondida do jogo e guardada 45 min. PvP: uso da linha no top 50 + vantagem de tipo da forma final.
+    //   PvE: em quantas das suas próximas hunts a forma final tira ×5,5.
+    const shinyPrecoCache = new Map(); // `${nome}|${moeda}` -> { em, v }
+    let shinyBuscando = false;
+    async function vendasShiny(nome, moeda) {
+      const k = `${nome}|${moeda}`;
+      const c = shinyPrecoCache.get(k);
+      if (c && Date.now() - c.em < 45 * 60000) return c.v;
+      if (!sock || sock.readyState !== 1) return null;
+      const antes = shinyHist && shinyHist.em;
+      sock.send(JSON.stringify({ t: 'market.historicoGlobal', pagina: 0, seq: SEQ_SHINY, tipo: 'pokemon', busca: nome, moeda, soShiny: true, ordem: 'recentes' }));
+      for (let i = 0; i < 15 && (shinyHist && shinyHist.em) === antes; i++) await espera(400);
+      if (!shinyHist || shinyHist.em === antes) return null;
+      const linhas = (shinyHist.m.linhas || []).filter((x) => x && x.ficha && x.ficha.shiny && String(x.ficha.nome || '').toLowerCase() === nome.toLowerCase() && (!x.moeda || x.moeda === moeda))
+        .map((x) => ({ preco: Number(x.bruto) || 0, level: Number(x.ficha.level) || 1, em: Number(x.em) || 0 })).filter((x) => x.preco > 0);
+      shinyPrecoCache.set(k, { em: Date.now(), v: linhas });
+      return linhas;
+    }
+    async function pveShiny(arg) {
+      const o = arg && typeof arg === 'object' ? arg : {};
+      if (!jogo.hunts || !jogo.tabelaTipos) return { pronto: false };
+      if (shinyBuscando) return { erro: 'Já estou calculando. Espere terminar.' };
+      shinyBuscando = true;
+      try {
+        const { map, ram } = await catalogoPve();
+        let cd = null; try { cd = await import('/shared/captura-degrau.mjs'); } catch {}
+        const rk = await huntRank({ todas: true });
+        if (!rk || !rk.pronto) return { pronto: false };
+        if (rk.semPokemon) return { pronto: true, semPokemon: true };
+        const agora = Date.now();
+        const L = Number(jogo.eu.level) || 0;
+        const horas = Math.min(240, Math.max(1, Number(o.horas) || 24));
+        const moeda = o.moeda === 'orb' ? 'orb' : 'gold';
+        // Bônus: o que vale AGORA (ou o que a pessoa marcou para quando for caçar).
+        const ativo = (fim) => Number(fim) > agora;
+        const pctK = Number(canais.kick && canais.kick.pct) || 15, pctT = Number(canais.twitch && canais.twitch.pct) || 15;
+        const fimB = (k, t) => Number(canais[k] && canais[k].bonus && canais[k].bonus[t]) || 0;
+        const tem = (k, d) => (o[k] == null ? d : !!o[k]);
+        const b = {
+          lure: tem('lure', ativo(jogo.eu.lureAte)), kick: tem('kick', ativo(fimB('kick', 'shiny'))), twitch: tem('twitch', ativo(fimB('twitch', 'shiny'))),
+          captura: tem('captura', ativo(jogo.eu.capturaAte)), kickCap: tem('kickCap', ativo(fimB('kick', 'captura'))), twitchCap: tem('twitchCap', ativo(fimB('twitch', 'captura'))),
+        };
+        const multS = 1 + (b.lure ? 1 : 0) + (b.kick ? pctK / 100 : 0) + (b.twitch ? pctT / 100 : 0);
+        const multC = 1 + (b.captura ? 1 : 0) + (b.kickCap ? pctK / 100 : 0) + (b.twitchCap ? pctT / 100 : 0);
+        const chanceS = Number(jogo.chanceShiny) || 1 / 24000;
+        // A bola: a escolhida, ou a melhor que tem na mochila (sem nenhuma, a Ultra Ball).
+        const bolas = (jogo.bolas || [{ id: 4, nome: 'Ultra Ball', rate: 4 }]).slice().sort((x, y) => y.rate - x.rate);
+        const temBola = (id) => Number(jogo.eu.balls && jogo.eu.balls[id]) > 0;
+        const bola = bolas.find((x) => String(x.id) === String(o.bola)) || bolas.find((x) => temBola(x.id)) || bolas.find((x) => x.id === 4) || bolas[0];
+        const cap = jogo.captura || { base: 0.0075, piso: 0.003, teto: 0.1, raridadeDiv: 17, precoSemPreco: 6.5e9 };
+        const chaves = cd ? cd.chavesEmHunt(jogo.hunts) : new Set();
+        const dexDe = (id) => (cd ? cd.chaveDeHunt(id) : id);
+        const fechar = (esp) => {
+          const preco = esp.priceNpc > 0 ? esp.priceNpc : cap.precoSemPreco;
+          let fator = 3.5745;
+          try { fator = cd.fatorDeCaptura({ tetoCaptura: esp.tetoCaptura, peloDegrau: cd.capturaPeloDegrau(esp.pokeId, chaves), preco, raridadeDiv: cap.raridadeDiv ?? 17, porDegrau: cap.porDegrau ?? cd.FATOR_CAPTURA_DO_DEGRAU }); } catch {}
+          return Math.max(cap.piso, Math.min(cap.teto, cap.base * (bola.rate / fator) * 1.4 * multC));
+        };
+        const ESTAGIO = { 20: '1º estágio', 40: '2º estágio', 100: '3º estágio' };
+        // Cada hunt que o pokémon em campo consegue fazer → cada espécie dela com forma shiny.
+        const porSlug = new Map((jogo.hunts || []).map((h) => [h.slug, h]));
+        const porEsp = new Map();
+        for (const hr of rk.todas || []) {
+          const h = porSlug.get(hr.slug);
+          if (!h || !Array.isArray(h.especies) || !(hr.kph > 0) || String(h.area || '').toLowerCase() === 'outland') continue;
+          const tot = h.especies.reduce((t, e) => t + (Number(e.pontos) || 0), 0) || 1;
+          for (const e of h.especies) {
+            const esp = map.get(e.pokeId);
+            if (!esp || !(jogo.shinyDex ? jogo.shinyDex.has(Number(dexDe(e.pokeId))) || jogo.shinyDex.has(Number(e.pokeId)) : true)) continue;
+            const fatia = (Number(e.pontos) || 0) / tot;
+            const arrH = hr.kph * fatia;
+            const fecha = fechar(esp);
+            const porH = arrH * chanceS * multS * fecha;
+            const cur = porEsp.get(esp.pokeId);
+            if (!cur || porH > cur.porH) porEsp.set(esp.pokeId, { pokeId: esp.pokeId, nome: esp.name, tipos: tiposDe(esp), estagio: ESTAGIO[esp.tetoCaptura] || null, teto: Number(esp.tetoCaptura) || null,
+              hunt: { nome: hr.nome, nivel: hr.nivel, kph: hr.kph, fatia: Math.round(fatia * 100) }, fecha, porH });
+          }
+        }
+        let lista = [...porEsp.values()].sort((x, y) => y.porH - x.porH);
+        // Evoluções (formas finais) para o PvP e o PvE: a forma final é a que a pessoa vai usar.
+        const alvo = huntsDoHorizonte(map, L, nivelDepoisDe(L, 30 * 12, xpHoraDaConta()));
+        const meta = (Array.isArray(o.meta) ? o.meta : []).map((m) => ({ id: Number(m.id), t: tiposDe(map.get(Number(m.id)) || {}), w: Number(m.n) || 1 })).filter((m) => m.t.length);
+        const metaW = meta.reduce((t, m) => t + m.w, 0);
+        const usoPorId = new Map(meta.map((m) => [m.id, m.w]));
+        const xPvp = (atks, defs) => Math.max(0, ...atks.map((t) => fxTipo(t, defs)));
+        const linha = (esp) => {
+          const ids = [esp.pokeId]; let fim = esp; const vistos = new Set();
+          const anda = (e2, prof) => { let ds = []; try { ds = ram.destinosDeEvolucao(e2, (id) => map.get(id)); } catch {} const prox = ds.filter((d) => d.temArte).length ? ds.filter((d) => d.temArte) : ds;
+            for (const d of prox) { if (!d.especie || vistos.has(d.especie.pokeId) || prof > 4) continue; vistos.add(d.especie.pokeId); ids.push(d.especie.pokeId); if (bst(d.especie) > bst(fim)) fim = d.especie; anda(d.especie, prof + 1); } };
+          anda(esp, 0);
+          return { ids, fim };
+        };
+        // Força de verdade no PvP: o duelo do jogo contra os times do top 50 (os "candidatos" da aba PvP, com as
+        // Megas). A linha inteira conta: base, evoluções e a Mega da forma final (ex.: Mawile → Mega Mawile).
+        const forca = new Map((Array.isArray(o.forca) ? o.forca : []).map((f) => [Number(f.id), Number(f.win) || 0]));
+        const megasDe = (c) => [...map.values()].filter((m2) => m2 && m2.name && (m2.name === `Mega ${c.name}` || m2.name.startsWith(`Mega ${c.name} `)));
+        const meusShiny = new Set([...jogo.pks.values()].filter((k) => k.shiny).map((k) => k.speciesId));
+        for (const x of lista) {
+          const esp = map.get(x.pokeId);
+          const { ids, fim } = linha(esp);
+          const megas = megasDe(fim);
+          const t = tiposDe(fim);
+          const cob = coberturaHunts(t, alvo);
+          x.final = fim.pokeId !== esp.pokeId ? { nome: fim.name, tipos: t } : null;
+          x.mega = megas.length ? megas[0].name : null;
+          const atq = Math.max(Number(fim.baseAtk) || 0, Number(fim.baseSpAtk) || 0);
+          x.pve = { x55: cob.x55, x25: cob.x25, sc: Math.round(cob.sc * 100) / 100, huntsAlvo: alvo.length, bst: bst(fim), atq };
+          // A melhor forma da linha no duelo contra o top.
+          let win = null, formaPvp = null;
+          for (const f of [fim, ...megas, esp, ...ids.map((id) => map.get(id)).filter(Boolean)]) { const w = forca.get(f.pokeId); if (w != null && (win == null || w > win)) { win = w; formaPvp = f.name; } }
+          x.pvp = { win: win != null ? Math.round(win * 100) : null, forma: formaPvp };
+          if (metaW) {
+            let vant = 0, risco = 0;
+            for (const m of meta) { if (xPvp(t, m.t) >= 2) vant += m.w; if (xPvp(m.t, t) >= 2) risco += m.w; }
+            Object.assign(x.pvp, { uso: ids.concat(megas.map((m2) => m2.pokeId)).reduce((s2, id) => s2 + (usoPorId.get(id) || 0), 0), vant: Math.round((vant / metaW) * 100), risco: Math.round((risco / metaW) * 100) });
+          }
+          x.temShiny = ids.some((id) => meusShiny.has(id));
+          x.umEmH = x.porH > 0 ? Math.round(1 / x.porH) : null;
+          x.chance = 1 - Math.exp(-x.porH * horas);
+          // Notas de 0 a 100 de cada objetivo (a lista de cada aba sai delas).
+          if (fim.pokeId === esp.pokeId && Number(esp.tetoCaptura) === 100) x.estagio = 'não evolui';
+          const bstMax = Math.max(bst(fim), ...megas.map((m2) => bst(m2)));
+          const pvpBase = x.pvp.win != null ? x.pvp.win : Math.min(60, (bstMax - 300) / 5 + (x.pvp.vant || 0) / 5 - (x.pvp.risco || 0) / 8);
+          x.notaPvp = Math.round(Math.max(0, pvpBase + Math.min(15, (x.pvp.uso || 0) * 2)));
+          x.notaPve = Math.round(Math.min(100, (cob.x55 / Math.max(1, alvo.length)) * 60 + (cob.x25 / Math.max(1, alvo.length)) * 15 + Math.min(25, atq / 6)));
+        }
+        // Só espécies que este pokémon caça num ritmo razoável (pelo menos ¼ do melhor ritmo de shiny).
+        const maxH = Math.max(0, ...lista.map((x) => x.porH));
+        lista = lista.filter((x) => x.porH >= maxH * 0.25);
+        // Preço e raridade no Market: as mais fortes no PvP e no PvE e as mais fáceis (até 20 consultas, 1 a cada 1,2 s).
+        const comPreco = o.precos !== false;
+        let consultas = 0;
+        if (comPreco) {
+          const pega = (arr, n) => arr.slice(0, n);
+          const alvoP = [...new Set([
+            ...pega([...lista].sort((a2, b2) => b2.notaPvp - a2.notaPvp), 8),
+            ...pega([...lista].sort((a2, b2) => b2.notaPve - a2.notaPve), 8),
+            ...pega([...lista].sort((a2, b2) => b2.porH - a2.porH), 4),
+          ])].slice(0, 20);
+          for (const x of alvoP) {
+            if (document.querySelector('#community:not(.hidden)')) { x.precoErro = 'mercado-aberto'; break; }
+            const cached = shinyPrecoCache.has(`${x.nome}|${moeda}`);
+            const v = await vendasShiny(x.nome, moeda);
+            if (!cached) { consultas++; await espera(1200); }
+            if (!v) continue;
+            const tetoNv = Math.max(200, (x.teto || 100) * 2.5);
+            const baixas = v.filter((y) => y.level <= tetoNv).map((y) => y.preco);
+            const usar = baixas.length >= 2 ? baixas : v.map((y) => y.preco);
+            const med = mediana(usar);
+            x.preco = med != null ? { v: Math.round(med), n: v.length, n7: v.filter((y) => agora - y.em < 7 * 86400000).length, nvBaixo: baixas.length >= 2 } : { v: null, n: 0, n7: 0 };
+            x.valorH = x.preco.v ? x.porH * x.preco.v : 0;
+            // Raridade: poucos desse shiny vendidos em 30 dias = pouca gente tem (ex.: o Mawile).
+            x.raro = v.length === 0 ? 'nenhum' : v.length <= 3 ? 'poucos' : v.length <= 10 ? 'alguns' : 'muitos';
+          }
+        }
+        lista = lista.sort((a2, b2) => (b2.notaPvp + b2.notaPve) - (a2.notaPvp + a2.notaPve)).slice(0, 60);
+        return { pronto: true, pokemon: rk.pokemon, L, horas, moeda, bola, bolas: bolas.map((x) => ({ id: x.id, nome: x.nome, rate: x.rate, tem: temBola(x.id) })),
+          bonus: b, multS: Math.round(multS * 100) / 100, multC: Math.round(multC * 100) / 100, chanceS, pctK, pctT, consultas, lista, em: Date.now(),
+          ativos: { lure: jogo.eu.lureAte || 0, kick: fimB('kick', 'shiny'), twitch: fimB('twitch', 'shiny'), captura: jogo.eu.capturaAte || 0 } };
+      } finally { shinyBuscando = false; }
+    }
     // Comprar no Market para FARMAR: as espécies que mais rendem nas próximas hunts da conta, as ofertas mais
     // baratas delas agora (consulta escondida do jogo, como a do PvP) e o ataque REAL de cada pokémon à venda.
     let pveBuscando = false;
@@ -868,15 +1053,16 @@ contextBridge.executeInMainWorld({
         bonus: r.bonusXp && r.bonusXp.treinador ? r.bonusXp.treinador : 1, tipoDia, seuDoDia: !!(tipoDia && tipos.includes(tipoDia)),
         calibrado: 0, ritmo: 0, top: out.slice(0, 8), atual: atualSlug, atualEst,
         topOuro: [...out].sort((a, b) => b.goldLiq - a.goldLiq).slice(0, 8),
+        todas: opts && opts.todas ? out.map((h) => ({ slug: h.slug, nome: h.nome, nivel: h.nivel, kph: h.kph })) : undefined,
       };
     }
 
-    async function huntRank() {
+    async function huntRank(opts) {
       // Primeiro o /hunt (a referência); sem ele nesta conta, o cálculo próprio.
-      try { const r = await huntRankPeloHunt(arguments[0]); if (r) return r; } catch {}
-      return huntRankProprio();
+      try { const r = await huntRankPeloHunt(opts); if (r) return r; } catch {}
+      return huntRankProprio(opts);
     }
-    async function huntRankProprio() {
+    async function huntRankProprio(opts) {
       if (!jogo.hunts || !jogo.tabelaTipos) return { pronto: false };
       let ha, gi, cdm, tm;
       try {
@@ -1010,6 +1196,7 @@ contextBridge.executeInMainWorld({
         calibrado: out.filter((h) => h.medidoMin).length, ritmo: Math.round(ritmo), fator: Math.round(fator * 100) / 100, hpExtra: Math.round(hpExtra * 100) / 100,
         top: out.slice(0, 8), atual: atualSlug, atualEst,
         topOuro: [...out].sort((a, b) => ordem(b, 'goldLiq') - ordem(a, 'goldLiq')).slice(0, 8),
+        todas: opts && opts.todas ? out.map((h) => ({ slug: h.slug, nome: h.nome, nivel: h.nivel, kph: h.kph })) : undefined,
       };
     }
 
@@ -1242,7 +1429,7 @@ contextBridge.executeInMainWorld({
         canais() { return JSON.parse(JSON.stringify(canais)); },
         // Aba PvE do app (só leitura).
         pve(o, arg) {
-          const f = o === 'proximas' ? pveProximas : o === 'evolucoes' ? () => pveEvolucoes(arg) : o === 'meus' ? pveMeus : o === 'buscar' ? () => pveBuscar(arg) : o === 'casas' ? () => pveCasas(arg) : o === 'mercado' ? () => (arg && typeof arg === 'object' ? pveMercado(arg.moeda, arg.dias, arg.valor) : pveMercado(arg)) : null;
+          const f = o === 'proximas' ? pveProximas : o === 'evolucoes' ? () => pveEvolucoes(arg) : o === 'meus' ? pveMeus : o === 'buscar' ? () => pveBuscar(arg) : o === 'casas' ? () => pveCasas(arg) : o === 'shiny' ? () => pveShiny(arg) : o === 'mercado' ? () => (arg && typeof arg === 'object' ? pveMercado(arg.moeda, arg.dias, arg.valor) : pveMercado(arg)) : null;
           return f ? f().catch((e) => ({ erro: String(e && e.message || e) })) : null;
         },
         // Comércio: nota, stats e espécie da ficha de um anúncio (mesma conta da ficha do jogo).
@@ -1260,7 +1447,8 @@ contextBridge.executeInMainWorld({
           extras.instalados.add(nome);
           const I = {
             get sock() { return sock; }, get ultimaLista() { return ultimaLista; },
-            jogo, keep, nossos, espera, catalogoNota, huntsDoHorizonte, nivelDepoisDe, xpHoraDaConta, coberturaHunts, tiposDe,
+            jogo, keep, nossos, espera, catalogoNota, huntsDoHorizonte, nivelDepoisDe, xpHoraDaConta, coberturaHunts, tiposDe, fichaNota,
+            get meuTimePvp() { return pvp.meuTime ? JSON.parse(JSON.stringify(pvp.meuTime)) : null; },
             filtro: (f) => extras.filtros.push(f), ouvir: (f) => extras.ouvintes.push(f), expor: (o) => Object.assign(extras.api, o),
           };
           try { fn(I); return true; } catch (e) { extras.instalados.delete(nome); return String(e && e.message || e); }
