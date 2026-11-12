@@ -31,7 +31,7 @@ contextBridge.executeInMainWorld({
 
     // ---- estado leve do jogador: o que a sugestão de hunt e o PvP precisam ----
     const jogo = { hunts: null, tabelaTipos: null, amp: 1.5, multHp: 5, eu: {}, pks: new Map(), keys: [] };
-    const CAMPOS_EU = ['diaSazonal', 'guild', 'xp', 'xpNivel', 'xpProximo', 'gold', 'nick', 'level', 'activeId', 'bicicleta', 'pvp', 'pvpRank', 'pvpPosicao', 'pvpHistorico', 'pvpTime', 'huntSlug', 'hunt', 'huntAtual', 'area'];
+    const CAMPOS_EU = ['diaSazonal', 'guild', 'xp', 'xpNivel', 'xpProximo', 'gold', 'orbs', 'nick', 'level', 'activeId', 'bicicleta', 'pvp', 'pvpRank', 'pvpPosicao', 'pvpHistorico', 'pvpTime', 'huntSlug', 'hunt', 'huntAtual', 'area'];
     const DUELO = (k) => ({ ivs: k.ivs || null, quality: k.quality ?? k.qualidade ?? null, potencia: k.potencia ?? null, refino: k.refino || null, tmElemental: k.tmElemental || null, tmFisico: !!k.tmFisico });
     const slimPk = (k) => ({
       ...DUELO(k),
@@ -153,7 +153,18 @@ contextBridge.executeInMainWorld({
               return;
             }
             if (d.indexOf('"t":"pvp"') >= 0) {
-              try { const m = JSON.parse(d); if (m.t === 'pvp') pvp.eu = { em: Date.now(), dados: JSON.parse(JSON.stringify(m)) }; } catch {}
+              try {
+                const m = JSON.parse(d);
+                if (m.t === 'pvp') {
+                  pvp.eu = { em: Date.now(), dados: JSON.parse(JSON.stringify(m)) };
+                  // O time ATIVO do PvP (ids) e a casa de cada um no tabuleiro: o jogo manda em pedaços (time/casas ou
+                  // timeSalvo/casasSalvas ao salvar). Guarda o último de cada para o Planejador abrir com ele.
+                  const t = m.timeSalvo !== undefined ? m.timeSalvo : m.time;
+                  const c = m.timeSalvo !== undefined ? m.casasSalvas : m.casas;
+                  if (Array.isArray(t)) pvp.meuTime = { ...(pvp.meuTime || {}), ids: t.map(Number).filter(Number.isFinite).slice(0, 5), em: Date.now() };
+                  if (c && typeof c === 'object') pvp.meuTime = { ...(pvp.meuTime || {}), casas: { ...c }, em: Date.now() };
+                }
+              } catch {}
               return;
             }
             // Campo: só o pacote em que selvagens aparecem (`mhp`), para a vida real e o tamanho dos bandos.
@@ -1055,7 +1066,12 @@ contextBridge.executeInMainWorld({
       // Cada pokémon da conta (pelo id): dois Charizards são dois — o PvP pode levar os dois.
       for (const k of jogo.pks.values()) { anota(k.speciesId); meus[k.id] = { ...k }; }
       const eu = pvp.eu ? pvp.eu.dados : null;
-      return { euPvp: jogo.eu.pvp ? JSON.parse(JSON.stringify(jogo.eu.pvp)) : null, nivel: Number(jogo.eu.level) || 0, at: pvp.at, coletando: pvp.coletando, feitos: pvp.feitos, total: pvp.total, erro: pvp.erro, linhas, perfis: pvp.perfis, info, meus, tabelaTipos: jogo.tabelaTipos, eu, nick: jogo.eu.nick || null, euKeys: jogo.keys.slice(0, 80) };
+      // Sem o time ativo ainda (a aba PvP do jogo não foi aberta): pede a mesma leitura que a aba faz (no máx. 1×/5 min).
+      if ((!pvp.meuTime || !pvp.meuTime.ids) && sock && sock.readyState === 1 && Date.now() - (pvp.pediuInfo || 0) > 5 * 60 * 1000) {
+        pvp.pediuInfo = Date.now();
+        try { sock.send(JSON.stringify({ t: 'pvp.info', semLadder: 1 })); } catch {}
+      }
+      return { meuTime: pvp.meuTime || null, euPvp: jogo.eu.pvp ? JSON.parse(JSON.stringify(jogo.eu.pvp)) : null, nivel: Number(jogo.eu.level) || 0, at: pvp.at, coletando: pvp.coletando, feitos: pvp.feitos, total: pvp.total, erro: pvp.erro, linhas, perfis: pvp.perfis, info, meus, tabelaTipos: jogo.tabelaTipos, eu, nick: jogo.eu.nick || null, euKeys: jogo.keys.slice(0, 80) };
     }
 
     // ---- duelo 1×1 com as contas do jogo ----

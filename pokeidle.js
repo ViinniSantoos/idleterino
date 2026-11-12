@@ -96,7 +96,15 @@ module.exports = function createPokeIdle(ctx) {
   const configPath = () => path.join(app.getPath('userData'), 'pokeidle.json');
   const DEFAULT = { accounts: [], selected: null, autoBackgroundUltra: false, autoFreezeMin: 0, optimizeEvery: 0 };
   let config = { ...DEFAULT };
-  const loadConfig = () => { try { config = { ...DEFAULT, ...JSON.parse(fs.readFileSync(configPath(), 'utf8')) }; } catch {} };
+  // Lê o arquivo DENTRO do mesmo objeto: quem recebeu `config` antes do start() (o Trader) continua apontando para ele.
+  // (Antes trocava o objeto, e o Trader ficava gravando num objeto que nunca ia para o disco: tudo voltava ao abrir.)
+  const loadConfig = () => {
+    try {
+      const novo = { ...DEFAULT, ...JSON.parse(fs.readFileSync(configPath(), 'utf8')) };
+      for (const k of Object.keys(config)) delete config[k];
+      Object.assign(config, novo);
+    } catch {}
+  };
   const saveConfig = () => fs.writeFileSync(configPath(), JSON.stringify(config, null, 2));
 
   let mainWin = null;
@@ -470,7 +478,7 @@ module.exports = function createPokeIdle(ctx) {
       const mv = views.get(mainAccId());
       if (pvpRunning && mv && !mv.webContents.isDestroyed()) prog = await mv.webContents.executeJavaScript('window.__idleterinoMercado.pvpEstado()').catch(() => null);
     }
-    return { meta: pvpMeta, hist: readJson(histPath(), []), me: (readJson(mePath(), {})[id] || []), watch: config.pvpWatch || [], watchHist: config.pvpWatchHist || {}, running: pvpRunning, prog, accountId: id, live: live && !live.erro ? { meus: live.meus, info: live.info, euPvp: live.euPvp, nick: live.nick, nivel: live.nivel, tabelaTipos: live.tabelaTipos } : null };
+    return { meta: pvpMeta, hist: readJson(histPath(), []), me: (readJson(mePath(), {})[id] || []), watch: config.pvpWatch || [], watchHist: config.pvpWatchHist || {}, running: pvpRunning, prog, accountId: id, live: live && !live.erro ? { meus: live.meus, info: live.info, euPvp: live.euPvp, nick: live.nick, nivel: live.nivel, tabelaTipos: live.tabelaTipos, meuTime: live.meuTime || null } : null };
   }
 
   // Mercado no Início: as mesmas consultas dos botões do mercado do jogo, pela conexão da própria

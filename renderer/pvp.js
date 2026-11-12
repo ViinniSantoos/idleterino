@@ -19,6 +19,7 @@ let pvpData = null;
 let pvpAcc = (() => { try { return localStorage.getItem('pvpAcc') || null; } catch { return null; } })();
 let pvpTab = (() => { try { return localStorage.getItem('pvpTab') || 'meta'; } catch { return 'meta'; } })();
 let pvpPlan = null;
+let pvpPlanSugestao = false; // o plano veio da sugestão (o time do jogo ainda não tinha chegado)
 let pvpBusca = '';
 let pvpRetry = 0;
 let pvpArqSel = null;
@@ -77,7 +78,8 @@ function pvpScore(c, entries, tab, refLevel) {
   off /= wsum || 1; def /= wsum || 1;
   const lvl = Math.min(1.5, (c.level || 1) / Math.max(1, refLevel));
   const st = statSum(c.stats) / 600;
-  const score = off * 1.0 - def * 0.8 + lvl * 1.4 + st * 0.5 + (c.aoe ? 0.25 : 0);
+  // AoE não entra: no PvP do jogo (tabuleiro) ele não tem efeito.
+  const score = off * 1.0 - def * 0.8 + lvl * 1.4 + st * 0.5;
   return { score, off, def, lvl, forte: [...forte.entries()].sort((a, b) => b[1] - a[1]), fraco: [...fraco.entries()].sort((a, b) => b[1] - a[1]) };
 }
 
@@ -115,38 +117,70 @@ function pvpSuggest(mine, entries, tab, refLevel) {
   return team;
 }
 
-// ---------- tabuleiro ----------
-const PVP_ROWS = [6, 8, 8, 4, 4];
-const ordemFila = (n) => { const mid = (n - 1) / 2; return [...Array(n).keys()].sort((a, b) => Math.abs(a - mid) - Math.abs(b - mid) || a - b); };
-const linhasDoAlcance = (a) => (a <= 1 ? [0, 1, 2, 3, 4] : a === 2 ? [1, 2, 0, 3, 4] : a === 3 ? [2, 3, 1, 4, 0] : [3, 2, 4, 1, 0]);
-// O previsto: corpo a corpo na frente, quem atira de mais longe mais atrás, do meio para as pontas.
-function pvpPlace(team) {
-  const usadas = new Set();
-  return team.map((m) => {
-    for (const r of linhasDoAlcance(m.alcance)) for (const col of ordemFila(PVP_ROWS[r])) { const k = `${r}:${col}`; if (!usadas.has(k)) { usadas.add(k); return { r, col }; } }
-    return null;
-  });
+// ---------- tabuleiro (o REAL do jogo: shared/pvp-tabuleiro.mjs) ----------
+// 5 fileiras e 30 casas numeradas como no jogo; a fileira 0 é a da frente (perto do meio). O lado do adversário é o
+// mesmo tabuleiro girado (cx → 29 − cx, cy → 25 − cy). Distância = a do jogo (a maior entre as diferenças de x e y).
+const TB_FILEIRAS = [{ cy: 13, de: 12, ate: 17 }, { cy: 14, de: 11, ate: 18 }, { cy: 15, de: 11, ate: 18 }, { cy: 16, de: 13, ate: 16 }, { cy: 17, de: 13, ate: 16 }];
+const TB_CASAS = (() => { const l = []; TB_FILEIRAS.forEach((f, r) => { for (let cx = f.de; cx <= f.ate; cx++) l.push({ casa: l.length, r, col: cx - f.de, cx, cy: f.cy }); }); return l; })();
+const PVP_ROWS = TB_FILEIRAS.map((f) => f.ate - f.de + 1);
+// A ordem em que o jogo põe cada alcance quando a pessoa não escolhe a casa (casasDaEquipe do jogo).
+const TB_F0 = [2, 3, 1, 4, 0, 5], TB_F1 = [9, 10, 8, 11, 7, 12, 6, 13], TB_F2M = [17, 18, 16, 19], TB_F2L = [15, 20], TB_F2P = [14, 21], TB_F3 = [23, 24, 22, 25], TB_F4 = [27, 28, 26, 29];
+const TB_F2 = [...TB_F2M, ...TB_F2L, ...TB_F2P];
+const TB_PRIO = { 1: [...TB_F0, ...TB_F1, ...TB_F2, ...TB_F3, ...TB_F4], 2: [...TB_F1, ...TB_F2, ...TB_F0, ...TB_F3, ...TB_F4], 3: [...TB_F2M, ...TB_F3, ...TB_F2L, ...TB_F4, ...TB_F2P, ...TB_F1, ...TB_F0], 4: [...TB_F3, ...TB_F2, ...TB_F4, ...TB_F1, ...TB_F0] };
+const casaOk = (v) => (v == null || v === '' ? null : Number.isInteger(Number(v)) && Number(v) >= 0 && Number(v) < TB_CASAS.length ? Number(v) : null);
+function casasDaEquipe(pedidas, alcances) {
+  const n = alcances.length; const out = new Array(n).fill(null); const usadas = new Set();
+  for (let i = 0; i < n; i++) { const c = casaOk(pedidas[i]); if (c == null || usadas.has(c)) continue; out[i] = c; usadas.add(c); }
+  for (let i = 0; i < n; i++) { if (out[i] != null) continue; const a = Math.min(4, Math.max(1, Math.round(alcances[i] || 1))); const c = TB_PRIO[a].find((x) => !usadas.has(x)); out[i] = c; usadas.add(c); }
+  return out;
 }
-// O seu, contra um adversário: cada um na fileira do seu alcance, na coluna de frente para o alvo que
-// ele vence no 1×1 (o tabuleiro dele está girado: a esquerda dele é a sua direita). Contra time com
-// muito AoE, ninguém fica colado em ninguém.
-function pvpPlaceVs(team, alvos, enemyPlaces, spread) {
-  const usadas = new Set();
-  const vizinho = (r, col) => [...usadas].some((k) => { const [rr, cc] = k.split(':').map(Number); return rr === r && Math.abs(cc - col) <= 1; });
-  return team.map((m, i) => {
-    const t = alvos[i] != null ? enemyPlaces[alvos[i]] : null;
-    const alvoX = t ? 1 - (t.col + 0.5) / PVP_ROWS[t.r] : 0.5;
-    for (const pass of spread ? [true, false] : [false]) {
-      for (const r of linhasDoAlcance(m.alcance)) {
-        const cols = [...Array(PVP_ROWS[r]).keys()].sort((a, b) => Math.abs((a + 0.5) / PVP_ROWS[r] - alvoX) - Math.abs((b + 0.5) / PVP_ROWS[r] - alvoX));
-        for (const col of cols) { const k = `${r}:${col}`; if (usadas.has(k) || (pass && vizinho(r, col))) continue; usadas.add(k); return { r, col }; }
+const distCasas = (minha, dele) => { const a = TB_CASAS[minha], b = TB_CASAS[dele]; if (!a || !b) return 99; return Math.max(Math.abs(a.cx - (29 - b.cx)), Math.abs(a.cy - (25 - b.cy))); };
+const nomeCasa = (c) => { const k = TB_CASAS[c]; return k ? `${k.r + 1}ª fileira, ${k.col + 1}ª casa da esquerda` : '—'; };
+
+// QUEM ENFRENTA QUEM (estimativa: a luta de verdade é calculada pelo servidor do jogo). Todos nascem juntos e cada
+// um vai no adversário mais perto. Para cada um dos seus: a chance de vencer o 1×1 contra quem ele vai enfrentar
+// (duelo do jogo). Quem bate sem apanhar de volta (o alvo dele está ocupado com outro) ganha vantagem — mais ainda
+// quem atira de longe. O mesmo do lado deles. Resultado de 0 a 1 = chance estimada de vencer a batalha.
+function avaliarPos(mc, team, ec, enemy, P) {
+  const nI = team.length, nJ = enemy.length;
+  if (!nI || !nJ) return 0;
+  const d = (i, j) => distCasas(mc[i], ec[j]);
+  const alvoMeu = team.map((_, i) => { let b = 0; for (let j = 1; j < nJ; j++) if (d(i, j) < d(i, b)) b = j; return b; });
+  const alvoDele = enemy.map((_, j) => { let b = 0; for (let i = 1; i < nI; i++) if (d(i, j) < d(b, j)) b = i; return b; });
+  const livre = (alc) => (alc > 1 ? 0.35 : 0.15);
+  let s = 0;
+  team.forEach((m, i) => { const j = alvoMeu[i]; let p = P[i][j]; if (alvoDele[j] !== i) p += (1 - p) * livre(m.alcance); s += p; });
+  enemy.forEach((e, j) => { const i = alvoDele[j]; let q = 1 - P[i][j]; if (alvoMeu[i] !== j) q += (1 - q) * livre(e.alcance); s += 1 - q; });
+  return s / (nI + nJ);
+}
+// MELHOR POSIÇÃO: procura as casas que dão a maior chance média contra os times escolhidos (pesados por quantos do
+// top usam cada um). Começa da posição do jogo, da padrão e de 14 pontos sorteados (sempre os mesmos) e vai trocando
+// um pokémon de casa (ou dois de lugar) enquanto melhora.
+function otimizarPos(team, alvos, inicial) {
+  const n = team.length;
+  const pesoT = alvos.reduce((s, x) => s + x.w, 0) || 1;
+  const val = (mc) => alvos.reduce((s, x) => s + x.w * avaliarPos(mc, team, x.ec, x.enemy, x.P), 0) / pesoT;
+  let seed = 12345; const rnd = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
+  const sorteio = () => { const l = [...TB_CASAS.keys()]; for (let i = l.length - 1; i > 0; i--) { const k = Math.floor(rnd() * (i + 1)); [l[i], l[k]] = [l[k], l[i]]; } return l.slice(0, n); };
+  const inicios = [inicial, casasDaEquipe([], team.map((m) => m.alcance))];
+  for (let r = 0; r < 14; r++) inicios.push(sorteio());
+  let best = inicial.slice(), bestV = val(best);
+  for (const ini of inicios) {
+    let cur = ini.slice(), v = val(cur), melhorou = true, voltas = 0;
+    while (melhorou && voltas++ < 30) {
+      melhorou = false;
+      for (let i = 0; i < n; i++) for (let c = 0; c < TB_CASAS.length; c++) {
+        if (cur[i] === c) continue;
+        const t = cur.slice(); const k = t.indexOf(c); if (k >= 0) t[k] = t[i]; t[i] = c;
+        const vv = val(t); if (vv > v + 1e-9) { cur = t; v = vv; melhorou = true; }
       }
     }
-    return null;
-  });
+    if (v > bestV + 1e-9) { best = cur; bestV = v; }
+  }
+  return { casas: best, v: bestV };
 }
+// Desenho: o adversário em cima (girado: a frente dele perto do meio), você embaixo. `casas[i]` = casa do pokémon i.
 function boardEl(sides) {
-  // sides: [{ team, places, cls, flip }]: o de cima vem girado (a frente dele perto do meio).
   const wrap = el('div', 'pp-board two');
   for (const sd of sides) {
     const half = el('div', `pp-half ${sd.cls}`);
@@ -156,9 +190,10 @@ function boardEl(sides) {
       const cols = [...Array(PVP_ROWS[r]).keys()];
       if (sd.flip) cols.reverse();
       for (const col of cols) {
-        const i = sd.places.findIndex((p) => p && p.r === r && p.col === col);
+        const casa = TB_CASAS.find((k) => k.r === r && k.col === col).casa;
+        const i = sd.casas.findIndex((c) => c === casa);
         const cell = el('div', `pp-cell${i >= 0 ? ' on' : ''}`);
-        if (i >= 0) { const m = sd.team[i]; cell.append(el('b', null, shortName(m.nome)), el('span', null, `${alcIcon(m.alcance)}${m.aoe ? ' AoE' : ''}`)); cell.title = `${m.nome} · Nv ${fmt(m.level)}`; }
+        if (i >= 0) { const m = sd.team[i]; cell.append(el('b', null, shortName(m.nome)), el('span', null, alcIcon(m.alcance))); cell.title = `${m.nome} · Nv ${fmt(m.level)} · ${nomeCasa(casa)}`; }
         row.append(cell);
       }
       half.append(row);
@@ -176,7 +211,6 @@ function pvpMemberCard(c, s, extra) {
   const tags = el('div', 'pm-tags');
   for (const t of c.tipos || []) tags.append(tipoChip(t));
   if (c.el) tags.append(zChip(c.el));
-  if (c.aoe) tags.append(el('span', 'aoechip', 'AoE'));
   card.append(top, tags);
   if (s) {
     const why = el('div', 'pm-why');
@@ -197,7 +231,7 @@ function priceRow(meta, nome) {
   if (!r) { box.append(el('span', 'sub', rows.length ? 'sem oferta dessa forma agora' : 'sem oferta lida no Market')); return { box, r: null }; }
   if (r.minOrb) { const b = el('b', 'orb'); b.append(el('i', 'cur orb'), fmt(r.minOrb)); box.append(b); }
   if (r.minGold) { const b = el('b'); b.append(el('i', 'cur gold'), fmt(r.minGold)); box.append(b); }
-  box.append(el('span', 'sub', `${r.anuncios} oferta${r.anuncios === 1 ? '' : 's'}${r.temTmAoe ? ' · tem com AoE' : ''}${r.temTmElemental ? ' · tem com Z-Move' : ''}`));
+  box.append(el('span', 'sub', `${r.anuncios} oferta${r.anuncios === 1 ? '' : 's'}${r.temTmElemental ? ' · tem com Z-Move' : ''}`));
   return { box, r };
 }
 function watchBtn(nome) {
@@ -260,7 +294,7 @@ async function renderPvp(keepScroll) {
 
   const tabs = el('div', 'pvp-tabs');
   for (const [k, l] of [['meta', 'Meta'], ['time', 'Meu time'], ['plan', 'Planejador'], ['hist', 'Histórico']]) {
-    tabs.append(button(l, pvpTab === k ? 'on' : '', () => { pvpTab = k; try { localStorage.setItem('pvpTab', k); } catch {} renderPvp(); }));
+    tabs.append(button(l, pvpTab === k ? 'on' : '', () => { if (k === 'plan') pvpPlan = null; pvpTab = k; try { localStorage.setItem('pvpTab', k); } catch {} renderPvp(); }));
   }
   root.append(tabs);
 
@@ -333,7 +367,7 @@ function renderPvpMeta(root, c) {
   cardUsed.append(el('div', 'ext-sec', 'Pokémon mais usados'));
   for (const u of usados.slice(0, 14)) {
     const row = el('div', 'pu-row');
-    const n = el('div', 'pu-n'); n.append(el('b', null, u.e.nome), el('span', 'sub', `${alcIcon(u.e.alcance)} · Nv médio ${fmt(Math.round(u.lv / u.n))} · AoE em ${pct(u.aoe / u.n)}`));
+    const n = el('div', 'pu-n'); n.append(el('b', null, u.e.nome), el('span', 'sub', `${alcIcon(u.e.alcance)} · Nv médio ${fmt(Math.round(u.lv / u.n))}`));
     const tg = el('div', 'pm-tags'); for (const tt of u.e.tipos) tg.append(tipoChip(tt));
     const zs = Object.entries(u.z).sort((a, b) => b[1] - a[1])[0]; if (zs) tg.append(zChip(zs[0]));
     const was = old && old.uso ? old.uso[u.e.speciesId] || 0 : null;
@@ -364,7 +398,7 @@ function renderPvpMeta(root, c) {
     const tg = el('span', 'tierchip', a ? (a.tier === 'U' ? '—' : a.tier) : ''); if (a) tg.style.background = TIER_COR[a.tier];
     r.append(el('span', 'pos', `#${l.pos}`), el('b', 'nk', l.nick), el('span', 'pr', `${fmt(l.pr)} PR`), el('span', 'wl', `${fmt(l.v)}V / ${fmt(l.d)}D · ${pct(l.v / Math.max(1, l.v + l.d))}`));
     const tags = el('div', 'pm-tags'); if (a) tags.append(tg);
-    for (const k of (p ? p.time : [])) { const s2 = el('span', 'pn-p', `${shortName(k.nome)} ${fmt(k.level)}`); s2.title = `${k.nome} · Nv ${fmt(k.level)}${k.aoe ? ' · AoE' : ''}${(k.el || k.tmElemental) ? ` · Z-Move ${k.el || k.tmElemental}` : ''}`; tags.append(s2); }
+    for (const k of (p ? p.time : [])) { const s2 = el('span', 'pn-p', `${shortName(k.nome)} ${fmt(k.level)}`); s2.title = `${k.nome} · Nv ${fmt(k.level)}${(k.el || k.tmElemental) ? ` · Z-Move ${k.el || k.tmElemental}` : ''}`; tags.append(s2); }
     r.append(tags);
     tl.append(r);
   }
@@ -454,7 +488,7 @@ function renderPvpTime(root, c) {
   // bons no PvP, avaliando cada pokémon à venda no duelo do jogo contra o top.
   const bk = el('div', 'card');
   bk.append(el('div', 'ext-sec', 'Comprar no Market com o seu orçamento'));
-  bk.append(el('div', 'sub up-lead', `No PvP não há trava de nível (acima do teto da arena o nível só é comprimido). Diga quanto quer gastar. O app procura agora as ofertas mais baratas dos pokémon mais fortes contra o meta e avalia cada pokémon à venda (nível, IV, shiny, AoE, Z-Move) no duelo do jogo contra o top. Os preços mudam o tempo todo: a busca é sempre na hora.`));
+  bk.append(el('div', 'sub up-lead', `No PvP não há trava de nível (acima do teto da arena o nível só é comprimido). Diga quanto quer gastar. O app procura agora as ofertas mais baratas dos pokémon mais fortes contra o meta e avalia cada pokémon à venda (nível, IV, shiny, Z-Move; AoE não conta no PvP) no duelo do jogo contra o top. Os preços mudam o tempo todo: a busca é sempre na hora.`));
   const form = el('div', 'budget');
   const inp = el('input'); inp.type = 'number'; inp.min = '0'; inp.step = '100'; inp.placeholder = 'Quanto quer gastar?'; inp.value = pvpBudget;
   inp.oninput = () => { pvpBudget = inp.value; };
@@ -489,7 +523,7 @@ function renderPvpTime(root, c) {
     const linha = (o) => {
       const r = el('div', 'cand');
       const l = el('div', 'pu-n'); l.append(el('b', null, `${o.nome} · Nv ${fmt(o.level)}${o.shiny ? ' ✨' : ''}`), el('span', 'sub', `vence ${pct(o.win)} dos duelos contra o top · vendedor ${o.vendedor || '—'}`));
-      const tg = el('div', 'pm-tags'); for (const tt of o.tipos || []) tg.append(tipoChip(tt)); if (o.el) tg.append(zChip(o.el)); if (o.aoe) tg.append(el('span', 'aoechip', 'AoE')); if (o.potencia) tg.append(el('span', 'pn-p', `P${o.potencia}`));
+      const tg = el('div', 'pm-tags'); for (const tt of o.tipos || []) tg.append(tipoChip(tt)); if (o.el) tg.append(zChip(o.el)); if (o.potencia) tg.append(el('span', 'pn-p', `P${o.potencia}`));
       const pr = el('div', 'price'); pr.append(fmtP(o), el('span', 'sub', o.qtd > 1 ? `${o.qtd} un.` : 'no Market agora'));
       r.append(l, tg, pr, watchBtn(o.nome));
       return r;
@@ -535,52 +569,79 @@ function candRow(meta, x, top) {
 }
 
 // ================= PLANEJADOR =================
+// Abre com o time ATIVO do PvP do jogo (os 5 e as casas de "Sua equipe de PvP"). Clicar num do seu time tira ele;
+// clicar num da lista põe. Para cada time do top (arquétipos), o duelo 1×1 do jogo de cada um contra cada um e o
+// tabuleiro real dão a chance estimada de vencer; a posição sugerida é a que dá a maior chance média contra o top.
+let pvpPosModo = (() => { try { return localStorage.getItem('pvpPosModo') || 'top'; } catch { return 'top'; } })();
+const pvpOtimoCache = new Map();
 function renderPvpPlan(root, c) {
-  const { meta, entries, tab, refLevel, mine, mineAll, arqs } = c;
-  if (!pvpPlan) { try { pvpPlan = JSON.parse(localStorage.getItem(`pvpPlan:${pvpAcc}`) || 'null'); } catch {} }
-  if (!pvpPlan) pvpPlan = pvpSuggest(mine, entries, tab, refLevel).map((x) => x.c.id);
-  pvpPlan = pvpPlan.filter((id) => mine.some((m) => m.id === id)).slice(0, 5); // plano antigo (por espécie) cai fora e vira sugestão nova
-  const savePlan = () => { try { localStorage.setItem(`pvpPlan:${pvpAcc}`, JSON.stringify(pvpPlan)); } catch {} };
-  const team = pvpPlan.map((id) => mine.find((m) => m.id === id)).filter(Boolean).sort((a, b) => a.alcance - b.alcance);
-  const top = arqs.filter((a) => a.tier !== 'U');
+  const { meta, entries, tab, refLevel, mine, mineAll, arqs, live } = c;
+  const mt = live && live.meuTime;
+  const doJogo = mt && Array.isArray(mt.ids) ? mt.ids.filter((id) => mine.some((m) => m.id === id)).slice(0, 5) : [];
+  // Começou pela sugestão porque o time do jogo ainda não tinha chegado? Quando ele chegar (e você não mexeu), troca.
+  if (pvpPlan && pvpPlanSugestao && doJogo.length) pvpPlan = null;
+  if (!pvpPlan) { pvpPlanSugestao = !doJogo.length; pvpPlan = doJogo.length ? doJogo.slice() : pvpSuggest(mine, entries, tab, refLevel).map((x) => x.c.id); }
+  pvpPlan = pvpPlan.filter((id) => mine.some((m) => m.id === id)).slice(0, 5);
+  const team = pvpPlan.map((id) => mine.find((m) => m.id === id)).filter(Boolean);
+  const ehDoJogo = doJogo.length > 0 && doJogo.length === team.length && team.every((m) => doJogo.includes(m.id));
+  // A posição de cada um no jogo (os que não estão no time do jogo vão para a casa padrão do alcance, como o jogo faz).
+  const casasJogo = casasDaEquipe(team.map((m) => (mt && mt.casas ? mt.casas[String(m.id)] : null)), team.map((m) => m.alcance));
+
+  const top = (arqs.filter((a) => a.tier !== 'U').length ? arqs.filter((a) => a.tier !== 'U') : arqs).slice(0, 12);
   if (pvpArqSel == null || !arqs.some((a) => a.id === pvpArqSel)) pvpArqSel = top[0] ? top[0].id : (arqs[0] ? arqs[0].id : null);
   const arq = arqs.find((a) => a.id === pvpArqSel);
-  const enemy = arq ? arqTeam(arq, meta).sort((a, b) => a.alcance - b.alcance) : [];
+  const timeDe = (a) => { const enemy = arqTeam(a, meta).slice(0, 5); return { enemy, ec: casasDaEquipe(enemy.map((k) => k.casa), enemy.map((k) => k.alcance)) }; };
+  const sel = arq ? timeDe(arq) : { enemy: [], ec: [] };
 
   const pc = el('div', 'card pvp-plan');
   const ph = el('div', 'pvp-sh');
-  ph.append(el('div', 'ext-sec', `Planejador (${team.length}/5)`));
+  ph.append(el('div', 'ext-sec', `Planejador (${team.length}/5)${ehDoJogo ? ' · o seu time do jogo' : ''}`));
   const vsSel = el('select');
   for (const a of arqs) { const o = el('option', null, `${a.tier === 'U' ? '—' : a.tier} · ${arqName(a, meta)} (${a.n})`); o.value = String(a.id); vsSel.append(o); }
   vsSel.value = String(pvpArqSel);
   vsSel.onchange = () => { pvpArqSel = Number(vsSel.value); renderPvp(true); };
   const right = el('div', 'actions'); right.style.margin = '0';
-  right.append(el('span', 'sub', 'Contra:'), vsSel, button('Limpar', 'mini', () => { pvpPlan = []; savePlan(); renderPvp(true); }));
+  right.append(el('span', 'sub', 'Contra:'), vsSel);
   ph.append(right);
   pc.append(ph);
+  if (!doJogo.length) pc.append(el('div', 'tip', 'O seu time do PvP ainda não chegou do jogo: abra a aba PvP no jogo uma vez (ou espere uns segundos). Enquanto isso, o planejador começa com uma sugestão.'));
+
   const body = el('div', 'pp-body');
   const left = el('div', 'pp-left');
-  const q = el('input'); q.type = 'text'; q.placeholder = 'Buscar seu pokémon…'; q.value = pvpBusca;
+  // --- o seu time: clique para tirar
+  const meu = el('div', 'pp-time');
+  meu.append(el('div', 'ext-sec', `Seu time (${team.length}/5) · clique para tirar`));
+  for (const m of team) {
+    const b = el('button', 'pp-item on');
+    b.append(el('b', null, `✕ ${m.nome}`), el('span', null, `Nv ${fmt(m.level)} · ${alcIcon(m.alcance)}${m.el ? ` · Z ${TIPO_PT[String(m.el).toUpperCase()] || m.el}` : ''}${doJogo.includes(m.id) ? ' · no time do jogo' : ' · trocado aqui'}`));
+    b.title = 'Tirar do planejador (no jogo nada muda)';
+    b.onclick = () => { pvpPlanSugestao = false; pvpPlan = pvpPlan.filter((x) => x !== m.id); renderPvp(true); };
+    meu.append(b);
+  }
+  if (!team.length) meu.append(el('span', 'sub', 'Escolha até 5 na lista abaixo.'));
+  if (doJogo.length && !ehDoJogo) meu.append(button('↺ Voltar ao time do jogo', 'mini', () => { pvpPlan = doJogo.slice(); renderPvp(true); }));
+  left.append(meu);
+  // --- a lista: clique para pôr
+  const q = el('input'); q.type = 'text'; q.placeholder = 'Buscar seu pokémon para pôr…'; q.value = pvpBusca;
   q.oninput = () => { pvpBusca = q.value; const pos = q.selectionStart; renderPvp(true).then(() => { const n = $('#page-pvp .pp-left input'); if (n) { n.focus(); n.setSelectionRange(pos, pos); } }); };
   left.append(q);
   const list = el('div', 'pp-list');
-  for (const m of mineAll.filter((x) => !pvpBusca || x.nome.toLowerCase().includes(pvpBusca.toLowerCase())).slice(0, 80)) {
-    const on = pvpPlan.includes(m.id);
-    const b = el('button', `pp-item${on ? ' on' : ''}${m.usavel ? '' : ' off'}`);
-    b.append(el('b', null, m.nome), el('span', null, `Nv ${fmt(m.level)} · ${alcIcon(m.alcance)}${m.aoe ? ' · AoE' : ''}${m.el ? ` · Z ${TIPO_PT[String(m.el).toUpperCase()] || m.el}` : ''}`));
-    b.onclick = () => { if (on) pvpPlan = pvpPlan.filter((x) => x !== m.id); else if (pvpPlan.length < 5) pvpPlan.push(m.id); else return toast('O time tem no máximo 5. Tire um antes.'); savePlan(); renderPvp(true); };
+  for (const m of mineAll.filter((x) => !pvpPlan.includes(x.id) && (!pvpBusca || x.nome.toLowerCase().includes(pvpBusca.toLowerCase()))).slice(0, 80)) {
+    const b = el('button', `pp-item${m.usavel ? '' : ' off'}`);
+    b.append(el('b', null, m.nome), el('span', null, `Nv ${fmt(m.level)} · ${alcIcon(m.alcance)}${m.el ? ` · Z ${TIPO_PT[String(m.el).toUpperCase()] || m.el}` : ''}`));
+    b.onclick = () => { if (pvpPlan.length >= 5) return toast('O time tem no máximo 5: clique num do "Seu time" para tirar antes.'); pvpPlanSugestao = false; pvpPlan.push(m.id); renderPvp(true); };
     list.append(b);
   }
   left.append(list);
-  // Time com menos de 5: sugestões do meta que você NÃO tem, para completar (com a tag), pelo mesmo placar do time.
-  if (team.length < 5 && enemy.length) {
+  // Time com menos de 5: sugestões do meta que você NÃO tem, para completar (com a tag).
+  if (team.length < 5 && sel.enemy.length) {
     const tenho = new Set(mineAll.map((m) => m.speciesId));
     const vistosS = new Set();
     const cands = [];
     for (const e of entries) {
       if (tenho.has(e.speciesId) || vistosS.has(e.speciesId)) continue;
       vistosS.add(e.speciesId);
-      cands.push({ c: e, s: pvpScore(e, enemy.map((x) => ({ ...x, w: 1 })), tab, refLevel) });
+      cands.push({ c: e, s: pvpScore(e, sel.enemy.map((x) => ({ ...x, w: 1 })), tab, refLevel) });
     }
     cands.sort((a, b) => b.s.score - a.s.score);
     const sg = el('div', 'pp-sug');
@@ -588,55 +649,96 @@ function renderPvpPlan(root, c) {
     for (const { c: e, s: sc } of cands.slice(0, 4)) {
       const it = el('div', 'pp-item sug');
       it.append(el('b', null, e.nome), el('span', 'pp-tag', '💡 sugestão — você não tem'),
-        el('span', null, `usado no top 50 · Nv ~${fmt(e.level)}${e.aoe ? ' · AoE' : ''}${sc.forte.length ? ` · bate forte em ${sc.forte.slice(0, 2).map(([n]) => shortName(n)).join(', ')}` : ''}`));
+        el('span', null, `usado no top 50 · Nv ~${fmt(e.level)}${sc.forte.length ? ` · bate forte em ${sc.forte.slice(0, 2).map(([n]) => shortName(n)).join(', ')}` : ''}`));
       sg.append(it);
     }
     if (cands.length) { sg.append(el('span', 'sub', 'Procure em "Meu time" > comprar no Market com o seu orçamento.')); left.append(sg); }
   }
+
+  // --- o meio: tabuleiro + qual posição mostrar
   const mid = el('div', 'pp-mid');
-  const enemyPlaces = pvpPlace(enemy);
+  const modos = el('div', 'pvp-tabs');
+  for (const [k, l] of [['top', '⭐ Melhor contra o top 50'], ['arq', '🎯 Melhor contra este time'], ['jogo', '🎮 Como está no jogo']]) {
+    modos.append(button(l, pvpPosModo === k ? 'on' : '', () => { pvpPosModo = k; try { localStorage.setItem('pvpPosModo', k); } catch {} renderPvp(true); }));
+  }
   const boardBox = el('div');
-  const tipsBox = el('div', 'pp-tips');
-  const aoeInimigo = enemy.filter((e) => e.aoe).length;
-  const spread = aoeInimigo >= 3;
-  const draw = (alvos) => {
-    const mine2 = pvpPlaceVs(team, alvos || team.map(() => null), enemyPlaces, spread);
-    boardBox.replaceChildren(boardEl([{ team: enemy, places: enemyPlaces, cls: 'enemy', flip: true }, { team, places: mine2, cls: 'mine', flip: false }]));
+  const ondeBox = el('div', 'pp-tips');
+  const desenhar = (casasMinhas) => {
+    boardBox.replaceChildren(boardEl([{ team: sel.enemy, casas: sel.ec, cls: 'enemy', flip: true }, { team, casas: casasMinhas, cls: 'mine', flip: false }]));
+    ondeBox.replaceChildren(...team.map((m, i) => el('div', 'tip', `${shortName(m.nome)} → ${nomeCasa(casasMinhas[i])}`)));
   };
-  draw(null);
-  mid.append(el('div', 'pp-front', arq ? `Adversário previsto: time de ${arq.rep} (#${arq.best}), arquétipo ${arqName(arq, meta)}` : 'Sem arquétipo'), boardBox, el('div', 'pp-front', 'Você (embaixo). Monte igual no "Editar tabuleiro" do jogo.'));
+  desenhar(casasJogo);
+  mid.append(modos, el('div', 'pp-front', arq ? `Adversário: time de ${arq.rep} (#${arq.best}), ${arqName(arq, meta)}` : 'Sem arquétipo'), boardBox,
+    el('div', 'pp-front', 'Você embaixo. Para usar: "Editar tabuleiro" no PvP do jogo e ponha cada um na casa indicada.'), ondeBox);
+
+  // --- a direita: chances
   const rightCol = el('div', 'pp-right');
-  if (!team.length) rightCol.append(el('div', 'mempty', 'Escolha até 5 pokémon na lista para ver a simulação contra esse time e o posicionamento sugerido.'));
-  else if (!enemy.length) rightCol.append(el('div', 'mempty', 'Atualize o meta para ter os times do topo.'));
+  if (!team.length) rightCol.append(el('div', 'mempty', 'Escolha até 5 pokémon para ver a chance de vencer e a melhor posição.'));
+  else if (!top.length || !sel.enemy.length) rightCol.append(el('div', 'mempty', 'Atualize o meta para ter os times do topo.'));
   else {
-    const res = el('div', 'pp-sum'); res.append(el('b', null, 'Simulando com o duelo 1×1 do jogo…'));
+    const res = el('div', 'pp-sum'); res.append(el('b', null, `Calculando contra os times do top (0/${top.length})…`));
+    const tipsBox = el('div', 'pp-tips');
     rightCol.append(res, tipsBox);
-    simTeam(team, enemy).then((sres) => {
-      if (!sres) { res.replaceChildren(el('b', null, 'Não deu para simular agora (a conta precisa estar aberta no app).')); return; }
-      const used = new Set();
-      const alvos = team.map((_, i) => { const ord = sres.m[i].map((p, j) => [p, j]).sort((a, b) => b[0] - a[0]); const pick = ord.find(([, j]) => !used.has(j)) || ord[0]; used.add(pick[1]); return pick[1]; });
-      draw(alvos);
-      const v = sres.est >= 0.55 ? 'ok' : sres.est >= 0.45 ? 'meh' : 'bad';
-      res.replaceChildren(el('b', `big ${v}`, `${pct(sres.est)} de força contra este time`), el('span', null, v === 'ok' ? 'Você é favorito.' : v === 'meh' ? 'Luta equilibrada: o posicionamento decide.' : 'Você é azarão: veja as dicas e o Upgrade em "Meu time".'));
+    (async () => {
+      const alvos = [];
+      for (const a of top) {
+        const t = timeDe(a);
+        if (!t.enemy.length) continue;
+        const s = await simTeam(team, t.enemy);
+        if (page !== 'pvp' || pvpTab !== 'plan') return;
+        if (s) alvos.push({ a, enemy: t.enemy, ec: t.ec, P: s.m, w: a.n || 1, est: s.est });
+        res.replaceChildren(el('b', null, `Calculando contra os times do top (${alvos.length}/${top.length})…`));
+      }
+      if (!alvos.length) { res.replaceChildren(el('b', null, 'Não deu para simular agora (a conta precisa estar aberta no app).')); return; }
+      const ch = `${pvpAcc}|${team.map((m) => m.id).join(',')}|${meta.at}`;
+      let ot = pvpOtimoCache.get(ch);
+      if (!ot) {
+        const daSel = alvos.find((x) => x.a.id === pvpArqSel);
+        ot = { top: otimizarPos(team, alvos, casasJogo), arq: daSel ? otimizarPos(team, [daSel], casasJogo) : null };
+        pvpOtimoCache.set(ch, ot);
+      }
+      // "Melhor contra este time" depende do adversário escolhido: calcula se ainda não tem.
+      const daSel = alvos.find((x) => x.a.id === pvpArqSel);
+      if (daSel && (!ot.arq || ot.arqId !== pvpArqSel)) { ot.arq = otimizarPos(team, [daSel], casasJogo); ot.arqId = pvpArqSel; }
+      const casasModo = pvpPosModo === 'jogo' ? casasJogo : pvpPosModo === 'arq' && ot.arq ? ot.arq.casas : ot.top.casas;
+      desenhar(casasModo);
+      const media = (casas) => { const pw = alvos.reduce((s, x) => s + x.w, 0) || 1; return alvos.reduce((s, x) => s + x.w * avaliarPos(casas, team, x.ec, x.enemy, x.P), 0) / pw; };
+      const vsSelV = daSel ? avaliarPos(casasModo, team, daSel.ec, daSel.enemy, daSel.P) : null;
+      const cls = (v) => (v >= 0.55 ? 'ok' : v >= 0.45 ? 'meh' : 'bad');
+      res.replaceChildren(
+        ...(vsSelV != null ? [el('b', `big ${cls(vsSelV)}`, `${pct(vsSelV)} de chance de vencer este time`)] : []),
+        el('span', null, `Contra o top (média de ${alvos.length} times, pesados por quantos usam): ${pct(media(casasModo))} nesta posição.`),
+        el('span', null, `Posição do jogo: ${pct(media(casasJogo))} · melhor contra o top: ${pct(ot.top.v)}${ot.top.v - media(casasJogo) >= 0.01 ? ` (+${Math.round((ot.top.v - media(casasJogo)) * 100)} pontos mudando as casas)` : ' (a do jogo já está boa)'}.`),
+        el('span', 'sub', 'Estimativa com o duelo 1×1 do jogo e o tabuleiro real: cada um vai no adversário mais perto, e quem bate sem apanhar de volta (principalmente de longe) leva vantagem. AoE não conta no PvP.'));
+      // Contra cada time do top, na posição mostrada.
       tipsBox.replaceChildren();
-      const add = (txt, cls) => tipsBox.append(el('div', `tip ${cls || ''}`, txt));
-      team.forEach((m, i) => { const j = alvos[i]; const e = enemy[j]; add(`${shortName(m.nome)} → fique de frente para ${shortName(e.nome)}: vence o 1×1 em ${pct(sres.m[i][j])}.`, sres.m[i][j] >= 0.5 ? 'ok' : 'bad'); });
-      if (spread) add(`O time deles tem ${aoeInimigo} com AoE: deixe espaço entre os seus (o tabuleiro já está espalhado).`, 'warn');
-      else add('Pouco AoE do outro lado: dá para juntar o time e focar o mesmo alvo.', '');
-      const meleeThem = enemy.filter((e) => e.alcance <= 1);
-      const tank = [...team].sort((a, b) => ((b.stats ? b.stats.hp + b.stats.def + b.stats.spd : 0) - (a.stats ? a.stats.hp + a.stats.def + a.stats.spd : 0)))[0];
-      if (meleeThem.length >= 2 && tank) add(`${meleeThem.length} deles batem corpo a corpo: ${shortName(tank.nome)} (mais HP e defesa) segura melhor a frente.`, '');
-      const ranged = enemy.filter((e) => e.alcance >= 3);
-      if (ranged.length) add(`Atiradores de longe deles: ${ranged.map((e) => shortName(e.nome)).join(', ')}. Quem tem alcance alto do seu lado chega à retaguarda deles.`, '');
-      const lvl = Math.round(team.reduce((s, m) => s + m.level, 0) / team.length);
-      const lvlE = Math.round(enemy.reduce((s, m) => s + m.level, 0) / enemy.length);
-      if (lvl < lvlE * 0.7) add(`Nível médio ${fmt(lvl)} contra ${fmt(lvlE)}: no duelo do jogo o nível pesa muito. Suba os escolhidos.`, 'warn');
-      const mx = el('div', 'pp-matrix');
-      const hd = el('div', 'pm-row hd'); hd.append(el('span', null, 'Seu'), ...enemy.map((e) => el('span', null, shortName(e.nome))));
-      mx.append(hd);
-      team.forEach((m, i) => { const r = el('div', 'pm-row'); r.append(el('span', null, shortName(m.nome))); sres.m[i].forEach((p) => r.append(el('span', p >= 0.55 ? 'ok' : p >= 0.45 ? 'meh' : 'bad', pct(p)))); mx.append(r); });
-      tipsBox.append(el('div', 'ext-sec', 'Duelos 1×1 (chance de vencer)'), mx);
-    });
+      tipsBox.append(el('div', 'ext-sec', 'Contra cada time do top'));
+      for (const x of [...alvos].sort((p, q) => q.w - p.w)) {
+        const v = avaliarPos(casasModo, team, x.ec, x.enemy, x.P);
+        const r = el('div', `tip ${cls(v)}`, `${x.a.tier} · ${arqName(x.a, meta)} (${x.a.n} do top): ${pct(v)}`);
+        r.style.cursor = 'pointer'; r.title = 'Ver este time no tabuleiro';
+        r.onclick = () => { pvpArqSel = x.a.id; renderPvp(true); };
+        tipsBox.append(r);
+      }
+      // Dicas sem AoE: frente, retaguarda e nível.
+      if (daSel) {
+        const add = (txt, k) => tipsBox.append(el('div', `tip ${k || ''}`, txt));
+        tipsBox.append(el('div', 'ext-sec', 'Dicas contra este time'));
+        const meleeThem = daSel.enemy.filter((e) => e.alcance <= 1);
+        const tank = [...team].sort((a, b) => ((b.stats ? b.stats.hp + b.stats.def + b.stats.spd : 0) - (a.stats ? a.stats.hp + a.stats.def + a.stats.spd : 0)))[0];
+        if (meleeThem.length >= 2 && tank) add(`${meleeThem.length} deles batem corpo a corpo: ${shortName(tank.nome)} (mais HP e defesa) segura melhor a frente.`);
+        const ranged = daSel.enemy.filter((e) => e.alcance >= 3);
+        if (ranged.length) add(`Atiradores de longe deles: ${ranged.map((e) => shortName(e.nome)).join(', ')}. Quem tem alcance alto do seu lado chega à retaguarda deles.`);
+        const lvl = Math.round(team.reduce((s, m) => s + m.level, 0) / team.length);
+        const lvlE = Math.round(daSel.enemy.reduce((s, m) => s + m.level, 0) / daSel.enemy.length);
+        if (lvl < lvlE * 0.7) add(`Nível médio ${fmt(lvl)} contra ${fmt(lvlE)}: no duelo do jogo o nível pesa muito. Suba os escolhidos.`, 'warn');
+        const mx = el('div', 'pp-matrix');
+        const hd = el('div', 'pm-row hd'); hd.append(el('span', null, 'Seu'), ...daSel.enemy.map((e) => el('span', null, shortName(e.nome))));
+        mx.append(hd);
+        team.forEach((m, i) => { const r = el('div', 'pm-row'); r.append(el('span', null, shortName(m.nome))); daSel.P[i].forEach((p) => r.append(el('span', p >= 0.55 ? 'ok' : p >= 0.45 ? 'meh' : 'bad', pct(p)))); mx.append(r); });
+        tipsBox.append(el('div', 'ext-sec', 'Duelos 1×1 (chance de vencer)'), mx);
+      }
+    })();
   }
   body.append(left, mid, rightCol);
   pc.append(body);

@@ -844,3 +844,8 @@ body.foco .glow { display: none; }
 .casa-alvo button { padding: 4px 8px; font-size: 12px; }
 .casa-res { display: flex; flex-direction: column; gap: 2px; }
 .casa-tempo { font-size: 20px; color: var(--text); }
+
+/* Planejador: o seu time (clique para tirar) */
+.pp-time { display: flex; flex-direction: column; gap: 4px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+.pp-mid .pvp-tabs { flex-wrap: wrap; justify-content: center; }
+.pp-tips .tip.ok { border-left: 3px solid var(--ok); } .pp-tips .tip.bad { border-left: 3px solid #ff8a8a; } .pp-tips .tip.meh { border-left: 3px solid #ffcf66; }
