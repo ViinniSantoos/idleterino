@@ -530,6 +530,28 @@ async function renderSettings() {
   sec.append(ul, button('Apagar todos os logins deste PC', null, async () => { if (await call('app:wipeLogins')) toast('Logins apagados. Entre de novo quando quiser.'); }));
   box.append(sec);
   if (typeof settingsExtras === 'function') await settingsExtras(box);
+  // Pacote extra: arquivo .idlpack assinado pelo dono do app e travado no nick do jogo de quem recebeu.
+  const pi = await call('app:pacote:info').catch(() => null);
+  const pac = el('div', 'card');
+  pac.append(el('h3', null, '🧩 Pacote extra'));
+  const inst = pi && pi.instalado;
+  if (inst && !inst.erro) {
+    pac.append(el('p', 'sub', `Instalado para ${inst.nicks.join(', ')} (só funciona na conta principal com esse nick no jogo).${pi.emUso ? '' : ' Reinicie o app para usar.'}`));
+    const acts = el('div', 'actions'); acts.style.justifyContent = 'flex-start';
+    if (!pi.emUso) acts.append(button('Reiniciar agora', 'primary', () => call('app:pacote:reiniciar')));
+    acts.append(button('Remover pacote', null, async () => { await call('app:pacote:remover'); toast('Pacote removido. Reinicie o app para tirar de vez.'); renderSettings(); }));
+    pac.append(acts);
+  } else {
+    pac.append(el('p', 'sub', inst && inst.erro ? `⚠ ${inst.erro}` : 'Recebeu um arquivo .idlpack do dono do Idleterino? Importe aqui. O app confere a assinatura: arquivo alterado ou de outra pessoa não abre.'));
+    pac.append(button('Importar pacote (.idlpack)', null, async () => {
+      const r = await call('app:pacote:importar').catch(() => null);
+      if (!r || r.cancelado) return;
+      if (r.erro) { toast(`⚠ ${r.erro}`); return; }
+      toast(`🧩 Pacote importado (${r.pacote.nicks.join(', ')}). Reinicie o app para usar.`);
+      renderSettings();
+    }));
+  }
+  box.append(pac);
   if (my !== settingsPintura) return; // outra pintura mais nova é que vale
   const pg = $('#page-settings'); const y = pg.scrollTop;
   tela.replaceChildren(...box.childNodes);

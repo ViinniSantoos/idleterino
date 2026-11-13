@@ -691,7 +691,17 @@ module.exports = function createPokeIdle(ctx) {
   // Compra sozinha só em COINS e só dentro dos limites daqui (gema: só avisa). Tudo desligado por padrão.
   // TRADER: só no PC do dono (trader-main.js fica fora do Git e do app público). Sem o arquivo, nada existe.
   let trader = null;
-  try { trader = require('./trader-main')({ ipcMain, views, mainAccId, config, saveConfig, send, ctx, app, path, fs }); } catch {}
+  const traderArgs = { ipcMain, views, mainAccId, config, saveConfig, send, ctx, app, path, fs };
+  try { trader = require('./trader-main')(traderArgs); } catch {}
+  // Sem os arquivos (app público): um PACOTE assinado pelo dono, travado no nick do jogo de quem vai usar (pacotes.js).
+  const pacotes = require('./pacotes')({ app, ipcMain, fs, path, ctx, dialog: require('electron').dialog });
+  const nickPrincipal = async () => {
+    const v = views.get(mainAccId());
+    if (!v || v.webContents.isDestroyed()) return null;
+    const t = await v.webContents.executeJavaScript('window.__idleterinoMercado && window.__idleterinoMercado.treinador ? window.__idleterinoMercado.treinador() : null').catch(() => null);
+    return t && t.nick ? t.nick : null;
+  };
+  if (!trader) { try { trader = pacotes.carregarTrader(traderArgs, nickPrincipal); } catch { trader = null; } }
   const timers = [];
   function start() {
     loadConfig();
@@ -712,7 +722,7 @@ module.exports = function createPokeIdle(ctx) {
   const api = {
     partitions: () => config.accounts.map((a) => partitionOf(a.id)),
     reloadAll: () => { for (const v of views.values()) if (!v.webContents.isDestroyed()) v.webContents.reload(); },
-    start, snapshot, setMain: (w) => { mainWin = w; mainWin.on('resize', () => send('relayout', true)); },
+    start, snapshot, setMain: (w) => { mainWin = w; mainWin.on('resize', () => send('relayout', true)); pacotes.aoAbrirJanela(w); },
     trayInfo: () => ({ accounts: config.accounts.length }),
     noteOutside,
     // Para o diário (modo noite e painel): ler as contas e trocar o modo / o otimizar sozinho.
