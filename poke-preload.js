@@ -41,6 +41,7 @@ contextBridge.executeInMainWorld({
       aoe: k.tmAoe === true || k.tmAoe === 1 || k.tmAoe === 'true' || k.tm_aoe === true,
       el: k.tmElemental || k.tm_elemental || null, apelido: k.apelido || null, poder: Number(k.poder || k.power) || 0,
       xp: Number(k.xp) || 0, xpNivel: Number(k.xpNivel) || 0, // aba Casas: quanto falta para o nível pedido
+      slot: k.slot ?? null, // na EQUIPE (0–4); fora dela, Depot ou Coleção
     });
     function aplicarEstado(p, cheioForcado) {
       if (!p || typeof p !== 'object') return;
@@ -56,6 +57,8 @@ contextBridge.executeInMainWorld({
       if (p.loja && p.loja.boosts && 'captura' in p.loja.boosts) jogo.eu.capturaAte = Number(p.loja.boosts.captura) || 0;
       // As bolas da mochila (quantas de cada): a aba Procurar shiny usa a melhor que a pessoa tem.
       if (p.balls && typeof p.balls === 'object') jogo.eu.balls = { ...p.balls };
+      // A COLEÇÃO do jogo são os pokémon travados (automation.pokemonTravado); fora da equipe e da coleção = Depot.
+      if (p.automation && Array.isArray(p.automation.pokemonTravado)) jogo.eu.travados = p.automation.pokemonTravado.map(Number);
       if ('nick' in p || 'xp' in p || 'level' in p) jogo.at = Date.now();
       if (Array.isArray(pokemons)) jogo.pks = new Map(pokemons.map((k) => [k.id, slimPk(k)]));
       for (const k of pkMud || []) jogo.pks.set(k.id, slimPk(k));
@@ -63,7 +66,8 @@ contextBridge.executeInMainWorld({
     }
 
     // ---- consultas do app que o jogo NÃO deve desenhar (o perfil de outro jogador abriria na tela) ----
-    const nossos = { tabela: 0, perfis: new Map(), especies: 0, lista: 0 };
+    const nossos = { tabela: 0, perfis: new Map(), especies: 0, lista: 0, itens: 0 };
+    let itensResp = null; // resposta do market.itens pedida pela Calculadora de Boss
     const precos = {}; // nome em minúsculas -> { em, linhas }
     let ultimaEspecies = null;
     let ultimaLista = null;
@@ -74,6 +78,7 @@ contextBridge.executeInMainWorld({
       if (d.indexOf('"especies"') >= 0 && d.indexOf('"market"') >= 0 && Date.now() - nossos.especies < 8000) return true;
       if (d.indexOf('"vitrine"') >= 0 && d.indexOf('"market"') >= 0 && Date.now() - nossos.lista < 8000) return true;
       if (d.indexOf('"seq":' + SEQ_SHINY) >= 0 && d.indexOf('"market"') >= 0) return true;
+      if (Date.now() - nossos.itens < 8000 && d.indexOf('"aba":"itens"') >= 0 && d.indexOf('"market"') >= 0) return true;
       for (const f of extras.filtros) { try { if (f(d)) return true; } catch {} }
       if (d.indexOf('"perfil"') >= 0 && nossos.perfis.size) {
         try { const m = JSON.parse(d); if (m.t === 'perfil' && m.perfil && recente(nossos.perfis.get(String(m.perfil.nick || '').toLowerCase()))) return true; } catch {}
@@ -136,6 +141,9 @@ contextBridge.executeInMainWorld({
                   if (m.pedrasEvolucao && typeof m.pedrasEvolucao === 'object') jogo.pedrasEvolucao = m.pedrasEvolucao;
                   // TM Researcher: fragmentos de AoE e de Z-Move (pieceAoe/pieceElemental) e quantos fazem um (custoAoe/custoElemental).
                   if (m.tmResearcher && typeof m.tmResearcher === 'object') jogo.tmResearcher = m.tmResearcher;
+                  // Calculadora de Boss: os bosses (token de entrada e drops com a chance) e a taxa do Market.
+                  if (Array.isArray(m.bossesJogaveis)) jogo.bosses = m.bossesJogaveis;
+                  if (m.economia && typeof m.economia === 'object') jogo.economia = m.economia;
                 }
                 aplicarEstado(est, m.t === 'welcome');
                 const bx = est && est.bonusXp;
@@ -196,6 +204,7 @@ contextBridge.executeInMainWorld({
               if (m && m.t === 'market' && m.aba === 'especies' && Date.now() - nossos.especies < 8000) { ultimaEspecies = { em: Date.now(), m }; return; }
               if (m && m.t === 'market' && m.aba === 'vitrine' && Date.now() - nossos.lista < 8000) { ultimaLista = { em: Date.now(), m }; return; }
               if (m && m.t === 'market' && m.seq === SEQ_SHINY) { shinyHist = { em: Date.now(), m }; return; }
+              if (m && m.t === 'market' && m.aba === 'itens' && Date.now() - nossos.itens < 8000) { itensResp = { em: Date.now(), m }; return; }
               if (!m || m.t !== 'market' || !ABAS[m.aba]) return;
               if (m.aba !== 'meus' && m.seq != null && m.seq !== SEQ) return;
               const key = m.aba === 'historicoGlobal' ? `historicoGlobal:${m.pagina || 0}` : m.aba;
@@ -760,6 +769,86 @@ contextBridge.executeInMainWorld({
           bonus: b, multS: Math.round(multS * 100) / 100, multC: Math.round(multC * 100) / 100, chanceS, pctK, pctT, consultas, lista, em: Date.now(),
           ativos: { lure: jogo.eu.lureAte || 0, kick: fimB('kick', 'shiny'), twitch: fimB('twitch', 'shiny'), captura: jogo.eu.capturaAte || 0 } };
       } finally { shinyBuscando = false; }
+    }
+    // ---- CALCULADORA DE BOSS (ideia do 369, 13/11/2026; a dele era toda à mão) ----
+    // O jogo diz, para cada boss: o token de entrada (ex.: Bronze Boss Token × 1) e os drops com a CHANCE por luta
+    // (ex.: Articuno 0,5% de peça de TM e 0,5% de peça de AoE). Os preços são os de AGORA na aba de itens do Market
+    // (o menor anúncio, e a média vendida em 7 dias), pedidos escondidos do jogo e guardados 1 min. A taxa do Market é a
+    // do jogo: coins 15%; gemas por faixa do preço (13% até 500, 10% até 5.000, 7,5% acima).
+    let itensCache = null;
+    async function precosItensCore(maxIdadeMs = 60 * 1000) {
+      if (itensCache && Date.now() - itensCache.em < maxIdadeMs) return itensCache;
+      if (!sock || sock.readyState !== 1) return itensCache;
+      if (document.querySelector('#community:not(.hidden)')) return itensCache; // Market aberto na tela: não pede
+      const antes = itensResp && itensResp.em;
+      nossos.itens = Date.now();
+      sock.send(JSON.stringify({ t: 'market.itens' }));
+      for (let i = 0; i < 15 && (itensResp && itensResp.em) === antes; i++) await espera(400);
+      if (!itensResp || itensResp.em === antes) return itensCache;
+      itensCache = { em: Date.now(), resumo: itensResp.m.resumo || {}, medias: itensResp.m.medias || {} };
+      return itensCache;
+    }
+    function taxaMercadoPct(preco, moeda) {
+      const e = jogo.economia || {};
+      if (moeda !== 'orb') return Number(e.taxaMercadoGoldPct ?? 15);
+      const f = (Array.isArray(e.faixasMercadoOrb) && e.faixasMercadoOrb.length ? e.faixasMercadoOrb : [{ ate: 500, pct: 13 }, { ate: 5000, pct: 10 }, { ate: null, pct: 7.5 }]);
+      for (const x of f) if (x.ate == null || preco <= Number(x.ate)) return Number(x.pct);
+      return Number(f[f.length - 1].pct);
+    }
+    function precoItemCore(ic, itemId, moeda) {
+      if (!ic || itemId == null) return { agora: null, media: null, vendidos7d: 0, anuncios: 0 };
+      const r = ic.resumo[itemId] || ic.resumo[String(itemId)];
+      const md = ic.medias[itemId] || ic.medias[String(itemId)];
+      const mm = md && (moeda === 'orb' ? md.orb : md.gold);
+      return { agora: r && (moeda === 'orb' ? r.minOrb : r.minGold) != null ? Number(moeda === 'orb' ? r.minOrb : r.minGold) : null,
+        media: mm && mm.media ? Math.round(Number(mm.media) * 100) / 100 : null, vendidos7d: mm ? Number(mm.unidades) || 0 : 0, anuncios: r ? Number(r.anuncios) || 0 : 0 };
+    }
+    async function pveBoss(arg) {
+      const o = arg && typeof arg === 'object' ? arg : {};
+      const moeda = o.moeda === 'gold' ? 'gold' : 'orb';
+      if (!Array.isArray(jogo.bosses) || !jogo.bosses.length) return { pronto: false, motivo: 'sem-bosses' };
+      const ic = await precosItensCore(o.forcar ? 0 : 60 * 1000);
+      const catL = jogo.mercado && jogo.mercado.catalogo;
+      const cat = new Map((Array.isArray(catL) ? catL : catL && typeof catL === 'object' ? Object.values(catL) : []).filter((x) => x && x.id != null).map((x) => [Number(x.id), x]));
+      const L = Number(jogo.eu.level) || 0;
+      const itens = {};
+      // Os nomes como o JOGO mostra na tela (os dados dos bosses vêm com o nome interno: "TM Disk Piece" é o Fragmento
+      // de Z-Move, e parecia um segundo AoE).
+      const tmr = jogo.tmResearcher || {};
+      const PT = { 'TM Disk Piece': 'Fragmento de Z-Move', 'AoE TM Disk Piece': 'Fragmento de AoE (AoE TM Disk Piece)', 'Mega Stone Fragment': 'Fragmento de Mega Stone',
+        'Mega Shiny Stone Fragment': 'Fragmento de Mega Shiny Stone', 'Shiny Stone Fragment': 'Fragmento de Shiny Stone', 'Key Fragment': 'Fragmento de Chave', 'Bicycle Fragment': 'Fragmento de Bicicleta' };
+      const nomePt = (id, nome) => (Number(id) === Number(tmr.pieceElemental ?? 59194) ? 'Fragmento de Z-Move'
+        : Number(id) === Number(tmr.pieceAoe ?? 40530) ? 'Fragmento de AoE (AoE TM Disk Piece)' : PT[nome] || nome);
+      const item = (id, nome0) => {
+        if (itens[id]) return itens[id];
+        const c = cat.get(Number(id)) || {};
+        const nome = nomePt(id, nome0 || c.nome);
+        const p = precoItemCore(ic, id, moeda);
+        // Preço de referência: o menor anúncio de agora; sem anúncio, a média vendida em 7 dias.
+        const ref = p.agora != null ? p.agora : p.media;
+        itens[id] = { id: Number(id), nome: nome || c.nome || `#${id}`, icone: c.icone || null, ...p, preco: ref, taxaPct: ref != null ? taxaMercadoPct(ref, moeda) : null };
+        return itens[id];
+      };
+      const bosses = jogo.bosses.map((b) => {
+        const ent = b.entrada || {};
+        const tok = ent.itemId != null ? item(ent.itemId, ent.nome) : null;
+        const custo = tok && tok.preco != null ? tok.preco * (Number(ent.qtd) || 1) : null;
+        let ev = 0, falta = !tok || tok.preco == null;
+        const drops = (b.drops || []).map((d) => {
+          const it = item(d.itemId, d.nome);
+          const chance = Number(d.chance) || 0, qtd = Number(d.qtd) || 1;
+          const liq = it.preco != null ? it.preco * (1 - (it.taxaPct || 0) / 100) : null;
+          if (liq == null) falta = true; else ev += chance * qtd * liq;
+          return { itemId: Number(d.itemId), nome: it.nome, chance, qtd, preco: it.preco, liquido: liq != null ? Math.round(liq * 100) / 100 : null, porLuta: liq != null ? Math.round(chance * qtd * liq * 10000) / 10000 : null,
+            lutasPorDrop: chance > 0 ? Math.round(1 / chance) : null };
+        });
+        const lucro = custo != null ? ev - custo : null;
+        return { key: b.key, nome: b.nome || b.name, level: Number(b.level) || 0, minNivel: Number(b.minNivelTreinador) || 0, liberado: L >= (Number(b.minNivelTreinador) || 0), regiao: b.regiao || null, trio: b.trio || null,
+          premio: b.premio || null, equipeIdeal: b.equipeIdeal || null, token: tok ? { itemId: tok.id, nome: tok.nome, qtd: Number(ent.qtd) || 1, preco: tok.preco } : null, custoLuta: custo,
+          evLuta: Math.round(ev * 10000) / 10000, lucroLuta: lucro != null ? Math.round(lucro * 10000) / 10000 : null, roi: custo ? Math.round((lucro / custo) * 1000) / 10 : null, faltaPreco: falta, drops };
+      });
+      return { pronto: true, moeda, L, em: ic ? ic.em : null, semPrecos: !ic, itens, bosses,
+        taxa: { gold: taxaMercadoPct(0, 'gold'), faixasOrb: (jogo.economia && jogo.economia.faixasMercadoOrb) || [{ ate: 500, pct: 13 }, { ate: 5000, pct: 10 }, { ate: null, pct: 7.5 }] } };
     }
     // Comprar no Market para FARMAR: as espécies que mais rendem nas próximas hunts da conta, as ofertas mais
     // baratas delas agora (consulta escondida do jogo, como a do PvP) e o ataque REAL de cada pokémon à venda.
@@ -1429,7 +1518,7 @@ contextBridge.executeInMainWorld({
         canais() { return JSON.parse(JSON.stringify(canais)); },
         // Aba PvE do app (só leitura).
         pve(o, arg) {
-          const f = o === 'proximas' ? pveProximas : o === 'evolucoes' ? () => pveEvolucoes(arg) : o === 'meus' ? pveMeus : o === 'buscar' ? () => pveBuscar(arg) : o === 'casas' ? () => pveCasas(arg) : o === 'shiny' ? () => pveShiny(arg) : o === 'mercado' ? () => (arg && typeof arg === 'object' ? pveMercado(arg.moeda, arg.dias, arg.valor) : pveMercado(arg)) : null;
+          const f = o === 'proximas' ? pveProximas : o === 'evolucoes' ? () => pveEvolucoes(arg) : o === 'meus' ? pveMeus : o === 'buscar' ? () => pveBuscar(arg) : o === 'casas' ? () => pveCasas(arg) : o === 'shiny' ? () => pveShiny(arg) : o === 'boss' ? () => pveBoss(arg) : o === 'mercado' ? () => (arg && typeof arg === 'object' ? pveMercado(arg.moeda, arg.dias, arg.valor) : pveMercado(arg)) : null;
           return f ? f().catch((e) => ({ erro: String(e && e.message || e) })) : null;
         },
         // Comércio: nota, stats e espécie da ficha de um anúncio (mesma conta da ficha do jogo).

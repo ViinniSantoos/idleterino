@@ -45,7 +45,7 @@ async function renderPve() {
   act.append(sel);
   head.append(t, act);
   const tabs = el('div', 'pvp-tabs');
-  for (const [k, l] of [['agora', '🎯 Hunt agora'], ['proximas', '🗺️ Próximas hunts'], ['evo', '🧬 Evoluir para qual?'], ['casas', '🏠 Casas'], ['shiny', '✨ Procurar shiny'], ['mercado', '🛒 Comprar para farmar']]) {
+  for (const [k, l] of [['agora', '🎯 Hunt agora'], ['proximas', '🗺️ Próximas hunts'], ['evo', '🧬 Evoluir para qual?'], ['casas', '🏠 Casas'], ['shiny', '✨ Procurar shiny'], ['boss', '🧮 Calculadora Boss'], ['mercado', '🛒 Comprar para farmar']]) {
     tabs.append(button(l, pveTab === k ? 'on' : '', () => { pveTab = k; try { localStorage.setItem('pveTab', k); } catch {} renderPve(); }));
   }
   root.append(head, tabs);
@@ -56,6 +56,7 @@ async function renderPve() {
   else if (pveTab === 'mercado') pveMercado(corpo, accs.find((a) => a.id === pveAcc));
   else if (pveTab === 'casas') await pveCasas(corpo);
   else if (pveTab === 'shiny') pveShiny(corpo);
+  else if (pveTab === 'boss') await pveBossTela(corpo);
   else await pveEvo(corpo);
 }
 
@@ -452,6 +453,158 @@ function pveMercado(box, a) {
   c.append(el('div', 'mempty', '"Ver no Market" abre o anúncio no jogo, nesta conta. Confira o nível e o vendedor antes de comprar. A compra é sempre sua.'));
 }
 function go2Poke() { if (typeof go === 'function') go('poke'); }
+
+// ---------- 🧮 Calculadora Boss (ideia do 369; a dele era toda à mão) ----------
+// Os bosses, o token de entrada e a chance de cada drop vêm do jogo; os preços são os de AGORA no Market (aba de
+// itens: o menor anúncio, e a média vendida em 7 dias) e a taxa é a do jogo (coins 15%; gemas 13% até 500, 10% até
+// 5.000, 7,5% acima). Você digita só o que conseguiu (e pode trocar qualquer preço).
+let bossOpc = casasLer('bossOpc', { moeda: 'orb', boss: null, tokens: '', custo: '', tokPreco: '', qtds: {}, precos: {}, taxa: '' });
+let pveBossRes = null;
+const numBr = (v, casas = 2) => (v == null || !Number.isFinite(v) ? '—' : Number(v).toLocaleString('pt-BR', { minimumFractionDigits: casas, maximumFractionDigits: casas }));
+const lerNum = (s) => { const t = String(s ?? '').trim().replace(/\s/g, ''); if (!t) return null; const v = Number(t.includes(',') ? t.replace(/\./g, '').replace(',', '.') : t); return Number.isFinite(v) && v >= 0 ? v : NaN; };
+function taxaPctDe(preco, moeda, r) {
+  if (moeda !== 'orb') return r && r.taxa ? r.taxa.gold : 15;
+  for (const f of (r && r.taxa && r.taxa.faixasOrb) || []) if (f.ate == null || preco <= f.ate) return f.pct;
+  return 7.5;
+}
+async function pveBossTela(box) {
+  const o = bossOpc;
+  const grava = () => casasGravar('bossOpc', bossOpc);
+  if (!pveBossRes || pveBossRes.acc !== pveAcc || pveBossRes.moeda !== o.moeda || Date.now() - (pveBossRes.lido || 0) > 2 * 60 * 1000) {
+    box.append(el('p', 'sub', 'Lendo os bosses do jogo e os preços de agora no Market…'));
+    const r = await call('poke:pve', pveAcc, 'boss', { moeda: o.moeda }).catch((e) => ({ erro: String(e && e.message || e) }));
+    if (page !== 'pve' || pveTab !== 'boss') return;
+    box.replaceChildren();
+    if (!r || !r.pronto) {
+      // Erro NÃO fica guardado: com a conta ainda carregando, a lista de bosses chega logo — tenta de novo sozinho.
+      pveBossRes = null;
+      const motivo = !r ? 'A conta do PokeIdle não respondeu (está aberta e logada?).'
+        : r.erro ? `Erro ao calcular: ${r.erro}`
+        : 'O jogo ainda não mandou a lista de bosses para o app (ela chega quando a conta entra no jogo). Se a conta já está aberta, clique em Recarregar nela.';
+      const eb = emptyBox('Calculadora Boss', motivo);
+      eb.append(button('Tentar de novo', 'primary', () => renderPve()));
+      box.append(eb);
+      setTimeout(() => { if (page === 'pve' && pveTab === 'boss' && !pveBossRes) renderPve(); }, 5000);
+      return;
+    }
+    pveBossRes = { ...r, acc: pveAcc, lido: Date.now() };
+  }
+  const r = pveBossRes;
+  const m = o.moeda;
+  const un = m === 'orb' ? 'gemas' : 'coins';
+  const v = (x, casas) => (m === 'orb' ? `${numBr(x, casas ?? 2)} gemas` : `${numBr(x, 0)} coins`);
+  const bosses = r.bosses.slice().sort((a, b) => a.level - b.level);
+  if (!o.boss || !bosses.some((b) => b.key === o.boss)) o.boss = (bosses.find((b) => b.liberado) || bosses[0]).key;
+  const b = bosses.find((x) => x.key === o.boss);
+
+  // ---- 1) A SUA SESSÃO ----
+  const c = el('div', 'card');
+  c.append(el('div', 'ext-sec', '🧮 Calculadora da sua sessão de boss'));
+  c.append(el('div', 'sub up-lead', `Escolha o boss, digite quantos tokens usou e quantas peças caíram. Os preços já vêm do Market agora (${r.em ? new Date(r.em).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '—'}) e a taxa é a do jogo — troque qualquer valor se quiser. Atualiza sozinho.`));
+  const topo = el('div', 'budget');
+  const sb = el('select');
+  for (const x of bosses) { const op = el('option', null, `${x.nome} · Nv ${fmt(x.level)}${x.liberado ? '' : ' (seu nível ainda não libera)'}`); op.value = x.key; sb.append(op); }
+  sb.value = o.boss; sb.onchange = () => { o.boss = sb.value; o.qtds = {}; o.precos = {}; o.tokPreco = ''; grava(); renderPve(); };
+  const sm = el('select'); for (const [k, l] of [['orb', 'em gemas 💎'], ['gold', 'em coins']]) { const op = el('option', null, l); op.value = k; sm.append(op); }
+  sm.value = m; sm.onchange = () => { o.moeda = sm.value; o.precos = {}; o.tokPreco = ''; grava(); renderPve(); };
+  topo.append(sb, sm, button('↻ Atualizar preços', 'mini', async () => { pveBossRes = null; renderPve(); }));
+  c.append(topo);
+  const grade = el('div', 'tr-grade');
+  const campo = (rot, dica, val, ph, fn) => {
+    const w = el('label', 'tr-campo'); w.append(el('span', 'tr-rot', rot));
+    const i = el('input'); i.type = 'text'; i.inputMode = 'decimal'; i.value = val ?? ''; i.placeholder = ph || '';
+    i.oninput = () => { fn(i.value); grava(); conta(); };
+    w.append(i); if (dica) w.append(el('span', 'tr-dica', dica)); return w;
+  };
+  const tok = b.token || {};
+  grade.append(
+    campo(`Preço do ${tok.nome || 'token'} (${un})`, tok.preco != null ? `Market agora: ${v(tok.preco)}${(r.itens[tok.itemId] || {}).media != null ? ` · média 7 dias ${v(r.itens[tok.itemId].media)}` : ''}${tok.qtd > 1 ? ` · ${tok.qtd} por luta` : ''}` : 'Sem preço no Market agora: digite o valor.', o.tokPreco, tok.preco != null ? String(tok.preco) : '', (x) => { o.tokPreco = x; }),
+    campo('Quantidade de tokens usados', 'Cada luta gasta ' + (tok.qtd || 1) + ' token(s).', o.tokens, 'ex.: 476', (x) => { o.tokens = x; }),
+    campo('…ou custo total já gasto (opcional)', 'Se preencher, vale este no lugar de preço × quantidade.', o.custo, '', (x) => { o.custo = x; }),
+    campo('Taxa do market (%)', m === 'orb' ? 'Vazio = a do jogo pelo preço de cada item (13% até 500, 10% até 5.000, 7,5% acima).' : 'Vazio = a do jogo (15% em coins).', o.taxa, 'automática', (x) => { o.taxa = x; }));
+  c.append(grade);
+  // Os drops do boss: quantidade (você digita) e preço (vem do Market).
+  const gd = el('div', 'tr-grade');
+  for (const d of b.drops) {
+    const it = r.itens[d.itemId] || {};
+    gd.append(campo(`Quantidade de ${d.nome}`, `Chance por luta: ${numBr(d.chance * 100, d.chance < 0.001 ? 4 : 2)}% (1 a cada ~${fmt(d.lutasPorDrop || 0)} lutas)`, (o.qtds || {})[d.itemId], '0', (x) => { o.qtds = { ...(o.qtds || {}), [d.itemId]: x }; }),
+      campo(`Preço de ${d.nome} (${un})`, it.preco != null ? `Market agora: ${it.agora != null ? v(it.agora) : 'sem anúncio'}${it.media != null ? ` · média 7 dias ${v(it.media)} (${fmt(it.vendidos7d)} vendidos)` : ''}` : 'Sem preço no Market: digite o valor.', (o.precos || {})[d.itemId], it.preco != null ? String(it.preco) : '', (x) => { o.precos = { ...(o.precos || {}), [d.itemId]: x }; }));
+  }
+  c.append(gd);
+  const aviso = el('div', 'tip warn'); aviso.hidden = true;
+  const res = el('div', 'tr-faixas');
+  const linhas = {};
+  for (const [k, t] of [['custo', 'Custo dos tokens'], ['bruto', 'Receita bruta'], ['taxa', 'Taxa do market'], ['liquido', 'Receita líquida'], ['porToken', 'Lucro por token'], ['eq', 'Preço mínimo para não ter prejuízo'], ['esperado', 'Pela chance do jogo, com esses tokens']]) {
+    const lin = el('div', 'tr-linha'); lin.append(el('span', 'sub', t)); linhas[k] = el('b', null, '—'); lin.append(linhas[k]); res.append(lin);
+  }
+  const grande = el('div', 'boss-res');
+  const lucroEl = el('b', null, '—'), roiEl = el('b', null, '—');
+  const g1 = el('div'); g1.append(el('span', 'sub', 'LUCRO'), lucroEl);
+  const g2 = el('div'); g2.append(el('span', 'sub', 'ROI'), roiEl);
+  grande.append(g1, g2);
+  c.append(aviso, res, grande);
+  box.append(c);
+  function conta() {
+    const tp = lerNum(o.tokPreco) ?? tok.preco;
+    const nt = lerNum(o.tokens), cm = lerNum(o.custo), tx = lerNum(o.taxa);
+    const ruim = [tp, nt, cm, tx, ...b.drops.map((d) => lerNum((o.qtds || {})[d.itemId])), ...b.drops.map((d) => lerNum((o.precos || {})[d.itemId]))].some((x) => Number.isNaN(x)) || (tx != null && tx >= 100);
+    aviso.hidden = !ruim; aviso.textContent = '⚠ Confira os números digitados (use 3, 3,5 ou 1.441,5).';
+    if (ruim) return;
+    const custo = cm != null && cm > 0 ? cm : (tp || 0) * (nt || 0);
+    let bruto = 0, taxaV = 0;
+    const porDrop = b.drops.map((d) => {
+      const q = lerNum((o.qtds || {})[d.itemId]) || 0;
+      const p = lerNum((o.precos || {})[d.itemId]) ?? (r.itens[d.itemId] || {}).preco ?? 0;
+      const pct = tx != null ? tx : taxaPctDe(p, m, r);
+      bruto += p * q; taxaV += p * q * pct / 100;
+      return { d, q, p, pct };
+    });
+    const liquido = bruto - taxaV, lucro = liquido - custo;
+    linhas.custo.textContent = v(custo);
+    linhas.bruto.textContent = v(bruto);
+    linhas.taxa.textContent = `− ${v(taxaV)}`;
+    linhas.liquido.textContent = v(liquido);
+    linhas.porToken.textContent = nt ? v(lucro / nt) : '—';
+    // Preço mínimo de cada peça para empatar (as outras no preço que estão).
+    const comQtd = porDrop.filter((x) => x.q > 0);
+    linhas.eq.textContent = comQtd.length ? comQtd.map((x) => {
+      const outros = porDrop.filter((y) => y !== x).reduce((s, y) => s + y.p * y.q * (1 - y.pct / 100), 0);
+      const eq = (custo - outros) / (x.q * (1 - x.pct / 100));
+      return `${x.d.nome}: ${eq <= 0 ? 'qualquer preço' : v(eq)}`;
+    }).join(' · ') : '—';
+    // O esperado pela chance do jogo: lutas = tokens ÷ tokens por luta; cada drop = chance × lutas.
+    const lutas = nt ? nt / (tok.qtd || 1) : 0;
+    linhas.esperado.textContent = lutas ? `${b.drops.map((d) => `~${numBr(d.chance * lutas * (d.qtd || 1), 1)} ${d.nome}`).join(' · ')} → lucro médio ${v(lutas * (b.evLuta || 0) - custo)}` : '—';
+    const cor = lucro >= 0 ? 'ok' : 'bad';
+    lucroEl.className = cor; roiEl.className = cor;
+    lucroEl.textContent = `${lucro >= 0 ? '+' : '−'}${numBr(Math.abs(lucro), m === 'orb' ? 2 : 0)}`;
+    roiEl.textContent = custo > 0 ? `${lucro >= 0 ? '+' : '−'}${numBr(Math.abs((lucro / custo) * 100), 1)}%` : '—';
+  }
+  conta();
+
+  // ---- 2) QUAL BOSS COMPENSA ----
+  const c2 = el('div', 'card');
+  c2.append(el('div', 'ext-sec', '👹 Qual boss compensa (média por luta, preços de agora)'));
+  c2.append(el('div', 'sub up-lead', `Por luta: o que cada drop rende em média (chance do jogo × preço de agora no Market, já sem a taxa) menos o custo do token. É a média de muitas lutas — numa sessão curta a sorte pesa muito. ${r.L ? `Seu treinador: Nv ${fmt(r.L)}.` : ''}`));
+  const lista = el('div', 'cand-list');
+  const ord = bosses.slice().sort((a, z) => (z.liberado - a.liberado) || ((z.lucroLuta ?? -Infinity) - (a.lucroLuta ?? -Infinity)));
+  for (const x of ord) {
+    const row = el('div', 'cand');
+    const l = el('div', 'pu-n');
+    l.append(el('b', null, `${x.nome} · Nv ${fmt(x.level)}${x.trio ? ` · ${x.trio}` : ''}${x.liberado ? '' : ` · libera no Nv ${fmt(x.minNivel)}`}`));
+    l.append(el('span', 'sub', `Entrada: ${x.token ? `${x.token.qtd}× ${x.token.nome} (${x.token.preco != null ? v(x.token.preco) : 'sem preço'})` : '—'}`));
+    l.append(el('span', 'sub', `Drops: ${x.drops.map((d) => `${d.nome} ${numBr(d.chance * 100, d.chance < 0.001 ? 4 : 2)}% × ${d.preco != null ? v(d.preco) : 'sem preço'}`).join(' · ')}`));
+    l.append(el('span', 'sub', `Por luta: rende ~${v(x.evLuta, 4)} − token ${x.custoLuta != null ? v(x.custoLuta) : '—'}${x.faltaPreco ? ' · ⚠ algum item sem preço no Market agora' : ''}`));
+    const pr = el('div', 'price');
+    pr.append(el('b', x.lucroLuta != null && x.lucroLuta >= 0 ? 'ok' : 'bad', x.lucroLuta == null ? '—' : `${x.lucroLuta >= 0 ? '+' : '−'}${numBr(Math.abs(x.lucroLuta), m === 'orb' ? 3 : 0)}`), el('span', 'sub', x.roi != null ? `por luta · ROI ${x.roi >= 0 ? '+' : ''}${numBr(x.roi, 1)}%` : 'por luta'));
+    const usar = button('Usar na calculadora', null, () => { o.boss = x.key; o.qtds = {}; o.precos = {}; o.tokPreco = ''; grava(); renderPve(); });
+    row.append(l, pr, usar);
+    lista.append(row);
+  }
+  c2.append(lista);
+  c2.append(el('p', 'small', 'Preço de referência de cada item: o menor anúncio no Market agora; sem anúncio, a média vendida em 7 dias. A chance é a de cada luta, do próprio jogo.'));
+  box.append(c2);
+}
 
 // ---------- ✨ Procurar shiny: quais shiny caçar com o pokémon em campo ----------
 // Regras do jogo: o brilho é sorteado a CADA arremesso (1 em 24.000; o Lure dobra; Kick e Twitch +15% cada) e só vale

@@ -873,3 +873,11 @@ body.foco .glow { display: none; }
 .tr-dica-res > b { font-size: 16px; }
 .tr-dica-res .tip { font-size: 14px; padding: 10px 12px; }
 
+
+/* calculadora de boss */
+.boss-res { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
+.boss-res > div { display: grid; justify-items: center; gap: 4px; padding: 12px; border-radius: 12px; background: var(--s2); }
+.boss-res b { font-size: 26px; font-weight: 900; }
+.boss-res b.ok, .cand .price b.ok { color: var(--ok, #4cd08a); }
+.boss-res b.bad, .cand .price b.bad { color: #ff7b7b; }
+
