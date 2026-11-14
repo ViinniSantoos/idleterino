@@ -72,13 +72,47 @@ contextBridge.executeInMainWorld({
     let ultimaEspecies = null;
     let ultimaLista = null;
     const recente = (t) => t && Date.now() - t < 30000;
-    function ehNosso(d) {
+    // FILA DO MARKET (bug do RMT, 14/11/2026: "não atualiza, não consigo clicar em alguns filtros"): a lista do Market
+    // (vitrine), a busca por espécie e o preço dos itens não têm número de pedido — o jogo desenha QUALQUER resposta que
+    // chegar. Antes o app escondia toda resposta que chegava até 8 s depois de uma consulta dele, e com o app
+    // consultando seguido, a resposta que o JOGO pediu (clicou num filtro) sumia. Agora cada pedido entra numa fila
+    // dizendo quem pediu (o app ou o jogo) e cada resposta vai para quem pediu, na ordem — o servidor responde na ordem.
+    const PEDIDO_ABA = { 'market.listar': 'vitrine', 'market.especies': 'especies', 'market.itens': 'itens' };
+    const filaMk = []; // { quem: 'app' | 'jogo', aba, em }
+    let enviandoDoApp = false;
+    const abaDoPedido = (txt) => {
+      if (typeof txt !== 'string' || txt.indexOf('"market.') < 0) return null;
+      const r = /"t"\s*:\s*"(market\.(?:listar|especies|itens))"/.exec(txt);
+      return r ? PEDIDO_ABA[r[1]] : null;
+    };
+    function enviarDoApp(txt) {
+      if (!sock || sock.readyState !== 1) return false;
+      enviandoDoApp = true;
+      try { sock.send(txt); } finally { enviandoDoApp = false; }
+      return true;
+    }
+    const donoMk = new WeakMap(); // evento -> 'app' | 'jogo' | null (decidido UMA vez por resposta)
+    function donoDaResposta(ev) {
+      if (donoMk.has(ev)) return donoMk.get(ev);
+      let dono = null;
+      const d = ev && ev.data;
+      if (typeof d === 'string' && d.indexOf('"market"') >= 0) {
+        const r = /"aba"\s*:\s*"(vitrine|especies|itens)"/.exec(d);
+        if (r) {
+          const agora = Date.now();
+          while (filaMk.length && agora - filaMk[0].em > 15000) filaMk.shift(); // pedido sem resposta não trava a fila
+          const i = filaMk.findIndex((x) => x.aba === r[1]);
+          dono = i >= 0 ? filaMk.splice(i, 1)[0].quem : 'jogo'; // sem pedido na fila = o jogo (aviso do servidor)
+        }
+      }
+      donoMk.set(ev, dono);
+      return dono;
+    }
+    function ehNosso(d, ev) {
       if (typeof d !== 'string') return false;
       if (d.indexOf('"pvpTabela"') >= 0 && recente(nossos.tabela)) return true;
-      if (d.indexOf('"especies"') >= 0 && d.indexOf('"market"') >= 0 && Date.now() - nossos.especies < 8000) return true;
-      if (d.indexOf('"vitrine"') >= 0 && d.indexOf('"market"') >= 0 && Date.now() - nossos.lista < 8000) return true;
+      if (ev && donoDaResposta(ev) === 'app') return true;
       if (d.indexOf('"seq":' + SEQ_SHINY) >= 0 && d.indexOf('"market"') >= 0) return true;
-      if (Date.now() - nossos.itens < 8000 && d.indexOf('"aba":"itens"') >= 0 && d.indexOf('"market"') >= 0) return true;
       for (const f of extras.filtros) { try { if (f(d)) return true; } catch {} }
       if (d.indexOf('"perfil"') >= 0 && nossos.perfis.size) {
         try { const m = JSON.parse(d); if (m.t === 'perfil' && m.perfil && recente(nossos.perfis.get(String(m.perfil.nick || '').toLowerCase()))) return true; } catch {}
@@ -100,18 +134,26 @@ contextBridge.executeInMainWorld({
       try {
         if (new URL(url, location.href).host === location.host) {
           sock = ws;
+          filaMk.length = 0;
+          // Cada pedido de lista/espécie/itens que sai entra na fila com quem pediu (o app manda por enviarDoApp).
+          ws.send = function (data) {
+            const aba = abaDoPedido(data);
+            if (aba) filaMk.push({ quem: enviandoDoApp ? 'app' : 'jogo', aba, em: Date.now() });
+            return Native.prototype.send.call(this, data);
+          };
           // O jogo lê pelo `onmessage`: embrulhado para não desenhar as respostas das consultas do app.
           const desc = Object.getOwnPropertyDescriptor(Native.prototype, 'onmessage');
           if (desc && desc.set) {
             Object.defineProperty(ws, 'onmessage', {
               configurable: true,
               get() { return desc.get.call(ws); },
-              set(fn) { desc.set.call(ws, typeof fn === 'function' ? function (ev) { if (ehNosso(ev.data)) return undefined; return fn.call(this, ev); } : fn); },
+              set(fn) { desc.set.call(ws, typeof fn === 'function' ? function (ev) { if (ehNosso(ev.data, ev)) return undefined; return fn.call(this, ev); } : fn); },
             });
           }
           ws.addEventListener('message', (e) => {
             const d = e.data;
             if (typeof d !== 'string') return;
+            const doApp = donoDaResposta(e) === 'app';
             for (const f of extras.ouvintes) { try { f(d); } catch {} }
             const welcome = d.indexOf('"welcome"') >= 0 && d.indexOf('"welcome"') < 40;
             const estado = !welcome && d.indexOf('"estado"') >= 0 && d.indexOf('"t":"estado"') >= 0;
@@ -201,10 +243,10 @@ contextBridge.executeInMainWorld({
             if (d.indexOf('"market"') < 0) return;
             try {
               const m = JSON.parse(d);
-              if (m && m.t === 'market' && m.aba === 'especies' && Date.now() - nossos.especies < 8000) { ultimaEspecies = { em: Date.now(), m }; return; }
-              if (m && m.t === 'market' && m.aba === 'vitrine' && Date.now() - nossos.lista < 8000) { ultimaLista = { em: Date.now(), m }; return; }
+              if (m && m.t === 'market' && m.aba === 'especies' && doApp) { ultimaEspecies = { em: Date.now(), m }; return; }
+              if (m && m.t === 'market' && m.aba === 'vitrine' && doApp) { ultimaLista = { em: Date.now(), m }; return; }
               if (m && m.t === 'market' && m.seq === SEQ_SHINY) { shinyHist = { em: Date.now(), m }; return; }
-              if (m && m.t === 'market' && m.aba === 'itens' && Date.now() - nossos.itens < 8000) { itensResp = { em: Date.now(), m }; return; }
+              if (m && m.t === 'market' && m.aba === 'itens' && doApp) { itensResp = { em: Date.now(), m }; return; }
               if (!m || m.t !== 'market' || !ABAS[m.aba]) return;
               if (m.aba !== 'meus' && m.seq != null && m.seq !== SEQ) return;
               const key = m.aba === 'historicoGlobal' ? `historicoGlobal:${m.pagina || 0}` : m.aba;
@@ -782,7 +824,7 @@ contextBridge.executeInMainWorld({
       if (document.querySelector('#community:not(.hidden)')) return itensCache; // Market aberto na tela: não pede
       const antes = itensResp && itensResp.em;
       nossos.itens = Date.now();
-      sock.send(JSON.stringify({ t: 'market.itens' }));
+      enviarDoApp(JSON.stringify({ t: 'market.itens' }));
       for (let i = 0; i < 15 && (itensResp && itensResp.em) === antes; i++) await espera(400);
       if (!itensResp || itensResp.em === antes) return itensCache;
       itensCache = { em: Date.now(), resumo: itensResp.m.resumo || {}, medias: itensResp.m.medias || {} };
@@ -891,7 +933,7 @@ contextBridge.executeInMainWorld({
         async function listarEspecie(id, nivelMin) {
           const antes = ultimaLista && ultimaLista.em;
           nossos.lista = Date.now();
-          sock.send(JSON.stringify({ t: 'market.listar', tipo: 'pokemon', moeda: moeda === 'gold' ? 'gold' : 'orb', ordem: 'baratos', busca: '', criterios: ['nivel'], elementos: [], tiposUnidos: true,
+          enviarDoApp(JSON.stringify({ t: 'market.listar', tipo: 'pokemon', moeda: moeda === 'gold' ? 'gold' : 'orb', ordem: 'baratos', busca: '', criterios: ['nivel'], elementos: [], tiposUnidos: true,
             ...vazias, nivelMin: nivelMin ? String(nivelMin) : '', nivelMax: String(tetoNv), precoMax, pagina: 0, especieId: Number(id) }));
           for (let i = 0; i < 12 && (ultimaLista && ultimaLista.em) === antes; i++) await espera(400);
           return ultimaLista && ultimaLista.em !== antes ? (ultimaLista.m.linhas || []) : null;
@@ -1422,7 +1464,7 @@ contextBridge.executeInMainWorld({
         if (document.querySelector('#community:not(.hidden)')) break;
         const antes = ultimaEspecies && ultimaEspecies.em;
         nossos.especies = Date.now();
-        sock.send(JSON.stringify({ t: 'market.especies', tipo: 'pokemon', busca: String(nome), pagina: 0 }));
+        enviarDoApp(JSON.stringify({ t: 'market.especies', tipo: 'pokemon', busca: String(nome), pagina: 0 }));
         for (let i = 0; i < 12 && (ultimaEspecies && ultimaEspecies.em) === antes; i++) await espera(400);
         if (ultimaEspecies && ultimaEspecies.em !== antes) {
           const linhas = (ultimaEspecies.m.linhas || []).slice(0, 6).map((e) => JSON.parse(JSON.stringify(e)));
@@ -1448,7 +1490,7 @@ contextBridge.executeInMainWorld({
         if (document.querySelector('#community:not(.hidden)')) return { erro: 'mercado-aberto', lista: out };
         const antes = ultimaLista && ultimaLista.em;
         nossos.lista = Date.now();
-        sock.send(JSON.stringify({ t: 'market.listar', tipo: 'pokemon', moeda: moeda === 'gold' ? 'gold' : 'orb', ordem: 'baratos', busca: '', criterios: [], elementos: [], pagina: 0, especieId: Number(id) }));
+        enviarDoApp(JSON.stringify({ t: 'market.listar', tipo: 'pokemon', moeda: moeda === 'gold' ? 'gold' : 'orb', ordem: 'baratos', busca: '', criterios: [], elementos: [], pagina: 0, especieId: Number(id) }));
         for (let i = 0; i < 12 && (ultimaLista && ultimaLista.em) === antes; i++) await espera(400);
         if (ultimaLista && ultimaLista.em !== antes) {
           for (const a of (ultimaLista.m.linhas || []).slice(0, 8)) {
@@ -1535,7 +1577,7 @@ contextBridge.executeInMainWorld({
           if (typeof fn !== 'function' || extras.instalados.has(nome)) return extras.instalados.has(nome);
           extras.instalados.add(nome);
           const I = {
-            get sock() { return sock; }, get ultimaLista() { return ultimaLista; },
+            get sock() { return sock; }, get ultimaLista() { return ultimaLista; }, get itensResp() { return itensResp; }, enviarNosso: (txt) => enviarDoApp(txt),
             jogo, keep, nossos, espera, catalogoNota, huntsDoHorizonte, nivelDepoisDe, xpHoraDaConta, coberturaHunts, tiposDe, fichaNota,
             get meuTimePvp() { return pvp.meuTime ? JSON.parse(JSON.stringify(pvp.meuTime)) : null; },
             filtro: (f) => extras.filtros.push(f), ouvir: (f) => extras.ouvintes.push(f), expor: (o) => Object.assign(extras.api, o),

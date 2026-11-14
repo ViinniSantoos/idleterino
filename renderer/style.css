@@ -872,6 +872,37 @@ body.foco .glow { display: none; }
 .tr-dica-res { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
 .tr-dica-res > b { font-size: 16px; }
 .tr-dica-res .tip { font-size: 14px; padding: 10px 12px; }
+/* Cartão do preço: a resposta primeiro, os detalhes fechados no fim. */
+.tr-p2 { display: grid; gap: 12px; margin-top: 12px; padding: 16px; border-radius: var(--r); background: var(--s1); border: 1px solid var(--line); }
+.tr-p2-cab { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; }
+.tr-p2-nome { font-size: 16px; }
+.tr-p2-onde { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: var(--s3); color: var(--muted); }
+.tr-p2-veredito { display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 10px; }
+.tr-p2-tile { display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; border-radius: 12px; background: var(--s2); border: 1px solid var(--line); min-width: 0; }
+.tr-p2-tile.principal { background: linear-gradient(160deg, rgba(69, 227, 155, .13), var(--s2) 70%); border-color: rgba(69, 227, 155, .35); }
+.tr-p2-rot { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
+.tr-p2-valor { font-size: 22px; font-weight: 800; line-height: 1.15; }
+.tr-p2-tile.principal .tr-p2-valor { font-size: 30px; color: var(--ok); }
+.tr-p2-sub { font-size: 12px; color: var(--muted); line-height: 1.35; }
+.tr-p2-conf { align-self: flex-start; margin-top: 4px; font-size: 12px; font-weight: 700; padding: 3px 9px; border-radius: 999px; background: var(--s3); }
+.tr-p2-conf.alta { color: #9ff0c8; } .tr-p2-conf.media { color: #ffcf66; } .tr-p2-conf.baixa { color: #ffab73; }
+.tr-p2-anuncio { font-size: 14px; font-weight: 600; padding: 10px 14px; border-radius: 10px; background: var(--s2); border-left: 4px solid var(--line-2); }
+.tr-p2-anuncio.certo { border-left-color: var(--ok); color: #9ff0c8; }
+.tr-p2-anuncio.baixo { border-left-color: #ffcf66; color: #ffdf94; }
+.tr-p2-anuncio.alto { border-left-color: #ff8a8a; color: #ffb3b3; }
+.tr-p2-alertas { display: grid; gap: 6px; }
+.tr-p2-alerta { font-size: 13px; padding: 8px 12px; border-radius: 9px; background: var(--s2); border-left: 3px solid var(--line-2); color: var(--text); line-height: 1.4; }
+.tr-p2-alerta.ruim { border-left-color: #ff8a8a; } .tr-p2-alerta.medio { border-left-color: #ffcf66; } .tr-p2-alerta.bom { border-left-color: var(--ok); }
+.tr-p2 > .tip { font-size: 14px; padding: 10px 14px; }
+.tr-p2-mais { border-radius: 10px; background: var(--s2); padding: 10px 14px; }
+.tr-p2-mais summary { cursor: pointer; font-weight: 700; color: var(--muted); }
+.tr-p2-mais summary:hover { color: var(--text); }
+.tr-p2-mais[open] summary { margin-bottom: 8px; color: var(--text); }
+.tr-p2-mais .tr-faixas { background: transparent; padding: 0; }
+.tr-p2-mais .tr-faixas > .tr-rot:first-child { display: none; }
+.tr-p2-det { display: grid; gap: 6px; }
+.tr-p2-det > span { display: block; line-height: 1.45; }
+@media (max-width: 820px) { .tr-p2-veredito { grid-template-columns: 1fr; } }
 
 
 /* calculadora de boss */
@@ -880,4 +911,7 @@ body.foco .glow { display: none; }
 .boss-res b { font-size: 26px; font-weight: 900; }
 .boss-res b.ok, .cand .price b.ok { color: var(--ok, #4cd08a); }
 .boss-res b.bad, .cand .price b.bad { color: #ff7b7b; }
+
+
+.tr-achado.shiny-op { border-left: 3px solid #ffd166; background: rgba(255, 209, 102, 0.06); }
 
