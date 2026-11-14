@@ -665,6 +665,42 @@ module.exports = function createPokeIdle(ctx) {
     setTimeout(() => pvpWatch().catch(() => {}), 2000);
     return config.pvpWatch;
   });
+  // COMO CADA ESPÉCIE JOGA DE VERDADE (Tracker do próprio PokeIdle, pokeidle.io/tracker, público e sem login): por
+  // espécie, nas partidas da temporada — dano e dano recebido por entrada, sobrevivência, abates e winrate. O Planejador
+  // usa para saber o PAPEL de cada um (tanque, soldado, assassino, atirador, mago). As 300 mais usadas (3 consultas),
+  // guardadas 6 h por faixa de rank, em memória e em arquivo.
+  const trackerPath = () => path.join(app.getPath('userData'), 'pvp-tracker.json');
+  const FAIXAS_TRACKER = new Set(['todas', 'baixo', 'alto', 'bronze', 'prata', 'ouro', 'platina', 'diamante', 'mestre']);
+  let trackerCache = null; // { [faixa]: { em, ... } }
+  ipcMain.handle('poke:pvp:tracker', async (_e, faixa0) => {
+    const faixa = FAIXAS_TRACKER.has(faixa0) ? faixa0 : 'todas';
+    if (!trackerCache) trackerCache = readJson(trackerPath(), {}) || {};
+    const c = trackerCache[faixa];
+    if (c && Date.now() - c.em < 6 * 3600 * 1000) return c;
+    try {
+      const especies = {};
+      let base = null;
+      for (let pagina = 0; pagina < 3; pagina++) {
+        const u = new URL('https://pokeidle.io/tracker/api/meta');
+        u.searchParams.set('ordem', 'uso'); u.searchParams.set('limite', '100'); u.searchParams.set('pagina', String(pagina));
+        if (faixa !== 'todas') u.searchParams.set('faixa', faixa);
+        const r = await fetch(u, { headers: { accept: 'application/json' } });
+        if (!r.ok) break;
+        const j = await r.json();
+        base = base || j;
+        for (const x of j.linhas || []) {
+          especies[x.id] = { nome: x.nome, partidas: x.partidas, winrate: x.winrate, dano: x.danoPorEntrada, recebido: x.recebidoPorEntrada, sobrev: x.sobrevivencia, abates: x.abatesPorEntrada };
+        }
+        if (!(j.linhas || []).length || (pagina + 1) * 100 >= (j.total || 0)) break;
+        await new Promise((res) => setTimeout(res, 400));
+      }
+      if (!Object.keys(especies).length) return c || null;
+      const out = { em: Date.now(), faixa, temporada: base && base.temporada, amostra: base && base.amostra, especies };
+      trackerCache[faixa] = out;
+      try { fs.writeFileSync(trackerPath(), JSON.stringify(trackerCache)); } catch {}
+      return out;
+    } catch { return c || null; }
+  });
   ipcMain.handle('poke:pvp:refresh', () => {
     if (pvpRunning) return { ok: true, running: true };
     if (pvpMeta && Date.now() - pvpMeta.at < 30 * 60 * 1000) return { ok: false, error: 'O meta foi atualizado há pouco. Dá para pedir de novo 30 min depois da última leitura.' };

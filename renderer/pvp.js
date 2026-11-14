@@ -141,7 +141,140 @@ const nomeCasa = (c) => { const k = TB_CASAS[c]; return k ? `${k.r + 1}ª fileir
 // um vai no adversário mais perto. Para cada um dos seus: a chance de vencer o 1×1 contra quem ele vai enfrentar
 // (duelo do jogo). Quem bate sem apanhar de volta (o alvo dele está ocupado com outro) ganha vantagem — mais ainda
 // quem atira de longe. O mesmo do lado deles. Resultado de 0 a 1 = chance estimada de vencer a batalha.
-function avaliarPos(mc, team, ec, enemy, P) {
+// ---------- PAPÉIS (ideia do dono, 14/11/2026, "como no TFT") ----------
+// Regras do PokeIdle que pesam aqui (código do jogo):
+//  · o ALCANCE vem do SP.ATK: só é 🏹 quem tem SP.ATK acima do ATK e do HP (folga → 2, 3 ou 4 casas); o resto é 🗡️;
+//  · não existe cura, escudo, buff, atordoar nem provocar no PvP — todo golpe é dano. Por isso NÃO há "suporte" de verdade;
+//  · a Speed só encurta o intervalo dos golpes em até 7% (shared/cooldown-golpes.mjs): pesa pouco.
+// O papel junta os status base (aguenta = HP e defesas; bate = o maior entre ATK e SP.ATK) com o que a espécie FAZ nas
+// partidas de verdade (Tracker do jogo: dano e dano recebido por entrada, sobrevivência e abates, comparados com o meta).
+const PAPEIS = {
+  tanque: { ic: '🛡️', nome: 'Tanque', faz: 'aguenta muito e segura quem chega', onde: 'na 1ª fileira, no meio' },
+  soldado: { ic: '⚔️', nome: 'Soldado', faz: 'aguenta e bate bem', onde: 'na 1ª ou 2ª fileira' },
+  assassino: { ic: '🗡️', nome: 'Assassino', faz: 'bate muito, mas cai rápido', onde: 'na 2ª fileira, nas pontas' },
+  atirador: { ic: '🏹', nome: 'Atirador', faz: 'bate de longe, golpe atrás de golpe', onde: 'na 3ª ou 4ª fileira, atrás do tanque' },
+  mago: { ic: '🔮', nome: 'Mago', faz: 'o maior dano de longe, mas é frágil', onde: 'na 4ª ou 5ª fileira, bem protegido' },
+  resistente: { ic: '🧱', nome: 'Resistente de longe', faz: 'atira e aguenta (o mais perto de um "suporte": o jogo não tem cura)', onde: 'na 2ª ou 3ª fileira' },
+};
+const med = (l) => { const s = l.filter((x) => x > 0).sort((a, b) => a - b); return s.length ? s[Math.floor(s.length / 2)] : 0; };
+// Comparação JUSTA: dentro do mesmo grupo (corpo a corpo × corpo a corpo, de longe × de longe — quem fica atrás sempre
+// causa mais dano e sobrevive mais) e por PROPORÇÕES (recebido ÷ causado), que não dependem do nível de quem usa.
+const grupoDe = (alc) => (alc > 1 ? 'longe' : 'perto');
+function preparaTracker(tk, alcanceDe, chave) {
+  if (!tk || !tk.especies || !alcanceDe) return tk;
+  if (tk.med && tk.medDe === chave) return tk;
+  const g = { perto: [], longe: [] };
+  for (const [id, x] of Object.entries(tk.especies)) { const a = alcanceDe(Number(id)); if (a && x.partidas >= 5000 && x.dano > 0) g[grupoDe(a)].push(x); }
+  const resumo = (l) => ({ razao: med(l.map((x) => x.recebido / x.dano)), dano: med(l.map((x) => x.dano)), sobrev: med(l.map((x) => x.sobrev)), abates: med(l.map((x) => x.abates)), n: l.length });
+  tk.med = { perto: resumo(g.perto), longe: resumo(g.longe) };
+  tk.medDe = chave;
+  return tk;
+}
+function papelDe(m, tk) {
+  const s = m.stats || {};
+  const hp = s.hp || 50, def = ((s.def || 50) + (s.spd || 50)) / 2, atq = Math.max(s.atk || 0, s.spa || 0), spe = s.spe || 50;
+  const aguenta = (hp + def) / 2;
+  const foco = atq / Math.max(1, aguenta); // > 1 = mais bate que aguenta
+  const alc = m.alcance || 1;
+  // O que ele faz nas partidas de verdade (só com amostra boa).
+  const r = tk && tk.especies && tk.med ? tk.especies[m.speciesId] : null;
+  const gm = r && tk.med[grupoDe(alc)];
+  const real = r && gm && gm.n >= 5 && r.partidas >= 2000 && r.dano > 0
+    ? { razao: (r.recebido / r.dano) / (gm.razao || 1), dano: r.dano / (gm.dano || 1), sobrev: r.sobrev / (gm.sobrev || 0.4), abates: r.abates / (gm.abates || 1), wr: r.winrate, partidas: r.partidas, grupo: grupoDe(alc) }
+    : null;
+  let p;
+  if (alc <= 1) {
+    // Tanque: aguenta mais do que bate — nos status, ou nas partidas (apanha bem mais do que bate, para o grupo dele).
+    // (Apanhar muito e cair rápido é ser frágil, não tanque: o real só conta se ele também sobrevive.)
+    const tank = foco < 1 || (real && real.razao >= 1.6 && real.sobrev >= 0.8);
+    const assas = !tank && ((spe >= 100 && foco >= 1.25) || (real && real.abates >= 1.3 && real.sobrev < 0.85));
+    p = tank ? 'tanque' : assas ? 'assassino' : 'soldado';
+  } else if (alc === 2) {
+    p = (spe >= 95 && foco >= 1.2) ? 'assassino' : aguenta >= 85 && foco < 1.15 ? 'resistente' : 'soldado';
+  } else {
+    // Mago = o golpe grande (SP.ATK 120+, ou dano real bem acima dos outros de longe); atirador = bate de longe com menos força.
+    p = aguenta >= 90 && foco < 1.15 ? 'resistente' : (s.spa || 0) >= 120 || (real && real.dano >= 1.4) ? 'mago' : 'atirador';
+  }
+  // Por que (curto, em números).
+  const porque = [`aguenta ${Math.round(aguenta)} (HP ${hp}, defesas ${Math.round(def)}) × bate ${atq} (${(s.atk || 0) >= (s.spa || 0) ? 'ATK' : 'SP.ATK'})`, `Speed ${spe}`, alc > 1 ? `alcance ${alc} 🏹` : 'corpo a corpo 🗡️'];
+  if (real) porque.push(`nas partidas reais, comparado aos outros ${real.grupo === 'longe' ? 'de longe' : 'corpo a corpo'}: causa ${Math.round(real.dano * 100)}% do dano típico, apanha ${String(Math.round(real.razao * 10) / 10).replace('.', ',')}× o normal para o dano que causa, sobrevive ${Math.round(real.sobrev * 100)}% do típico (winrate ${Math.round(real.wr * 100)}% em ${fmt(real.partidas)} partidas)`);
+  return { id: p, ...PAPEIS[p], porque, real: !!real };
+}
+// FORMAÇÃO POR PAPEL: a casa de partida de cada papel (a ordem de preferência, como o jogo faz por alcance).
+const PAPEL_CASAS = {
+  tanque: [2, 3, 1, 4, 9, 10], soldado: [1, 4, 0, 5, 9, 10, 8, 11], assassino: [7, 12, 6, 13, 14, 21, 8, 11],
+  resistente: [17, 18, 16, 19, 9, 10], atirador: [23, 24, 17, 18, 22, 25, 16, 19], mago: [27, 28, 23, 24, 26, 29, 22, 25],
+};
+function casasPorPapel(team, papeis) {
+  const ordem = ['tanque', 'soldado', 'assassino', 'resistente', 'atirador', 'mago'];
+  const usadas = new Set(), out = new Array(team.length).fill(null);
+  for (const p of ordem) team.forEach((m, i) => { if (papeis[i].id !== p || out[i] != null) return; const c = PAPEL_CASAS[p].find((x) => !usadas.has(x)) ?? TB_CASAS.findIndex((_, k) => !usadas.has(k)); out[i] = c; usadas.add(c); });
+  return out;
+}
+
+// A LUTA NO TEMPO (pedido do dono, 14/11/2026: o Planejador punha o Umbreon — o tank — na última fileira e o dano na
+// frente, sem dizer por quê). Simulação simples do tabuleiro com os números do próprio duelo do jogo:
+//  · todos nascem nas casas; cada um escolhe o inimigo vivo mais perto e anda até ficar no alcance dele
+//    (🗡️ corpo a corpo = 1 casa; 🏹 = 2 a 4 casas), uma casa a cada TB_PASSO_S;
+//  · no alcance, tira da vida do alvo 1/T por segundo — T = os segundos que o duelo do jogo diz que ele leva para
+//    derrubar AQUELE adversário (vida ÷ dano por segundo, com tipo, golpe, nível, IV…);
+//  · quem cai sai; quem ficou sem alvo procura o próximo. Acaba quando um lado cai inteiro (ou em 90 s).
+// Assim o tank na frente SEGURA quem chega (os inimigos batem nele) enquanto os atiradores batem sem apanhar — o que a
+// conta antiga (só "quem enfrenta quem") não via. A luta de verdade é do servidor; isto é estimativa.
+// Passo: 260 ms por casa (o padrão do replay do jogo, replay.mjs: ms ?? 260). Num passo da conta anda quantas couberem.
+const TB_PASSO_S = 0.26, TB_DT = 0.5, TB_MAX_S = 90;
+function simBatalha(mc, team, ec, enemy, T, detalhe) {
+  const nI = team.length, nJ = enemy.length;
+  const mk = (lado, i, casa, alc) => { const k = TB_CASAS[casa] || TB_CASAS[0]; const p = lado === 0 ? { x: k.cx, y: k.cy } : { x: 29 - k.cx, y: 25 - k.cy }; return { lado, i, x: p.x, y: p.y, alc: Math.max(1, Math.min(4, Math.round(alc || 1))), vida: 1, alvo: -1, anda: 0, morreu: null, entrou: null, dano: 0, apanhouDe: new Set(), bateuEm: new Set(), livre: 0 }; };
+  const A = team.map((m, i) => mk(0, i, mc[i], m.alcance)), B = enemy.map((e, j) => mk(1, j, ec[j], e.alcance));
+  const taxa = (u, alvo) => { const t = u.lado === 0 ? T[u.i] && T[u.i][alvo.i] && T[u.i][alvo.i][0] : T[alvo.i] && T[alvo.i][u.i] && T[alvo.i][u.i][1]; return t > 0 && t < 999 ? 1 / t : 1 / 60; };
+  const dist = (a, b) => Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
+  let tempo = 0;
+  for (; tempo < TB_MAX_S; tempo += TB_DT) {
+    const vivosA = A.filter((u) => u.vida > 0), vivosB = B.filter((u) => u.vida > 0);
+    if (!vivosA.length || !vivosB.length) break;
+    const golpes = [];
+    for (const u of [...vivosA, ...vivosB]) {
+      const inimigos = u.lado === 0 ? B : A;
+      let alvo = u.alvo >= 0 ? inimigos[u.alvo] : null;
+      if (!alvo || alvo.vida <= 0) {
+        let melhor = null;
+        for (const e of inimigos) if (e.vida > 0 && (!melhor || dist(u, e) < dist(u, melhor))) melhor = e;
+        alvo = melhor; u.alvo = alvo ? alvo.i : -1;
+      }
+      if (!alvo) continue;
+      if (dist(u, alvo) > u.alc) {
+        u.anda += TB_DT;
+        while (u.anda >= TB_PASSO_S && dist(u, alvo) > u.alc) { u.anda -= TB_PASSO_S; u.x += Math.sign(alvo.x - u.x); u.y += Math.sign(alvo.y - u.y); }
+        if (dist(u, alvo) > u.alc) continue;
+        u.anda = 0;
+      }
+      if (u.entrou == null) u.entrou = tempo;
+      golpes.push([u, alvo, taxa(u, alvo) * TB_DT]);
+    }
+    for (const [u, alvo, d] of golpes) {
+      const tirado = Math.min(alvo.vida, d);
+      alvo.vida -= d; u.dano += tirado; alvo.apanhouDe.add(u.i); u.bateuEm.add(alvo.i);
+      if (alvo.vida <= 0 && alvo.morreu == null) alvo.morreu = tempo;
+    }
+    // "Livre" = batendo sem ninguém batendo nele (o tank segura, o atirador bate de graça).
+    const batidos = new Set(golpes.filter(([u]) => u.lado === 1).map(([, a]) => a.i));
+    for (const [u] of golpes) if (u.lado === 0 && !batidos.has(u.i)) u.livre += TB_DT;
+  }
+  const restoA = A.reduce((s, u) => s + Math.max(0, u.vida), 0), restoB = B.reduce((s, u) => s + Math.max(0, u.vida), 0);
+  // 0 a 1: vence com mais gente viva = perto de 1; perde por pouco = perto de 0,5.
+  const v = restoA > 0 && restoB <= 0 ? 0.5 + 0.5 * (restoA / nI) : restoB > 0 && restoA <= 0 ? 0.5 - 0.5 * (restoB / nJ) : 0.5 + 0.5 * ((restoA / nI) - (restoB / nJ));
+  return detalhe ? { v, tempo, A, B } : v;
+}
+function avaliarPos(mc, team, ec, enemy, P, T) {
+  const nI = team.length, nJ = enemy.length;
+  if (!nI || !nJ) return 0;
+  // Com os tempos do duelo: a luta no tempo pesa 70% (a ordem de quem segura e quem bate) e o "quem enfrenta quem"
+  // pela chance do duelo, 30% (guarda a incerteza do 1×1).
+  if (T) return 0.7 * simBatalha(mc, team, ec, enemy, T) + 0.3 * avaliarParear(mc, team, ec, enemy, P);
+  return avaliarParear(mc, team, ec, enemy, P);
+}
+function avaliarParear(mc, team, ec, enemy, P) {
   const nI = team.length, nJ = enemy.length;
   if (!nI || !nJ) return 0;
   const d = (i, j) => distCasas(mc[i], ec[j]);
@@ -156,23 +289,26 @@ function avaliarPos(mc, team, ec, enemy, P) {
 // MELHOR POSIÇÃO: procura as casas que dão a maior chance média contra os times escolhidos (pesados por quantos do
 // top usam cada um). Começa da posição do jogo, da padrão e de 14 pontos sorteados (sempre os mesmos) e vai trocando
 // um pokémon de casa (ou dois de lugar) enquanto melhora.
-function otimizarPos(team, alvos, inicial) {
+async function otimizarPos(team, alvos, inicial, extras) {
   const n = team.length;
   const pesoT = alvos.reduce((s, x) => s + x.w, 0) || 1;
-  const val = (mc) => alvos.reduce((s, x) => s + x.w * avaliarPos(mc, team, x.ec, x.enemy, x.P), 0) / pesoT;
+  const val = (mc) => alvos.reduce((s, x) => s + x.w * avaliarPos(mc, team, x.ec, x.enemy, x.P, x.T), 0) / pesoT;
   let seed = 12345; const rnd = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
   const sorteio = () => { const l = [...TB_CASAS.keys()]; for (let i = l.length - 1; i > 0; i--) { const k = Math.floor(rnd() * (i + 1)); [l[i], l[k]] = [l[k], l[i]]; } return l.slice(0, n); };
-  const inicios = [inicial, casasDaEquipe([], team.map((m) => m.alcance))];
-  for (let r = 0; r < 14; r++) inicios.push(sorteio());
-  let best = inicial.slice(), bestV = val(best);
+  // Com a luta no tempo cada avaliação pesa mais: menos pontos de partida e menos voltas (continua rápido).
+  const comTempo = alvos.some((x) => x.T);
+  const inicios = [inicial, casasDaEquipe([], team.map((m) => m.alcance)), ...(extras || [])];
+  for (let r = 0; r < (comTempo ? 4 : 14); r++) inicios.push(sorteio());
+  let best = inicial.slice(), bestV = val(best), contas = 0;
   for (const ini of inicios) {
     let cur = ini.slice(), v = val(cur), melhorou = true, voltas = 0;
-    while (melhorou && voltas++ < 30) {
+    while (melhorou && voltas++ < (comTempo ? 8 : 30)) {
       melhorou = false;
       for (let i = 0; i < n; i++) for (let c = 0; c < TB_CASAS.length; c++) {
         if (cur[i] === c) continue;
         const t = cur.slice(); const k = t.indexOf(c); if (k >= 0) t[k] = t[i]; t[i] = c;
         const vv = val(t); if (vv > v + 1e-9) { cur = t; v = vv; melhorou = true; }
+        if (comTempo && ++contas % 60 === 0) await new Promise((r) => setTimeout(r, 0)); // a tela continua respondendo
       }
     }
     if (v > bestV + 1e-9) { best = cur; bestV = v; }
@@ -193,7 +329,7 @@ function boardEl(sides) {
         const casa = TB_CASAS.find((k) => k.r === r && k.col === col).casa;
         const i = sd.casas.findIndex((c) => c === casa);
         const cell = el('div', `pp-cell${i >= 0 ? ' on' : ''}`);
-        if (i >= 0) { const m = sd.team[i]; cell.append(el('b', null, shortName(m.nome)), el('span', null, alcIcon(m.alcance))); cell.title = `${m.nome} · Nv ${fmt(m.level)} · ${nomeCasa(casa)}`; }
+        if (i >= 0) { const m = sd.team[i]; const pp = m.papel; cell.append(el('b', null, shortName(m.nome)), el('span', null, `${pp ? `${pp.ic} ` : ''}${alcIcon(m.alcance)}`)); cell.title = `${m.nome} · Nv ${fmt(m.level)} · ${nomeCasa(casa)}${pp ? `\n${pp.ic} ${pp.nome}: ${pp.faz}` : ''}`; }
         row.append(cell);
       }
       half.append(row);
@@ -258,7 +394,9 @@ async function simTeam(team, enemyTime) {
   const cols = enemyTime.map((_, j) => Math.max(...m.map((row) => row[j])));
   const all = m.flat();
   const est = 0.6 * (cols.reduce((a, b) => a + b, 0) / cols.length) + 0.4 * (all.reduce((a, b) => a + b, 0) / all.length);
-  const out = { m, est };
+  // Tempos do duelo (segundos para derrubar / ser derrubado): só nas versões do núcleo que já mandam.
+  const t = Array.isArray(res.t) && res.t.length === m.length ? res.t.map((row) => row.map((x) => (Array.isArray(x) ? x : [30, 30]))) : null;
+  const out = { m, t, est };
   pvpSimCache.set(key, out);
   return out;
 }
@@ -572,6 +710,83 @@ function candRow(meta, x, top) {
 // Abre com o time ATIVO do PvP do jogo (os 5 e as casas de "Sua equipe de PvP"). Clicar num do seu time tira ele;
 // clicar num da lista põe. Para cada time do top (arquétipos), o duelo 1×1 do jogo de cada um contra cada um e o
 // tabuleiro real dão a chance estimada de vencer; a posição sugerida é a que dá a maior chance média contra o top.
+// POR QUE ESSA POSIÇÃO (feedback do dono): a luta simulada contra o time escolhido, pokémon a pokémon — quando entra na
+// luta, em quem bate, de quem apanha, quanto do dano faz e quando cai — e o papel de cada um (segura a frente / bate sem
+// apanhar). E o teste do TANK: o seu pokémon que mais aguenta (corpo a corpo) colocado na frente — se a sugestão o deixou
+// atrás, mostra quanto daria na frente e por quê.
+const segs = (s) => `${String(Math.round(s * 10) / 10).replace('.', ',')} s`;
+function porQueEssaPosicao(casas, team, sel, media, papeis, casasPapel) {
+  const out = [el('div', 'ext-sec', 'Por que essa posição? (luta simulada contra este time)')];
+  const r = simBatalha(casas, team, sel.ec, sel.enemy, sel.T, true);
+  const danoTot = r.A.reduce((s, u) => s + u.dano, 0) || 1;
+  const vivos = r.A.filter((u) => u.vida > 0).length, vivosE = r.B.filter((u) => u.vida > 0).length;
+  out.push(el('div', `tip ${vivos && !vivosE ? 'ok' : vivosE && !vivos ? 'bad' : 'meh'}`, vivos && !vivosE ? `Na simulação você vence em ~${segs(r.tempo)}, com ${vivos} de pé.`
+    : vivosE && !vivos ? `Na simulação você perde em ~${segs(r.tempo)} (sobram ${vivosE} deles).` : `Luta equilibrada: depois de ${segs(r.tempo)} os dois lados ainda têm gente de pé.`));
+  const nomesE = (set) => [...set].map((j) => shortName(sel.enemy[j].nome)).join(', ');
+  // O "tank": quem mais demora para cair, na média contra os 5 deles (pelo duelo do jogo).
+  const aguenta = team.map((_, i) => { const l = (sel.T[i] || []).map((x) => (x ? x[1] : 0)).filter((x) => x > 0 && x < 999); return l.length ? l.reduce((s, x) => s + x, 0) / l.length : 0; });
+  // O tanque: o de papel Tanque (status + partidas reais); sem nenhum, o que mais demora para cair contra eles.
+  const iPapelTank = papeis ? papeis.findIndex((p) => p.id === 'tanque') : -1;
+  const iTank = iPapelTank >= 0 ? iPapelTank : aguenta.indexOf(Math.max(...aguenta));
+  r.A.forEach((u, i) => {
+    const m = team[i];
+    const linhaCasa = TB_CASAS[casas[i]] ? TB_CASAS[casas[i]].r + 1 : '?';
+    const ativo = u.entrou != null ? (u.morreu != null ? u.morreu : r.tempo) - u.entrou : 0;
+    const papel = u.apanhouDe.size >= 2 ? '🛡️ segura a frente' : ativo > 0 && u.livre >= ativo * 0.6 ? '🏹 bate sem apanhar' : u.entrou == null ? '💤 não chegou a lutar' : '⚔️ troca golpes';
+    const partes = [
+      u.entrou != null ? `entra aos ${segs(u.entrou)}` : 'não chega em ninguém',
+      u.bateuEm.size ? `bate em ${nomesE(u.bateuEm)}` : null,
+      u.apanhouDe.size ? `apanha de ${nomesE(u.apanhouDe)}` : 'ninguém bate nele',
+      `${Math.round((u.dano / danoTot) * 100)}% do dano do time`,
+      u.morreu != null ? `cai aos ${segs(u.morreu)}` : 'termina de pé',
+    ].filter(Boolean);
+    const pp = papeis ? papeis[i] : null;
+    out.push(el('div', `tip ${u.morreu != null ? 'meh' : 'ok'}`, `${pp ? `${pp.ic} ${shortName(m.nome)} é ${pp.nome}` : shortName(m.nome)} ${alcIcon(m.alcance)} (${linhaCasa}ª fileira) · na luta: ${papel}: ${partes.join(' · ')}.`));
+  });
+  // FORA DO LUGAR: cada papel tem a sua fileira (o tanque na frente, mago e atirador atrás).
+  if (papeis) {
+    const foraDoLugar = [];
+    team.forEach((m, i) => {
+      const r0 = TB_CASAS[casas[i]] ? TB_CASAS[casas[i]].r : 0, p = papeis[i];
+      if ((p.id === 'mago' || p.id === 'atirador') && r0 <= 0) foraDoLugar.push(`${p.ic} ${shortName(m.nome)} é ${p.nome} e está na 1ª fileira: ele ${p.faz.split(',')[0]}, mas ali é o primeiro a apanhar (lugar dele: ${p.onde}).`);
+      if (p.id === 'tanque' && r0 >= 2) foraDoLugar.push(`${p.ic} ${shortName(m.nome)} é Tanque e está na ${r0 + 1}ª fileira: ninguém chega nele no começo, então ele não segura nada (lugar dele: ${p.onde}).`);
+    });
+    for (const t of foraDoLugar) out.push(el('div', 'tip warn', t));
+    if (casasPapel && casasPapel.join() !== casas.join()) {
+      const mP = media(casasPapel), mA = media(casas), d = Math.round((mP - mA) * 100);
+      out.push(el('div', `tip ${d > 0 ? 'ok' : ''}`, `📐 A formação por papel (cada um no lugar do papel) daria ${pct(mP)} contra o top${d > 0 ? ` (+${d} pontos): vale testar` : d < 0 ? ` (${d} pontos): aqui a posição sugerida rende mais` : ' (igual)'}.`));
+    }
+  }
+  // TESTE DO TANK: o tanque, se for corpo a corpo e estiver da 3ª fileira para trás, vai para a frente.
+  const tank = team[iTank];
+  const filaTank = TB_CASAS[casas[iTank]] ? TB_CASAS[casas[iTank]].r : 0;
+  if (tank && tank.alcance <= 1 && filaTank >= 2) {
+    const frentes = casas.map((c, i) => ({ c, i, r: TB_CASAS[c] ? TB_CASAS[c].r : 9 })).filter((x) => x.i !== iTank).sort((a, b) => a.r - b.r);
+    const troca = frentes[0];
+    if (troca) {
+      const alt = casas.slice(); alt[iTank] = troca.c; alt[troca.i] = casas[iTank];
+      const vAqui = avaliarPos(casas, team, sel.ec, sel.enemy, sel.P, sel.T), vAlt = avaliarPos(alt, team, sel.ec, sel.enemy, sel.P, sel.T);
+      const mAqui = media(casas), mAlt = media(alt);
+      const rAlt = simBatalha(alt, team, sel.ec, sel.enemy, sel.T, true);
+      const uT = rAlt.A[iTank], uT0 = r.A[iTank];
+      const dif = Math.round((mAlt - mAqui) * 100);
+      const nomeT = shortName(tank.nome), nomeX = shortName(team[troca.i].nome);
+      if (dif < 0) {
+        out.push(el('div', 'tip', `❓ E com o ${nomeT} na frente (trocando com o ${nomeX})? Contra o top daria ${pct(mAlt)} em vez de ${pct(mAqui)} (${dif} pontos); contra este time ${pct(vAlt)}. `
+          + `Na frente ele ${uT.morreu != null ? `cai aos ${segs(uT.morreu)}` : 'aguenta até o fim'}${uT.apanhouDe.size ? ` apanhando de ${nomesE(uT.apanhouDe)}` : ''}; `
+          + `${uT0.apanhouDe.size ? `atrás ele entra aos ${segs(uT0.entrou ?? 0)}, quando os deles já estão gastos` : 'atrás ele fica protegido'} — por isso a sugestão o deixa lá. `
+          + `Isso costuma acontecer quando ele perde o 1×1 para quem chega primeiro: segurar a frente só vale se ele aguentar quem bate nele.`));
+      } else if (dif > 0 || vAlt > vAqui + 0.005) {
+        out.push(el('div', 'tip ok', `💡 Com o ${nomeT} na frente (trocando com o ${nomeX}) fica melhor: contra o top ${pct(mAlt)} (${dif >= 0 ? '+' : ''}${dif} pontos), contra este time ${pct(vAlt)}. Ele ${uT.morreu != null ? `segura até ${segs(uT.morreu)}` : 'aguenta a luta toda'} e protege quem bate de longe.`));
+      }
+    }
+  }
+  out.push(el('span', 'sub', 'Papéis: 🛡️ Tanque · ⚔️ Soldado · 🗡️ Assassino · 🏹 Atirador · 🔮 Mago · 🧱 Resistente de longe — pelos status (aguenta × bate, alcance e Speed) e por como a espécie joga nas partidas reais (Tracker do jogo). Não existe \"suporte\" de verdade: no PvP do PokeIdle não há cura, escudo nem buff (todo golpe é dano), e a Speed só acelera os golpes em até 7%.'));
+  out.push(el('span', 'sub', `Como a simulação funciona: cada um vai no inimigo mais perto e anda até ficar no alcance (🗡️ 1 casa, 🏹 até 4); o dano por segundo e a vida vêm do duelo 1×1 do jogo (tipo, golpe, nível, IV, Z-Move). A luta de verdade é calculada pelo servidor: é estimativa.`));
+  return out;
+}
+
+let pvpTracker = null, pvpTrackerPedido = false;
 let pvpPosModo = (() => { try { return localStorage.getItem('pvpPosModo') || 'top'; } catch { return 'top'; } })();
 const pvpOtimoCache = new Map();
 function renderPvpPlan(root, c) {
@@ -586,12 +801,19 @@ function renderPvpPlan(root, c) {
   const ehDoJogo = doJogo.length > 0 && doJogo.length === team.length && team.every((m) => doJogo.includes(m.id));
   // A posição de cada um no jogo (os que não estão no time do jogo vão para a casa padrão do alcance, como o jogo faz).
   const casasJogo = casasDaEquipe(team.map((m) => (mt && mt.casas ? mt.casas[String(m.id)] : null)), team.map((m) => m.alcance));
+  // Papéis (tanque, soldado…): status base + como a espécie joga no Tracker do jogo (lido 1× a cada 6 h).
+  if (!pvpTracker && !pvpTrackerPedido) { pvpTrackerPedido = true; call('poke:pvp:tracker', 'todas').then((tk) => { if (tk) { pvpTracker = tk; if (page === 'pvp' && pvpTab === 'plan') renderPvp(true); } }).catch(() => {}); }
+  if (pvpTracker) preparaTracker(pvpTracker, (id) => (meta.info && meta.info[id] ? meta.info[id].alcance : null), meta.at || 1);
+  const papeis = team.map((m) => papelDe(m, pvpTracker));
+  const casasPapel = casasPorPapel(team, papeis);
+  team.forEach((m, i) => { m.papel = papeis[i]; });
 
   const top = (arqs.filter((a) => a.tier !== 'U').length ? arqs.filter((a) => a.tier !== 'U') : arqs).slice(0, 12);
   if (pvpArqSel == null || !arqs.some((a) => a.id === pvpArqSel)) pvpArqSel = top[0] ? top[0].id : (arqs[0] ? arqs[0].id : null);
   const arq = arqs.find((a) => a.id === pvpArqSel);
   const timeDe = (a) => { const enemy = arqTeam(a, meta).slice(0, 5); return { enemy, ec: casasDaEquipe(enemy.map((k) => k.casa), enemy.map((k) => k.alcance)) }; };
   const sel = arq ? timeDe(arq) : { enemy: [], ec: [] };
+  sel.enemy.forEach((e) => { e.papel = papelDe(e, pvpTracker); });
 
   const pc = el('div', 'card pvp-plan');
   const ph = el('div', 'pvp-sh');
@@ -613,8 +835,9 @@ function renderPvpPlan(root, c) {
   meu.append(el('div', 'ext-sec', `Seu time (${team.length}/5) · clique para tirar`));
   for (const m of team) {
     const b = el('button', 'pp-item on');
-    b.append(el('b', null, `✕ ${m.nome}`), el('span', null, `Nv ${fmt(m.level)} · ${alcIcon(m.alcance)}${m.el ? ` · Z ${TIPO_PT[String(m.el).toUpperCase()] || m.el}` : ''}${doJogo.includes(m.id) ? ' · no time do jogo' : ' · trocado aqui'}`));
-    b.title = 'Tirar do planejador (no jogo nada muda)';
+    const pp = papeis[team.indexOf(m)];
+    b.title = `Tirar do planejador (no jogo nada muda)\n${pp.ic} ${pp.nome}: ${pp.faz}. Lugar: ${pp.onde}.\n${pp.porque.join(' · ')}`;
+    b.append(el('b', null, `✕ ${m.nome}`), el('span', 'pp-papel', `${pp.ic} ${pp.nome}`), el('span', null, `Nv ${fmt(m.level)} · ${alcIcon(m.alcance)}${m.el ? ` · Z ${TIPO_PT[String(m.el).toUpperCase()] || m.el}` : ''}${doJogo.includes(m.id) ? ' · no time do jogo' : ' · trocado aqui'}`));
     b.onclick = () => { pvpPlanSugestao = false; pvpPlan = pvpPlan.filter((x) => x !== m.id); renderPvp(true); };
     meu.append(b);
   }
@@ -658,7 +881,7 @@ function renderPvpPlan(root, c) {
   // --- o meio: tabuleiro + qual posição mostrar
   const mid = el('div', 'pp-mid');
   const modos = el('div', 'pvp-tabs');
-  for (const [k, l] of [['top', '⭐ Melhor contra o top 50'], ['arq', '🎯 Melhor contra este time'], ['jogo', '🎮 Como está no jogo']]) {
+  for (const [k, l] of [['top', '⭐ Melhor contra o top 50'], ['arq', '🎯 Melhor contra este time'], ['papel', '📐 Formação por papel'], ['jogo', '🎮 Como está no jogo']]) {
     modos.append(button(l, pvpPosModo === k ? 'on' : '', () => { pvpPosModo = k; try { localStorage.setItem('pvpPosModo', k); } catch {} renderPvp(true); }));
   }
   const boardBox = el('div');
@@ -686,7 +909,7 @@ function renderPvpPlan(root, c) {
         if (!t.enemy.length) continue;
         const s = await simTeam(team, t.enemy);
         if (page !== 'pvp' || pvpTab !== 'plan') return;
-        if (s) alvos.push({ a, enemy: t.enemy, ec: t.ec, P: s.m, w: a.n || 1, est: s.est });
+        if (s) alvos.push({ a, enemy: t.enemy, ec: t.ec, P: s.m, T: s.t, w: a.n || 1, est: s.est });
         res.replaceChildren(el('b', null, `Calculando contra os times do top (${alvos.length}/${top.length})…`));
       }
       if (!alvos.length) { res.replaceChildren(el('b', null, 'Não deu para simular agora (a conta precisa estar aberta no app).')); return; }
@@ -694,16 +917,16 @@ function renderPvpPlan(root, c) {
       let ot = pvpOtimoCache.get(ch);
       if (!ot) {
         const daSel = alvos.find((x) => x.a.id === pvpArqSel);
-        ot = { top: otimizarPos(team, alvos, casasJogo), arq: daSel ? otimizarPos(team, [daSel], casasJogo) : null };
+        ot = { top: await otimizarPos(team, alvos, casasJogo, [casasPapel]), arq: daSel ? await otimizarPos(team, [daSel], casasJogo, [casasPapel]) : null };
         pvpOtimoCache.set(ch, ot);
       }
       // "Melhor contra este time" depende do adversário escolhido: calcula se ainda não tem.
       const daSel = alvos.find((x) => x.a.id === pvpArqSel);
-      if (daSel && (!ot.arq || ot.arqId !== pvpArqSel)) { ot.arq = otimizarPos(team, [daSel], casasJogo); ot.arqId = pvpArqSel; }
-      const casasModo = pvpPosModo === 'jogo' ? casasJogo : pvpPosModo === 'arq' && ot.arq ? ot.arq.casas : ot.top.casas;
+      if (daSel && (!ot.arq || ot.arqId !== pvpArqSel)) { ot.arq = await otimizarPos(team, [daSel], casasJogo, [casasPapel]); ot.arqId = pvpArqSel; }
+      const casasModo = pvpPosModo === 'jogo' ? casasJogo : pvpPosModo === 'papel' ? casasPapel : pvpPosModo === 'arq' && ot.arq ? ot.arq.casas : ot.top.casas;
       desenhar(casasModo);
-      const media = (casas) => { const pw = alvos.reduce((s, x) => s + x.w, 0) || 1; return alvos.reduce((s, x) => s + x.w * avaliarPos(casas, team, x.ec, x.enemy, x.P), 0) / pw; };
-      const vsSelV = daSel ? avaliarPos(casasModo, team, daSel.ec, daSel.enemy, daSel.P) : null;
+      const media = (casas) => { const pw = alvos.reduce((s, x) => s + x.w, 0) || 1; return alvos.reduce((s, x) => s + x.w * avaliarPos(casas, team, x.ec, x.enemy, x.P, x.T), 0) / pw; };
+      const vsSelV = daSel ? avaliarPos(casasModo, team, daSel.ec, daSel.enemy, daSel.P, daSel.T) : null;
       const cls = (v) => (v >= 0.55 ? 'ok' : v >= 0.45 ? 'meh' : 'bad');
       res.replaceChildren(
         ...(vsSelV != null ? [el('b', `big ${cls(vsSelV)}`, `${pct(vsSelV)} de chance de vencer este time`)] : []),
@@ -714,7 +937,7 @@ function renderPvpPlan(root, c) {
       tipsBox.replaceChildren();
       tipsBox.append(el('div', 'ext-sec', 'Contra cada time do top'));
       for (const x of [...alvos].sort((p, q) => q.w - p.w)) {
-        const v = avaliarPos(casasModo, team, x.ec, x.enemy, x.P);
+        const v = avaliarPos(casasModo, team, x.ec, x.enemy, x.P, x.T);
         const r = el('div', `tip ${cls(v)}`, `${x.a.tier} · ${arqName(x.a, meta)} (${x.a.n} do top): ${pct(v)}`);
         r.style.cursor = 'pointer'; r.title = 'Ver este time no tabuleiro';
         r.onclick = () => { pvpArqSel = x.a.id; renderPvp(true); };
@@ -723,10 +946,11 @@ function renderPvpPlan(root, c) {
       // Dicas sem AoE: frente, retaguarda e nível.
       if (daSel) {
         const add = (txt, k) => tipsBox.append(el('div', `tip ${k || ''}`, txt));
+        if (daSel.T) for (const x of porQueEssaPosicao(casasModo, team, daSel, media, papeis, casasPapel)) tipsBox.append(x);
         tipsBox.append(el('div', 'ext-sec', 'Dicas contra este time'));
         const meleeThem = daSel.enemy.filter((e) => e.alcance <= 1);
         const tank = [...team].sort((a, b) => ((b.stats ? b.stats.hp + b.stats.def + b.stats.spd : 0) - (a.stats ? a.stats.hp + a.stats.def + a.stats.spd : 0)))[0];
-        if (meleeThem.length >= 2 && tank) add(`${meleeThem.length} deles batem corpo a corpo: ${shortName(tank.nome)} (mais HP e defesa) segura melhor a frente.`);
+        if (!daSel.T && meleeThem.length >= 2 && tank) add(`${meleeThem.length} deles batem corpo a corpo: ${shortName(tank.nome)} (mais HP e defesa) segura melhor a frente.`);
         const ranged = daSel.enemy.filter((e) => e.alcance >= 3);
         if (ranged.length) add(`Atiradores de longe deles: ${ranged.map((e) => shortName(e.nome)).join(', ')}. Quem tem alcance alto do seu lado chega à retaguarda deles.`);
         const lvl = Math.round(team.reduce((s, m) => s + m.level, 0) / team.length);

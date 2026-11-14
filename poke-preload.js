@@ -1400,16 +1400,25 @@ contextBridge.executeInMainWorld({
       if (!g || !g.compararDuelo1v1) return { erro: 'comparador indisponível' };
       const esp = await especies();
       const tab = jogo.tabelaTipos || {};
-      const m = [];
+      // m[i][j] = chance de A vencer B · t[i][j] = [segundos para A derrubar B, segundos para B derrubar A] (vida ÷
+      // dano por segundo do próprio duelo do jogo) — o Planejador usa os tempos para simular a luta no tabuleiro.
+      const m = [], t = [];
       for (const x of a || []) {
         const ea = esp.get(x.speciesId);
+        const linhaT = [];
         m.push((b || []).map((y) => {
           const eb = esp.get(y.speciesId);
-          if (!ea || !eb) return null;
-          try { const r = g.compararDuelo1v1({ ...x, id: x.id ?? 1 }, ea, { ...y, id: y.id ?? 2 }, eb, { amostras: 80, tabelaTipos: tab }); return r ? Math.round(r.pctA * 1000) / 1000 : null; } catch { return null; }
+          if (!ea || !eb) { linhaT.push(null); return null; }
+          try {
+            const r = g.compararDuelo1v1({ ...x, id: x.id ?? 1 }, ea, { ...y, id: y.id ?? 2 }, eb, { amostras: 80, tabelaTipos: tab });
+            const seg = (vida, dps) => (vida > 0 && dps > 0 ? Math.round((vida / dps) * 100) / 100 : 999);
+            linhaT.push(r && r.a && r.b ? [seg(r.b.ehp, r.a.dps), seg(r.a.ehp, r.b.dps)] : null);
+            return r ? Math.round(r.pctA * 1000) / 1000 : null;
+          } catch { linhaT.push(null); return null; }
         }));
+        t.push(linhaT);
       }
-      return { m };
+      return { m, t };
     }
     // Melhores espécies contra o meta, se a pessoa pudesse ter qualquer uma (a "baleia"): cada espécie
     // forte do jogo (inclusive Mega), num pokémon de referência do nível/qualidade típicos do top,

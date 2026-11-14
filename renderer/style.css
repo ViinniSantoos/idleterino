@@ -805,6 +805,7 @@ body.foco .glow { display: none; }
 .pp-sug { display: grid; gap: 6px; margin-top: 12px; }
 .pp-item.sug { border: 1px dashed color-mix(in srgb, #f5c542 55%, transparent); background: color-mix(in srgb, #f5c542 6%, transparent); cursor: default; }
 .pp-tag { font-size: 11px; font-weight: 800; color: #f7d774; }
+.pp-item span.pp-papel { font-size: 11px; font-weight: 800; color: #c9b8ff; }
 /* Botão com o atributo hidden nunca aparece (o display dos botões do menu passava por cima). */
 [hidden] { display: none !important; }
 .celular { display: grid; gap: 12px; max-width: 760px; }
