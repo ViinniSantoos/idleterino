@@ -256,6 +256,7 @@ module.exports = function createPokeIdle(ctx) {
       if (!vivo) { if (views.get(id) === v) reopen(id, 'travou'); return; }
     }
     const r = await v.webContents.executeJavaScript(READ_SCRIPT).catch(() => null);
+    guardarPartidas(id, v).catch(() => {});
     if (r) {
       const canais = r.canais; delete r.canais;
       if (Array.isArray(r.hunts) && r.hunts.length) huntLevels = r.hunts;
@@ -276,6 +277,23 @@ module.exports = function createPokeIdle(ctx) {
       if (canais && ctx.onOfficial) { try { ctx.onOfficial(canais, id); } catch {} }
       send('status', snapshot());
     }
+  }
+  // MINHAS PARTIDAS: o núcleo resume cada partida ranqueada (do replay que o jogo manda); aqui elas vão para um arquivo
+  // (as últimas 100 de cada conta), para não se perderem quando a conta é otimizada ou o app fecha.
+  const partidasPath = () => path.join(app.getPath('userData'), 'pvp-partidas.json');
+  async function guardarPartidas(id, v) {
+    if (!v || v.webContents.isDestroyed()) return;
+    const novas = await v.webContents.executeJavaScript('window.__idleterinoMercado && window.__idleterinoMercado.pvpPartidasDesde ? window.__idleterinoMercado.pvpPartidasDesde(0) : []').catch(() => []);
+    if (!Array.isArray(novas) || !novas.length) return;
+    const todas = readJson(partidasPath(), {}) || {};
+    const lista = Array.isArray(todas[id]) ? todas[id] : [];
+    const chave = (x) => (x.id != null ? `id${x.id}` : `${x.oponente && x.oponente.nick}|${x.delta}|${Math.round((x.em || 0) / 60000)}`);
+    const vistas = new Set(lista.map(chave));
+    let mudou = false;
+    for (const x of novas) { const k = chave(x); if (vistas.has(k)) continue; vistas.add(k); delete x.seq; lista.push(x); mudou = true; }
+    if (!mudou) return;
+    todas[id] = lista.sort((a, b) => (a.em || 0) - (b.em || 0)).slice(-100);
+    try { fs.writeFileSync(partidasPath(), JSON.stringify(todas)); } catch {}
   }
   async function readAll() { for (const id of views.keys()) await readOne(id); autoFreeze(); }
 
@@ -478,7 +496,8 @@ module.exports = function createPokeIdle(ctx) {
       const mv = views.get(mainAccId());
       if (pvpRunning && mv && !mv.webContents.isDestroyed()) prog = await mv.webContents.executeJavaScript('window.__idleterinoMercado.pvpEstado()').catch(() => null);
     }
-    return { meta: pvpMeta, hist: readJson(histPath(), []), me: (readJson(mePath(), {})[id] || []), watch: config.pvpWatch || [], watchHist: config.pvpWatchHist || {}, running: pvpRunning, prog, accountId: id, live: live && !live.erro ? { meus: live.meus, info: live.info, euPvp: live.euPvp, nick: live.nick, nivel: live.nivel, tabelaTipos: live.tabelaTipos, meuTime: live.meuTime || null } : null };
+    if (v && !v.webContents.isDestroyed()) await guardarPartidas(id, v).catch(() => {});
+    return { meta: pvpMeta, hist: readJson(histPath(), []), me: (readJson(mePath(), {})[id] || []), partidas: (readJson(partidasPath(), {}) || {})[id] || [], watch: config.pvpWatch || [], watchHist: config.pvpWatchHist || {}, running: pvpRunning, prog, accountId: id, live: live && !live.erro ? { meus: live.meus, info: live.info, euPvp: live.euPvp, nick: live.nick, nivel: live.nivel, tabelaTipos: live.tabelaTipos, meuTime: live.meuTime || null } : null };
   }
 
   // Mercado no Início: as mesmas consultas dos botões do mercado do jogo, pela conexão da própria

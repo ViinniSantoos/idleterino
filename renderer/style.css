@@ -578,6 +578,17 @@ button.mini.on { border-color: var(--ok); color: var(--ok); }
 .pp-matrix .pm-row { grid-template-columns: minmax(0, 1.3fr) repeat(5, minmax(0, 1fr)); }
 .pp-matrix .pm-row span.ok { color: var(--ok); } .pp-matrix .pm-row span.meh { color: #ffcf66; } .pp-matrix .pm-row span.bad { color: #ff8a8a; }
 .pvp-me-row.six { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+/* Minhas partidas e meta real */
+.pp-matrix .pm-row:has(> span:nth-child(7)) { grid-template-columns: minmax(0, 1.5fr) repeat(6, minmax(0, 1fr)); }
+.pvp-partida { border-radius: 10px; background: var(--s2); padding: 8px 12px; margin-top: 6px; border-left: 3px solid var(--line-2); }
+.pvp-partida.v { border-left-color: var(--ok); } .pvp-partida.d { border-left-color: #ff8a8a; }
+.pvp-partida summary { cursor: pointer; font-weight: 700; font-size: 13px; }
+.pvp-partida[open] summary { margin-bottom: 8px; }
+.pvp-partida-corpo { display: grid; gap: 8px; }
+.pvp-partida-corpo .pp-board { max-width: 440px; }
+.pvp-meta-real { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.pvp-meta-real .tip { font-size: 12px; margin-top: 4px; }
+@media (max-width: 900px) { .pvp-meta-real { grid-template-columns: 1fr; } }
 .pr-chart { width: 100%; height: auto; }
 .pr-chart .ax { stroke: var(--line-2); } .pr-chart .ln { fill: none; stroke: #8c6cff; stroke-width: 2.5; } .pr-chart .pt { fill: #c8b8ff; } .pr-chart .lb { fill: var(--muted); font-size: 12px; }
 .pvp-days { margin-top: 10px; }

@@ -431,13 +431,14 @@ async function renderPvp(keepScroll) {
   root.append(head);
 
   const tabs = el('div', 'pvp-tabs');
-  for (const [k, l] of [['meta', 'Meta'], ['time', 'Meu time'], ['plan', 'Planejador'], ['hist', 'Histórico']]) {
+  for (const [k, l] of [['meta', 'Meta'], ['time', 'Meu time'], ['plan', 'Planejador'], ['jogos', '🎬 Minhas partidas'], ['hist', 'Histórico']]) {
     tabs.append(button(l, pvpTab === k ? 'on' : '', () => { if (k === 'plan') pvpPlan = null; pvpTab = k; try { localStorage.setItem('pvpTab', k); } catch {} renderPvp(); }));
   }
   root.append(tabs);
 
   if (running) setTimeout(() => page === 'pvp' && renderPvp(true), 8000);
   if (pvpTab === 'hist') { renderPvpHist(root); root.scrollTop = scroll; return; }
+  if (pvpTab === 'jogos') { renderPvpPartidas(root, meta); root.scrollTop = scroll; return; }
   if (!meta) {
     root.append(emptyBox(running ? 'Lendo o top 50…' : 'O meta ainda não foi lido', running ? 'Uma consulta a cada poucos segundos pela conta principal. Em uns 6 minutos aparece tudo aqui.' : 'Ele é lido sozinho 3 minutos depois de abrir o app (pela conta principal) e depois uma vez por dia. Ou clique em "Atualizar meta".'));
     return;
@@ -463,9 +464,193 @@ async function renderPvp(keepScroll) {
 const arqName = (a, meta) => a.core.slice(0, 3).map((id) => shortName((meta.info[id] || {}).nome || `#${id}`)).join(' + ');
 const arqTeam = (a, meta) => ((meta.perfis[a.rep] || {}).time || []).map((k) => { const inf = meta.info[k.speciesId] || {}; return { ...k, nome: k.nome || inf.nome, tipos: inf.tipos || [], alcance: inf.alcance || 1, stats: inf.stats, el: k.el || k.tmElemental, atk: [...new Set([...(inf.tipos || []), k.el || k.tmElemental].filter(Boolean))] }; });
 
+// ================= 🎬 MINHAS PARTIDAS (o replay que o jogo manda em cada partida ranqueada, resumido pelo núcleo) =================
+const segsP = (ms) => (ms == null ? '—' : `${String(Math.round(ms / 100) / 10).replace('.', ',')} s`);
+const curtoN = (n) => { const v = Number(n) || 0; return v >= 1e6 ? `${String(Math.round(v / 1e5) / 10).replace('.', ',')} mi` : v >= 1e3 ? `${String(Math.round(v / 100) / 10).replace('.', ',')} mil` : String(Math.round(v)); };
+function infoPorNome(meta) {
+  const mp = new Map();
+  for (const [id, x] of Object.entries((meta && meta.info) || {})) if (x && x.nome) mp.set(String(x.nome).toLowerCase(), { ...x, speciesId: Number(id) });
+  return mp;
+}
+// Um pokémon da partida com o que o app sabe da espécie (alcance, status, papel).
+function pkDaPartida(pk, infos) {
+  const inf = infos.get(String(pk.nome || '').toLowerCase()) || {};
+  const m = { nome: pk.nome, level: pk.nv, alcance: inf.alcance || 1, stats: inf.stats, speciesId: inf.speciesId };
+  m.papel = inf.stats ? papelDe(m, pvpTracker) : null;
+  return m;
+}
+let pvpPartidaAberta = null;
+function porQuePartida(p, meus, deles) {
+  const out = [];
+  const totE = p.eu.pks.reduce((s, x) => s + x.dano, 0), totD = p.ele.pks.reduce((s, x) => s + x.dano, 0);
+  out.push(`Dano total: você ${curtoN(totE)} × ${curtoN(totD)} dele${totE && totD ? ` (${totE >= totD ? `${String(Math.round((totE / totD) * 10) / 10).replace('.', ',')}× o dele` : `${Math.round((totE / totD) * 100)}% do dele`})` : ''}.`);
+  const caidos = p.eu.pks.map((x, i) => ({ x, i })).filter((o) => o.x.caiu != null).sort((a, b) => a.x.caiu - b.x.caiu);
+  if (caidos[0]) { const o = caidos[0]; const pp = meus[o.i].papel; out.push(`O primeiro seu a cair foi ${shortName(o.x.nome)}${pp ? ` (${pp.ic} ${pp.nome})` : ''} aos ${segsP(o.x.caiu)}${o.x.porQuem ? `, derrubado por ${shortName(o.x.porQuem)}` : ''}.${pp && (pp.id === 'mago' || pp.id === 'atirador') ? ' Atirador/mago caindo primeiro = estava exposto: ponha um tanque ou soldado na frente dele.' : ''}`); }
+  const mvpD = p.ele.pks.map((x, i) => ({ x, i })).sort((a, b) => b.x.dano - a.x.dano)[0];
+  if (mvpD && totD) out.push(`O que mais bateu do lado dele: ${shortName(mvpD.x.nome)} (${Math.round((mvpD.x.dano / totD) * 100)}% do dano dele${mvpD.x.maior ? `, o maior golpe foi ${mvpD.x.maior.golpe || 'golpe'} de ${curtoN(mvpD.x.maior.dano)}` : ''}). É o primeiro a ser segurado ou derrubado.`);
+  const mvpE = p.eu.pks.map((x, i) => ({ x, i })).sort((a, b) => b.x.dano - a.x.dano)[0];
+  if (mvpE && totE) out.push(`Quem mais bateu do seu lado: ${shortName(mvpE.x.nome)} (${Math.round((mvpE.x.dano / totE) * 100)}% do seu dano).`);
+  const sup = p.eu.pks.reduce((s, x) => s + (x.superEf || 0), 0);
+  if (sup >= 3) out.push(`Você levou ${sup} golpes super efetivos: o time dele tem vantagem de tipo sobre o seu.`);
+  // Fora do lugar (papel × fileira).
+  p.eu.pks.forEach((x, i) => {
+    const pp = meus[i].papel, f = x.casa != null && TB_CASAS[x.casa] ? TB_CASAS[x.casa].r : null;
+    if (!pp || f == null) return;
+    if (pp.id === 'tanque' && f >= 2) out.push(`⚠ ${shortName(x.nome)} é Tanque e estava na ${f + 1}ª fileira: não segurou ninguém no começo.`);
+    if ((pp.id === 'mago' || pp.id === 'atirador') && f === 0) out.push(`⚠ ${shortName(x.nome)} é ${pp.nome} e estava na 1ª fileira: apanha primeiro.`);
+  });
+  const vivosE = p.eu.pks.filter((x) => x.caiu == null).length, vivosD = p.ele.pks.filter((x) => x.caiu == null).length;
+  if (!p.venci && vivosD <= 1 && totE >= totD * 0.85) out.push('Foi por pouco: sobrou só 1 dele. Uma troca de casa pode virar essa.');
+  if (p.venci && vivosE <= 1) out.push('Ganhou no limite (sobrou 1 seu).');
+  return out;
+}
+function renderPvpPartidas(root, meta) {
+  const lista = (pvpData.partidas || []).slice().reverse();
+  const infos = infoPorNome(meta);
+  if (!pvpTracker && !pvpTrackerPedido) { pvpTrackerPedido = true; call('poke:pvp:tracker', 'todas').then((tk) => { if (tk) { pvpTracker = tk; if (page === 'pvp') renderPvp(true); } }).catch(() => {}); }
+  if (pvpTracker && meta) preparaTracker(pvpTracker, (id) => (meta.info && meta.info[id] ? meta.info[id].alcance : null), meta.at || 1);
+  if (!lista.length) {
+    root.append(emptyBox('Nenhuma partida guardada ainda', 'A partir desta versão o app guarda cada partida ranqueada desta conta — com a tela de batalha completa, minimizada ou desligada. Jogue uma partida e volte aqui: aparece o tabuleiro de verdade dos dois lados, quem bateu em quem, quem caiu primeiro e por quê.'));
+    return;
+  }
+  // ---- resumo das últimas
+  const ult = lista.slice(0, 30);
+  const v = ult.filter((p) => p.venci).length;
+  const res = el('div', 'card');
+  res.append(el('div', 'ext-sec', `Últimas ${ult.length} partidas`));
+  const row = el('div', 'pvp-me-row six');
+  const stat = (val, l) => { const d = el('div', 'fstat'); d.append(el('b', null, val), el('span', null, l)); return d; };
+  const somaPr = ult.reduce((s, p) => s + (p.delta || 0), 0);
+  let seq = 0; for (const p of ult) { if (p.venci === ult[0].venci) seq++; else break; }
+  const durM = ult.filter((p) => p.dur).reduce((s, p, _, a) => s + p.dur / a.length, 0);
+  row.append(stat(`${v}V · ${ult.length - v}D`, 'resultado'), stat(pct(v / ult.length), 'winrate'), stat(`${somaPr >= 0 ? '+' : ''}${somaPr}`, 'PR'), stat(`${seq} ${ult[0].venci ? 'vitória(s)' : 'derrota(s)'}`, 'sequência agora'), stat(segsP(durM), 'duração média'), stat(String(lista.length), 'guardadas'));
+  res.append(row);
+  // Seus pokémon: rendimento.
+  const porPk = new Map();
+  for (const p of ult) {
+    const tot = p.eu.pks.reduce((s, x) => s + x.dano, 0) || 1;
+    const primeiro = p.eu.pks.filter((x) => x.caiu != null).sort((a, b) => a.caiu - b.caiu)[0];
+    for (const x of p.eu.pks) {
+      const a = porPk.get(x.nome) || { n: 0, v: 0, fatia: 0, vivo: 0, primeiro: 0, abates: 0 };
+      a.n++; if (p.venci) a.v++; a.fatia += x.dano / tot; if (x.caiu == null) a.vivo++; if (primeiro === x) a.primeiro++; a.abates += x.abates || 0;
+      porPk.set(x.nome, a);
+    }
+  }
+  const tb = el('div', 'pp-matrix');
+  const hd = el('div', 'pm-row hd'); hd.append(...['Seu pokémon', 'Partidas', 'Vitórias', 'Do dano do time', 'Termina de pé', 'Cai primeiro', 'Abates/partida'].map((t) => el('span', null, t)));
+  tb.append(hd);
+  for (const [nome, a] of [...porPk.entries()].sort((x, y) => y[1].n - x[1].n)) {
+    const m = pkDaPartida({ nome }, infos);
+    const r = el('div', 'pm-row');
+    r.append(el('span', null, `${m.papel ? `${m.papel.ic} ` : ''}${shortName(nome)}`), el('span', null, String(a.n)), el('span', a.v / a.n >= 0.55 ? 'ok' : a.v / a.n >= 0.45 ? 'meh' : 'bad', pct(a.v / a.n)),
+      el('span', null, pct(a.fatia / a.n)), el('span', null, pct(a.vivo / a.n)), el('span', a.primeiro / a.n >= 0.4 ? 'bad' : null, pct(a.primeiro / a.n)), el('span', null, String(Math.round((a.abates / a.n) * 10) / 10).replace('.', ',')));
+    tb.append(r);
+  }
+  res.append(el('div', 'ext-sec', 'Como cada um seu rende'), tb);
+  // Quem mais te derruba (nas derrotas).
+  const algoz = new Map();
+  for (const p of ult) for (const x of p.eu.pks) if (x.porQuem) algoz.set(x.porQuem, (algoz.get(x.porQuem) || 0) + 1);
+  const topA = [...algoz.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6);
+  if (topA.length) res.append(el('div', 'ext-sec', 'Quem mais derruba os seus'), el('div', 'tip', topA.map(([n, k]) => `${shortName(n)} (${k}×)`).join(' · ')));
+  root.append(res);
+  // ---- cada partida
+  const card = el('div', 'card');
+  card.append(el('div', 'ext-sec', 'Partidas (clique para ver o tabuleiro e o porquê)'));
+  for (const p of lista.slice(0, 40)) {
+    const k = p.id != null ? `id${p.id}` : `${p.em}`;
+    const d = el('details', `pvp-partida ${p.venci ? 'v' : 'd'}`);
+    if (pvpPartidaAberta === k) d.open = true;
+    d.ontoggle = () => { if (d.open) pvpPartidaAberta = k; };
+    const quando = ago2(p.em);
+    d.append(el('summary', null, `${p.venci ? '✅ Vitória' : '❌ Derrota'} ${p.delta >= 0 ? '+' : ''}${p.delta} PR · contra ${p.oponente.nick || '—'}${p.oponente.pontos ? ` (${fmt(p.oponente.pontos)} PR)` : ''} · ${segsP(p.dur)} · ${quando}${p.promoveu ? ' · 🎉 subiu de tier' : p.rebaixou ? ' · ⬇ caiu de tier' : ''}`));
+    const corpo = el('div', 'pvp-partida-corpo');
+    d.append(corpo);
+    // Monta só quando abre (leve).
+    const montar = () => {
+      if (corpo.childElementCount) return;
+      const meus = p.eu.pks.map((x) => pkDaPartida(x, infos)), deles = p.ele.pks.map((x) => pkDaPartida(x, infos));
+      const cm = p.eu.pks.map((x) => x.casa), cd = p.ele.pks.map((x) => x.casa);
+      if (cm.every((c) => c != null) && cd.every((c) => c != null)) {
+        corpo.append(el('div', 'pp-front', `As casas de verdade: ${p.ele.nick || 'ele'} em cima, você embaixo`), boardEl([{ team: deles, casas: cd, cls: 'enemy', flip: true }, { team: meus, casas: cm, cls: 'mine', flip: false }]));
+      }
+      const totE = p.eu.pks.reduce((s, x) => s + x.dano, 0) || 1, totD = p.ele.pks.reduce((s, x) => s + x.dano, 0) || 1;
+      const tabela = (titulo, pks, ms, tot) => {
+        const t = el('div', 'pp-matrix');
+        t.append(el('div', 'ext-sec', titulo));
+        const h = el('div', 'pm-row hd'); h.append(...['Pokémon', 'Papel', 'Dano', 'Recebido', 'Abates', 'Caiu', 'Maior golpe'].map((x) => el('span', null, x))); t.append(h);
+        pks.forEach((x, i) => {
+          const r = el('div', 'pm-row');
+          r.append(el('span', null, `${x.sh ? '✨ ' : ''}${shortName(x.nome)} · Nv ${fmt(x.nv)}${x.casa != null && TB_CASAS[x.casa] ? ` · ${TB_CASAS[x.casa].r + 1}ª fil.` : ''}`),
+            el('span', null, ms[i].papel ? `${ms[i].papel.ic} ${ms[i].papel.nome}` : '—'), el('span', null, `${curtoN(x.dano)} (${Math.round((x.dano / tot) * 100)}%)`), el('span', null, curtoN(x.recebido)), el('span', null, String(x.abates || 0)),
+            el('span', x.caiu != null ? 'bad' : 'ok', x.caiu != null ? `aos ${segsP(x.caiu)}${x.porQuem ? ` (${shortName(x.porQuem)})` : ''}` : 'de pé'),
+            el('span', null, x.maior ? `${x.maior.golpe || '—'} ${curtoN(x.maior.dano)}${x.maior.ef >= 2 ? ' ⚡super' : ''}` : '—'));
+          t.append(r);
+        });
+        return t;
+      };
+      corpo.append(tabela(`Você${p.eu.nick ? ` (${p.eu.nick})` : ''}`, p.eu.pks, meus, totE), tabela(`${p.ele.nick || 'Adversário'}`, p.ele.pks, deles, totD));
+      corpo.append(el('div', 'ext-sec', p.venci ? 'Por que você ganhou' : 'Por que você perdeu'));
+      for (const t of porQuePartida(p, meus, deles)) corpo.append(el('div', `tip ${t.startsWith('⚠') ? 'warn' : ''}`, t));
+    };
+    d.addEventListener('toggle', () => { if (d.open) montar(); });
+    if (d.open) montar();
+    card.append(d);
+  }
+  card.append(el('span', 'sub', 'O app resume o replay que o jogo manda em cada partida ranqueada (funciona com a tela de batalha completa, minimizada ou desligada). Guarda as últimas 100 desta conta, só neste PC.'));
+  root.append(card);
+}
+
+// ================= META REAL (Tracker do jogo, filtrado pelo seu elo) =================
+const FAIXAS_UI = [['todas', 'Todos'], ['baixo', 'Low elo'], ['alto', 'High elo'], ['bronze', 'Bronze'], ['prata', 'Prata'], ['ouro', 'Ouro'], ['platina', 'Platina'], ['diamante', 'Diamante'], ['mestre', 'Mestre+']];
+const faixaDoTier = (tier) => { const t = String(tier || '').toLowerCase(); if (!t) return null; if (/mestre|master|grao|grand|challenger/.test(t)) return 'mestre'; return ['bronze', 'prata', 'ouro', 'platina', 'diamante'].find((x) => t.includes(x)) || null; };
+let pvpFaixa = (() => { try { return localStorage.getItem('pvpFaixa') || ''; } catch { return ''; } })();
+const pvpTrackerPorFaixa = new Map();
+function metaRealEl(c) {
+  const { meta, live, mineAll } = c;
+  const meuTier = live && live.euPvp ? faixaDoTier(live.euPvp.tierId) : null;
+  const faixa = pvpFaixa || meuTier || 'todas';
+  const card = el('div', 'card');
+  const h = el('div', 'pvp-sh');
+  h.append(el('div', 'ext-sec', '📊 Meta real das partidas (Tracker do jogo)'));
+  const sel = el('select');
+  for (const [k, l] of FAIXAS_UI) { const o = el('option', null, `${l}${k === meuTier ? ' (o seu)' : ''}`); o.value = k; sel.append(o); }
+  sel.value = faixa;
+  sel.onchange = () => { pvpFaixa = sel.value; try { localStorage.setItem('pvpFaixa', pvpFaixa); } catch {} renderPvp(true); };
+  const dir = el('div', 'actions'); dir.style.margin = '0'; dir.append(el('span', 'sub', 'Rank:'), sel);
+  h.append(dir);
+  card.append(h);
+  const tk = pvpTrackerPorFaixa.get(faixa);
+  if (!tk) {
+    card.append(el('div', 'sub', 'Lendo o meta real…'));
+    if (!pvpTrackerPorFaixa.has(`pedido:${faixa}`)) { pvpTrackerPorFaixa.set(`pedido:${faixa}`, 1); call('poke:pvp:tracker', faixa).then((r) => { if (r) { pvpTrackerPorFaixa.set(faixa, r); if (page === 'pvp' && pvpTab === 'meta') renderPvp(true); } else card.append(el('div', 'sub', 'Não deu para ler o Tracker agora.')); }).catch(() => {}); }
+    return card;
+  }
+  preparaTracker(tk, (id) => (meta.info && meta.info[id] ? meta.info[id].alcance : null), meta.at || 1);
+  const tenho = new Set((mineAll || []).map((m) => m.speciesId));
+  const lista = Object.entries(tk.especies).map(([id, x]) => ({ id: Number(id), ...x })).filter((x) => x.partidas > 0);
+  const totUso = lista.reduce((s, x) => s + x.partidas, 0) || 1;
+  const linha = (x, extra) => {
+    const inf = meta.info && meta.info[x.id];
+    const pp = inf && inf.stats ? papelDe({ speciesId: x.id, alcance: inf.alcance || 1, stats: inf.stats, nome: x.nome }, tk) : null;
+    const r = el('div', `tip ${x.winrate >= 0.52 ? 'ok' : x.winrate < 0.48 ? 'bad' : ''}`);
+    r.textContent = `${pp ? `${pp.ic} ` : ''}${x.nome}${tenho.has(x.id) ? ' · ✔ você tem' : ''} — winrate ${pct(x.winrate)} · em ${String(Math.round((x.partidas / totUso) * 1000) / 10).replace('.', ',')}% dos times · sobrevive ${pct(x.sobrev)}${extra || ''}`;
+    return r;
+  };
+  const cols = el('div', 'pvp-meta-real');
+  const a = el('div'); a.append(el('div', 'ext-sec', 'Mais usados'));
+  for (const x of lista.slice().sort((p, q) => q.partidas - p.partidas).slice(0, 12)) a.append(linha(x));
+  const minimo = Math.max(2000, Math.round(totUso * 0.0005));
+  const b = el('div'); b.append(el('div', 'ext-sec', `Maior winrate (com ${fmt(minimo)}+ partidas)`));
+  for (const x of lista.filter((x) => x.partidas >= minimo).sort((p, q) => q.winrate - p.winrate).slice(0, 12)) b.append(linha(x));
+  cols.append(a, b);
+  card.append(cols, el('span', 'sub', `Temporada ${tk.temporada || '—'} · ${fmt(tk.amostra || 0)} partidas${faixa !== 'todas' ? ` só de treinadores ${FAIXAS_UI.find((f) => f[0] === faixa)[1]}` : ''} · lido ${ago2(tk.em)} (relê a cada 6 h). Verde = vence mais do que perde.`));
+  return card;
+}
+
 // ================= META =================
 function renderPvpMeta(root, c) {
   const { meta, entries, teams, mine, arqs } = c;
+  root.append(metaRealEl(c));
   const hist = pvpData.hist || [];
   const old = hist.length > 1 ? hist[Math.max(0, hist.length - 8)] : null; // ~7 leituras atrás
   if (arqs.length) {

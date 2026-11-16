@@ -120,6 +120,56 @@ contextBridge.executeInMainWorld({
       return false;
     }
 
+    // ---- MINHAS PARTIDAS (resumo do replay que o jogo manda em cada partida ranqueada) ----
+    // Replay do jogo (replay.mjs / replay-tabuleiro.mjs): atores [{ s, n, nv, sh, mhp, g (lado 0/1), tr (treinador), dono }],
+    // inicio [slot, cx, cy…], golpes [{ n, t }] e quadros [{ t, a: [de, para, golpe, dano, ef×100, stab…], m: [quem caiu] }].
+    // A casa vem da posição inicial (o lado 1 é o tabuleiro girado: cx → 29 − cx, cy → 25 − cy).
+    const FILEIRAS_TB = [{ cy: 13, de: 12, ate: 17 }, { cy: 14, de: 11, ate: 18 }, { cy: 15, de: 11, ate: 18 }, { cy: 16, de: 13, ate: 16 }, { cy: 17, de: 13, ate: 16 }];
+    const CASAS_TB = (() => { const l = []; FILEIRAS_TB.forEach((f) => { for (let cx = f.de; cx <= f.ate; cx++) l.push({ cx, cy: f.cy }); }); return l; })();
+    const casaDaTile = (cx, cy, lado) => { const x = lado === 1 ? 29 - cx : cx, y = lado === 1 ? 25 - cy : cy; const i = CASAS_TB.findIndex((k) => k.cx === x && k.cy === y); return i >= 0 ? i : null; };
+    const partidas = { lista: [], seq: 0 };
+    function resumirPartida(p) {
+      const rep = p.replay || {};
+      const atores = (rep.atores || []).filter((a) => !a.tr && (a.g === 0 || a.g === 1));
+      if (!atores.length) return null;
+      const eu = String((jogo.eu && jogo.eu.nick) || '').toLowerCase();
+      let meu = Number(p.meuLado) === 1 ? 0 : Number(p.meuLado) === 2 ? 1 : null;
+      if (meu == null) { const a = (rep.atores || []).find((x) => String((x.tr ? x.n : x.dono) || '').toLowerCase() === eu && (x.g === 0 || x.g === 1)); meu = a ? a.g : 0; }
+      const ini = new Map();
+      for (let i = 0; i + 2 < (rep.inicio || []).length; i += 3) ini.set(rep.inicio[i], { cx: rep.inicio[i + 1], cy: rep.inicio[i + 2] });
+      const st = new Map(atores.map((a) => [a.s, { dano: 0, recebido: 0, abates: 0, golpes: 0, superEf: 0, caiu: null, maior: null, ultimoQueBateu: null }]));
+      const tabela = rep.golpes || [];
+      for (const q of rep.quadros || []) {
+        for (let i = 0; q.a && i + 5 < q.a.length; i += 6) {
+          const de = st.get(q.a[i]), para = st.get(q.a[i + 1]), dano = Number(q.a[i + 3]) || 0, ef = (Number(q.a[i + 4]) || 100) / 100;
+          if (de) { de.dano += dano; de.golpes++; if (!de.maior || dano > de.maior.dano) de.maior = { dano, golpe: (tabela[q.a[i + 2]] || {}).n || '', tipo: (tabela[q.a[i + 2]] || {}).t || '', ef }; }
+          if (para) { para.recebido += dano; if (ef >= 2) para.superEf++; para.ultimoQueBateu = q.a[i]; }
+        }
+        for (const s of q.m || []) { const x = st.get(s); if (x && x.caiu == null) { x.caiu = q.t; const k = st.get(x.ultimoQueBateu); if (k) k.abates++; } }
+      }
+      const porSlot = new Map(atores.map((a) => [a.s, a]));
+      const lado = (g) => atores.filter((a) => a.g === g).map((a) => {
+        const x = st.get(a.s), pos = ini.get(a.s);
+        const quem = porSlot.get(x.ultimoQueBateu);
+        return { nome: a.n, nv: a.nv, sh: a.sh ? 1 : 0, mhp: a.mhp, casa: pos ? casaDaTile(pos.cx, pos.cy, g) : null, dano: Math.round(x.dano), recebido: Math.round(x.recebido),
+          abates: x.abates, golpes: x.golpes, superEf: x.superEf, caiu: x.caiu, porQuem: x.caiu != null && quem ? quem.n : null, maior: x.maior };
+      });
+      const dono = (g) => { const tr = (rep.atores || []).find((a) => a.tr && a.g === g); const pk = atores.find((a) => a.g === g); return (tr && tr.n) || (pk && pk.dono) || ''; };
+      return { id: p.id ?? null, em: Date.now(), venci: !!p.venci, delta: Number(p.delta) || 0, pontos: p.pontos ?? null, posicao: p.posicao ?? null,
+        promoveu: !!p.promoveu, rebaixou: !!p.rebaixou, dur: rep.dur || null,
+        oponente: { nick: (p.oponente && p.oponente.nick) || dono(1 - meu), pontos: p.oponente ? p.oponente.pontos ?? null : null },
+        eu: { nick: dono(meu), pks: lado(meu) }, ele: { nick: dono(1 - meu), pks: lado(1 - meu) } };
+    }
+    function guardarPartida(p) {
+      if (p.amistoso) return;
+      if (p.id != null && partidas.lista.some((x) => x.id === p.id)) return;
+      const r = resumirPartida(p);
+      if (!r) return;
+      r.seq = ++partidas.seq;
+      partidas.lista.push(r);
+      if (partidas.lista.length > 40) partidas.lista.shift();
+    }
+
     // ---- PvP: tabela e equipes do topo ----
     const pvp = { tabela: null, tabelaEm: 0, perfis: {}, coletando: false, feitos: 0, total: 0, at: 0, erro: null };
     const slimTime = (lista) => (Array.isArray(lista) ? lista : []).slice(0, 5).map((k) => ({
@@ -223,7 +273,11 @@ contextBridge.executeInMainWorld({
               try {
                 const m = JSON.parse(d);
                 if (m.t === 'pvp') {
-                  pvp.eu = { em: Date.now(), dados: JSON.parse(JSON.stringify(m)) };
+                  // MINHAS PARTIDAS: a partida chega inteira (com o replay) em qualquer modo da tela de batalha — o app
+                  // guarda só o RESUMO (casas, dano, abates, quem caiu e quando), não os quadros.
+                  if (m.partida && m.partida.replay) { try { guardarPartida(m.partida); } catch {} }
+                  const leve = m.partida ? { ...m, partida: { ...m.partida, replay: undefined } } : m;
+                  pvp.eu = { em: Date.now(), dados: JSON.parse(JSON.stringify(leve)) };
                   // O time ATIVO do PvP (ids) e a casa de cada um no tabuleiro: o jogo manda em pedaços (time/casas ou
                   // timeSalvo/casasSalvas ao salvar). Guarda o último de cada para o Planejador abrir com ele.
                   const t = m.timeSalvo !== undefined ? m.timeSalvo : m.time;
@@ -1599,6 +1653,8 @@ contextBridge.executeInMainWorld({
         treinador() { const t = treinador(); return t ? { ...t } : null; },
         pvpEu() { return jogo.eu.pvp ? { ...JSON.parse(JSON.stringify(jogo.eu.pvp)), nick: jogo.eu.nick || null } : null; },
         pvpEstado() { return { coletando: pvp.coletando, feitos: pvp.feitos, total: pvp.total, at: pvp.at }; },
+        // Minhas partidas: as resumidas desde a última que o app já pegou (o app guarda em arquivo).
+        pvpPartidasDesde(seq) { return JSON.parse(JSON.stringify(partidas.lista.filter((x) => x.seq > (Number(seq) || 0)))); },
         // Duelo 1×1 do próprio jogo (o "Comparar" e o ginásio): matriz de chance de vitória de A contra B.
         duelos(a, b) { return duelos(a, b).then((r) => JSON.parse(JSON.stringify(r))).catch((e) => ({ erro: String(e) })); },
         candidatos(meta, opts) { return candidatos(meta, opts).then((r) => JSON.parse(JSON.stringify(r))).catch((e) => ({ erro: String(e) })); },
