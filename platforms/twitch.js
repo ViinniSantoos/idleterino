@@ -1408,16 +1408,27 @@ function stop() {
 }
 // Canais oficiais que o próprio jogo mostra (Bônus Twitch), lidos pelas contas do PokeIdle.
 // Canal novo com "pontos ativos" entra sozinho; canal que a pessoa tirou não volta (fica em seenDefaults).
+// 17/11/2026 (pedido do dono): quem SAI do jogo sai do app sozinho e volta sozinho se entrar de novo (só os que
+// vieram da lista do jogo; os que a pessoa pôs à mão ficam). Mesma regra da Kick.
 function syncOfficial(list) {
   const ids = [...new Set((list || []).filter((o) => o && o.ativo).map((o) => String(o.id).toLowerCase()).filter((x) => LOGIN_RE.test(x)))].slice(0, 80);
   if (!ids.length) return [];
   const seen = new Set(config.seenDefaults || []);
-  const fresh = ids.filter((x) => !seen.has(x) && !config.channels.includes(x));
-  if (!fresh.length && ids.every((x) => seen.has(x))) return [];
+  const sairam = new Set(config.saiuDoJogo || []);
+  const fresh = ids.filter((x) => (!seen.has(x) || sairam.has(x)) && !config.channels.includes(x));
+  const antes = (config.oficiaisAtivos || []).filter((x) => config.channels.includes(x));
+  const saiu = ids.length >= 3 ? antes.filter((x) => !ids.includes(x)) : [];
+  const tirar = saiu.length && saiu.length <= Math.max(2, Math.floor(antes.length / 2)) ? saiu : [];
+  const mudou = fresh.length || tirar.length || (config.oficiaisAtivos || []).join() !== ids.join();
+  config.oficiaisAtivos = ids;
+  if (!mudou) return [];
   config.seenDefaults = [...new Set([...seen, ...ids])];
-  if (fresh.length) { config.channels.push(...fresh); if (started) { syncChat(); poll(); } send('status', snapshot()); }
+  config.saiuDoJogo = [...new Set([...[...sairam].filter((x) => !fresh.includes(x)), ...tirar])].slice(-200);
+  if (fresh.length) config.channels.push(...fresh);
+  for (const slug of tirar) { config.channels = config.channels.filter((c) => c !== slug); config.favorites = (config.favorites || []).filter((s) => s !== slug); stopWatcher(slug); status.delete(slug); }
+  if (fresh.length || tirar.length) { if (started) { syncChat(); if (fresh.length) poll(); } send('status', snapshot()); }
   saveConfig();
-  return fresh;
+  return Object.assign(fresh, { saiu: tirar });
 }
 // Resumo para a bandeja e para a tela Início.
 function trayInfo() {

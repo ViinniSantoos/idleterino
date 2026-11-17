@@ -131,16 +131,15 @@ module.exports = function createSeguranca() {
     return file;
   }
 
-  // Instala a versão baixada: um ajudante (criado pelo Windows, fora do app) espera o app fechar,
-  // roda o instalador em silêncio e abre o Idleterino de novo.
+  // Instala a versão baixada (já conferida pelo SHA-512 publicado): roda o instalador em silêncio, do
+  // mesmo jeito que o atualizador do electron-builder — ele fecha o app aberto, instala e reabre
+  // (--force-run). 17/11/2026: sem PowerShell escondido/codificado pelo WMI (antivírus acusavam "trojan").
   function runInstaller(file) {
-    const exe = process.execPath.replace(/'/g, "''");
-    const inst = file.replace(/'/g, "''");
-    const ps = `$exe='${exe}'; $inst='${inst}'; $t=0; while ((Get-Process | Where-Object { $_.Path -eq $exe }) -and $t -lt 60) { Start-Sleep 1; $t++ }; Start-Process -FilePath $inst -ArgumentList '/S' -Wait; Start-Sleep 2; if (-not (Get-Process | Where-Object { $_.Path -eq $exe })) { Start-Process -FilePath $exe }; Remove-Item -LiteralPath $inst -Force -ErrorAction SilentlyContinue`;
-    const inner = `powershell.exe -NoProfile -WindowStyle Hidden -EncodedCommand ${Buffer.from(ps, 'utf16le').toString('base64')}`;
-    const r = require('child_process').spawnSync('powershell.exe', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command',
-      `Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = '${inner}' } | Out-Null`], { stdio: 'ignore', windowsHide: true, timeout: 15000 });
-    return r.status === 0;
+    try {
+      const c = require('child_process').spawn(file, ['/S', '--force-run'], { detached: true, stdio: 'ignore' });
+      c.unref();
+      return true;
+    } catch { return false; }
   }
 
   // Dá para voltar de versão só no app instalado do Windows (o portátil e o Linux baixam pelo site).

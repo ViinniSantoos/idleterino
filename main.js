@@ -162,11 +162,18 @@ const modules = {
 // Lista oficial de canais vinda do jogo: novos canais entram sozinhos na Twitch e na Kick.
 ctx.onOfficial = (canais, accountId) => {
   if (canais && canais.kick && modules.kick.setGameBonus) modules.kick.setGameBonus(accountId, canais.kick.bonus);
+  // Preço dos bônus na Kick muda junto com o jogo (estado.kick.recompensas).
+  if (canais && canais.kick && modules.kick.setGamePrices) {
+    const mud = modules.kick.setGamePrices(canais.kick.recompensas);
+    if (mud && mud.length) { send('twitch:toast', `💲 O PokeIdle mudou o preço na Kick: ${mud.join(' · ')}`); notify('Preço da Kick mudou no PokeIdle', mud.join(' · ')); }
+  }
   for (const ns of ['twitch', 'kick']) {
     const b = canais && canais[ns];
     if (!b || !modules[ns]) continue;
     const fresh = modules[ns].syncOfficial(b.oficiais);
-    if (fresh.length) send('twitch:toast', `${fresh.length === 1 ? 'Novo canal oficial' : 'Novos canais oficiais'} na ${ns === 'twitch' ? 'Twitch' : 'Kick'}: ${fresh.join(', ')}`);
+    const nome = ns === 'twitch' ? 'Twitch' : 'Kick';
+    if (fresh.length) send('twitch:toast', `${fresh.length === 1 ? 'Novo canal oficial' : 'Novos canais oficiais'} na ${nome}: ${fresh.join(', ')}`);
+    if (fresh.saiu && fresh.saiu.length) send('twitch:toast', `${fresh.saiu.length === 1 ? 'Saiu do PokeIdle' : 'Saíram do PokeIdle'} (${nome}): ${fresh.saiu.join(', ')}. Tirei do app; se voltar, volta sozinho.`);
   }
 };
 const poke = require('./pokeidle')(ctx);
@@ -224,22 +231,12 @@ function installUpdate() {
   if (update.state !== 'ready') return false;
   seg.backupNow(`antes da ${update.version}`);
   app.isQuitting = true;
-  // Silencioso. Quem reabre é o ajudante abaixo: o "reabrir" do instalador usa o atalho do Menu
-  // Iniciar e, sem ele, mostra o erro "O Windows não pode encontrar ... .lnk".
-  // O instalador nem sempre reabre o app no fim (testado em 05/11/2026): um ajudante escondido espera
-  // a instalação terminar e abre o Idleterino. Se o instalador já tiver aberto, ele não faz nada.
-  if (process.platform === 'win32') {
-    try {
-      const exe = process.execPath.replace(/'/g, "''");
-      const ps = `$exe='${exe}'; Start-Sleep 4; $t=0; while ((Get-Process | Where-Object { $_.Path -like '*-updater\\*' -or $_.Path -eq $exe }) -and $t -lt 300) { Start-Sleep 1; $t++ }; Start-Sleep 2; if (-not (Get-Process | Where-Object { $_.Path -eq $exe })) { Start-Process -FilePath $exe }`;
-      // Criado pelo próprio Windows (WMI), fora do grupo de processos do app: um filho comum é
-      // encerrado junto quando o app fecha.
-      const inner = `powershell.exe -NoProfile -WindowStyle Hidden -EncodedCommand ${Buffer.from(ps, 'utf16le').toString('base64')}`;
-      require('child_process').spawnSync('powershell.exe', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command',
-        `Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = '${inner}' } | Out-Null`], { stdio: 'ignore', windowsHide: true, timeout: 15000 });
-    } catch {}
-  }
-  setImmediate(() => autoUpdater.quitAndInstall(true, false));
+  // Silencioso, e o PRÓPRIO instalador reabre o app no fim (--force-run): ele recria o atalho do Menu
+  // Iniciar na instalação e, sem atalho, abre o Idleterino.exe direto (templates do electron-builder).
+  // 17/11/2026: antes um ajudante escondido do sistema, com o comando codificado, reabria o app — o mesmo
+  // jeito que vírus usam para se esconder, e antivírus (caso do Diogo) bloqueavam o Idleterino como
+  // "trojan" na atualização. NUNCA voltar a usar ajudante escondido/codificado.
+  setImmediate(() => autoUpdater.quitAndInstall(true, true));
   return true;
 }
 function setupAutoUpdate() {

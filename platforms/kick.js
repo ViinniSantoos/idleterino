@@ -58,6 +58,12 @@ function loadConfig() {
   // Loja antiga (só 1 h): o alvo era o custo (300/500/1000) e as compras não tinham o tipo.
   if (typeof config.bonusTarget === 'number') config.bonusTarget = config.bonusTarget ? `${(KIND_BY_COST[config.bonusTarget] || 'xp')}:1` : '';
   for (const p of config.purchases || []) if (!p.kind) { p.kind = KIND_BY_COST[p.cost] || 'xp'; p.hours = p.hours || 1; }
+  // Preços da loja lidos do jogo da última vez (valem até a próxima leitura).
+  if (config.precosJogo && typeof config.precosJogo === 'object') {
+    for (const k of KINDS) { const c = Math.round(Number(config.precosJogo[k.kind])); if (c >= 10 && c <= 100000) { k.per = c; const b = BONUSES.find((x) => x.name === k.name); if (b) b.cost = c; KIND_BY_COST[c] = k.kind; } }
+    BONUSES.sort((a, b) => a.cost - b.cost);
+    PACKS.length = 0; PACKS.push(...KINDS.flatMap((k) => HOURS.map((hours) => ({ kind: k.kind, hours, cost: k.per * hours }))));
+  }
   // v2: instalações antigas vinham com 20 lives; passa para o padrão novo (2 + rodízio) uma vez.
   if ((config.configVersion || 1) < 2) {
     config.maxWatchers = DEFAULT_CONFIG.maxWatchers;
@@ -353,17 +359,17 @@ function stopWatcher(slug) {
 // Avisa quando o saldo do canal alcança um bônus do PokeIdle. O saldo ao abrir o app é a
 // referência: só o que for alcançado depois gera aviso.
 const BONUSES = [
-  { cost: 300, name: '+15% XP' }, { cost: 500, name: '+15% Capture Boost' }, { cost: 1000, name: '+15% Secret Lure' },
+  { cost: 200, name: '+15% XP' }, { cost: 500, name: '+15% Capture Boost' }, { cost: 1000, name: '+15% Secret Lure' },
 ];
 // Loja da Kick (nov/2026): igual à da Twitch, cada bônus em 1 h, 3 h, 5 h e 10 h, pelo preço de 1 h
-// vezes as horas (XP 300/h, Capture Boost 500/h, Secret Lure 1.000/h).
+// vezes as horas (XP 200/h desde o jogo 1.436.0 de 17/11/2026 — era 300; Capture Boost 500/h, Secret Lure 1.000/h).
 const KINDS = [
-  { kind: 'xp', name: '+15% XP', per: 300, game: 'xp' },
+  { kind: 'xp', name: '+15% XP', per: 200, game: 'xp' },
   { kind: 'capture', name: '+15% Capture Boost', per: 500, game: 'captura' },
   { kind: 'lure', name: '+15% Secret Lure', per: 1000, game: 'shiny' },
 ];
 const KIND = Object.fromEntries(KINDS.map((k) => [k.kind, k]));
-const KIND_BY_COST = { 300: 'xp', 500: 'capture', 1000: 'lure' };
+const KIND_BY_COST = { 200: 'xp', 300: 'xp', 500: 'capture', 1000: 'lure' }; // 300 = o XP antigo (compras guardadas)
 const HOURS = [1, 3, 5, 10];
 const PACKS = KINDS.flatMap((k) => HOURS.map((hours) => ({ kind: k.kind, hours, cost: k.per * hours })));
 function parseTarget(t = config.bonusTarget) {
@@ -672,7 +678,7 @@ function logHistory() {
 }
 
 // Foco em bônus: o saldo é separado por canal, então espalhar pontos atrasa as compras. As vagas
-// vão para quem está mais perto do próximo bônus, e todos os canais ao vivo chegam a 300 antes
+// vão para quem está mais perto do próximo bônus, e todos os canais ao vivo chegam a 200 antes
 // de alguém buscar 500, depois 1.000 e cada milhar seguinte. Cada troca perde ~6–7 min até a primeira contagem, por isso só troca
 // quando o canal bateu a meta ou quando a diferença compensa (SWITCH_MARGIN).
 // Canal com sub rende o dobro: entra na frente de todos e fica enquanto estiver ao vivo, sem meta.
@@ -1164,16 +1170,51 @@ function stop() {
 }
 // Canais oficiais que o próprio jogo mostra (Bônus na Kick), lidos pelas contas do PokeIdle.
 // Canal novo com "pontos ativos" entra sozinho; canal que a pessoa tirou não volta (fica em seenDefaults).
+// 17/11/2026 (pedido do dono): quem SAI do jogo (deixa a lista ou os pontos ativos) sai do app sozinho, e volta
+// sozinho se entrar de novo. Só mexe em canal que veio da lista do jogo (os que a pessoa pôs à mão ficam).
 function syncOfficial(list) {
   const ids = [...new Set((list || []).filter((o) => o && o.ativo).map((o) => String(o.id).toLowerCase()).filter((x) => /^[a-z0-9_-]{2,30}$/.test(x)))].slice(0, 80);
   if (!ids.length) return [];
   const seen = new Set(config.seenDefaults || []);
-  const fresh = ids.filter((x) => !seen.has(x) && !config.channels.includes(x));
-  if (!fresh.length && ids.every((x) => seen.has(x))) return [];
+  const sairam = new Set(config.saiuDoJogo || []);
+  const fresh = ids.filter((x) => (!seen.has(x) || sairam.has(x)) && !config.channels.includes(x));
+  // Saiu: estava ativo na leitura anterior e não está mais. Trava contra leitura ruim do jogo (lista muito curta
+  // ou metade sumindo de uma vez): aí não tira ninguém.
+  const antes = (config.oficiaisAtivos || []).filter((x) => config.channels.includes(x));
+  const saiu = ids.length >= 3 ? antes.filter((x) => !ids.includes(x)) : [];
+  const tirar = saiu.length && saiu.length <= Math.max(2, Math.floor(antes.length / 2)) ? saiu : [];
+  const mudou = fresh.length || tirar.length || (config.oficiaisAtivos || []).join() !== ids.join();
+  config.oficiaisAtivos = ids;
+  if (!mudou) return [];
   config.seenDefaults = [...new Set([...seen, ...ids])];
-  if (fresh.length) { config.channels.push(...fresh); if (started) { poll(); } send('status', snapshot()); }
+  config.saiuDoJogo = [...new Set([...[...sairam].filter((x) => !fresh.includes(x)), ...tirar])].slice(-200);
+  if (fresh.length) config.channels.push(...fresh);
+  for (const slug of tirar) { config.channels = config.channels.filter((c) => c !== slug); config.favorites = (config.favorites || []).filter((s) => s !== slug); stopWatcher(slug); status.delete(slug); }
+  if (fresh.length || tirar.length) { if (started && fresh.length) poll(); send('status', snapshot()); }
   saveConfig();
-  return fresh;
+  return Object.assign(fresh, { saiu: tirar });
+}
+// PREÇOS DA LOJA vindos do JOGO (estado.kick.recompensas: tipo + custo de 1 h). 17/11/2026: o jogo 1.436.0 baixou o
+// XP de 300 para 200 pts/h e o app continuava com 300. Agora o preço muda sozinho quando o jogo muda.
+function setGamePrices(rec) {
+  if (!Array.isArray(rec) || !rec.length) return null;
+  const mud = [];
+  for (const r of rec) {
+    const k = KINDS.find((x) => x.game === String(r && r.tipo));
+    const c = Math.round(Number(r && r.custo));
+    if (!k || !(c >= 10 && c <= 100000) || k.per === c) continue;
+    mud.push(`${k.name}: ${k.per} → ${c} pts/h`);
+    k.per = c;
+    const b = BONUSES.find((x) => x.name === k.name); if (b) b.cost = c;
+    KIND_BY_COST[c] = k.kind;
+  }
+  BONUSES.sort((a, b) => a.cost - b.cost);
+  if (!mud.length) return null;
+  PACKS.length = 0; PACKS.push(...KINDS.flatMap((k) => HOURS.map((hours) => ({ kind: k.kind, hours, cost: k.per * hours }))));
+  config.precosJogo = Object.fromEntries(KINDS.map((k) => [k.kind, k.per]));
+  saveConfig();
+  send('status', snapshot());
+  return mud;
 }
 // Resumo para a bandeja e para a tela Início.
 function trayInfo() {
@@ -1181,7 +1222,7 @@ function trayInfo() {
   return { started, loggedIn, watching: watchers.size, gained: sumGained(), bonuses: activeBonuses(now) };
 }
 return {
-  ns: 'kick', start, stop, snapshot, trayInfo, recoverAfterResume, syncOfficial, setGameBonus,
+  ns: 'kick', start, stop, snapshot, trayInfo, recoverAfterResume, syncOfficial, setGameBonus, setGamePrices,
   loadConfig, setupSession, setMain: (w) => { mainWin = w; }, get started() { return started; },
 };
 };

@@ -356,7 +356,7 @@ function sideCol(ns, s) {
   }
 
   // 2) Próximos bônus: quem já dá para comprar e quem está chegando.
-  const costOf = (c) => (ns === 'twitch' ? (s.bonusTarget ? c.targetCost : Math.min(c.costs.xp, c.costs.capture, c.costs.lure)) : (s.targetCost || 300));
+  const costOf = (c) => (ns === 'twitch' ? (s.bonusTarget ? c.targetCost : Math.min(c.costs.xp, c.costs.capture, c.costs.lure)) : (s.targetCost || 200));
   const withPts = s.channels.filter((c) => c.points != null && (ns !== 'twitch' || c.hasBonus));
   const ready = withPts.filter((c) => c.points >= costOf(c)).sort((x, y) => y.points - x.points);
   const coming = withPts.filter((c) => c.watching && c.points < costOf(c) && c.earning !== 'idle')
