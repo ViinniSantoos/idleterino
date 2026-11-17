@@ -245,9 +245,12 @@ module.exports = function createPokeIdle(ctx) {
     let u = null;
     try { u = new URL(v.webContents.getURL()); } catch {}
     const naTelaDoJogo = u && isPokeIdle(u.href) && (u.pathname === '/app' || u.pathname.startsWith('/app/'));
-    if (u && isPokeIdle(u.href) && !naTelaDoJogo && !v.webContents.isLoading()) {
-      if (!fora.has(id)) { fora.set(id, Date.now()); setTimeout(() => readOne(id), 21 * 1000); }
-      else if (Date.now() - fora.get(id) > 20 * 1000) { fora.delete(id); v.webContents.loadURL(urlOf(acc)); }
+    // 17/11/2026 (izn: login com Google voltava para a tela de login): a volta do Google passa por /auth/... — enquanto
+    // o login acontece, o app NÃO mexe. Fora disso, 60 s (eram 20) antes de voltar para o jogo.
+    const noLogin = u && /^\/auth(\/|$)/i.test(u.pathname);
+    if (u && isPokeIdle(u.href) && !naTelaDoJogo && !noLogin && !v.webContents.isLoading()) {
+      if (!fora.has(id)) { fora.set(id, Date.now()); setTimeout(() => readOne(id), 61 * 1000); }
+      else if (Date.now() - fora.get(id) > 60 * 1000) { fora.delete(id); v.webContents.loadURL(urlOf(acc)); }
     } else fora.delete(id);
     // Sinal de vida: a página congelada não responde (e conta parada não dispara o aviso do Electron,
     // que depende de clique). Sem resposta em 15 s, a conta é reaberta num processo novo.
@@ -267,8 +270,10 @@ module.exports = function createPokeIdle(ctx) {
       // fechando e abrindo o app". O app faz isso sozinho, só nesta conta.
       if (!r.logged && r.temSessao) {
         if (!stuckSince.has(id)) stuckSince.set(id, Date.now());
-        else if (Date.now() - stuckSince.get(id) > 20 * 1000 && Date.now() - (lastReopen.get(id) || 0) > 2 * 60 * 1000) { stuckSince.delete(id); reopen(id, 'login preso'); }
-        setTimeout(() => readOne(id), 10 * 1000); // confere de novo logo
+        // 60 s (eram 20) e no máximo 1 vez a cada 5 min: com o servidor do jogo lento (o 0% demorando), recarregar no meio
+        // da conexão atrapalhava em vez de ajudar.
+        else if (Date.now() - stuckSince.get(id) > 60 * 1000 && Date.now() - (lastReopen.get(id) || 0) > 5 * 60 * 1000) { stuckSince.delete(id); reopen(id, 'login preso'); }
+        setTimeout(() => readOne(id), 15 * 1000); // confere de novo logo
       } else stuckSince.delete(id);
       // Diário: horas logadas, histórico do dia e vigia (conta parada, caiu, shiny).
       // No ULTRA a tela não mostra a hunt: vale o nome que a sugestão de hunt leu pela conexão.
