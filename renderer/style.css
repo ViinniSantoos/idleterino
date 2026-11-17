@@ -934,4 +934,9 @@ body.foco .glow { display: none; }
 .tier-itens{display:flex;flex-wrap:wrap;gap:6px;flex:1}
 .tier-item{display:flex;flex-direction:column;gap:2px;padding:6px 8px;border-radius:8px;background:var(--panel2,rgba(255,255,255,.04));min-width:150px;max-width:230px;cursor:help}
 .tier-item .sub{font-size:11px}
+.tier-item.trancado{opacity:.5}
+.tier-item .tier-hunt{font-size:11px;font-weight:600;color:var(--accent,#9fd3ff)}
+.tier-item.trancado .tier-hunt{color:inherit}
+.tier-item .tier-st{font-size:11px;opacity:.9}
+.tier-item .tier-rank{font-size:11px;opacity:.7}
 

@@ -134,6 +134,37 @@ function casasDaEquipe(pedidas, alcances) {
   for (let i = 0; i < n; i++) { if (out[i] != null) continue; const a = Math.min(4, Math.max(1, Math.round(alcances[i] || 1))); const c = TB_PRIO[a].find((x) => !usadas.has(x)); out[i] = c; usadas.add(c); }
   return out;
 }
+// FILEIRA PELA DISTÂNCIA (regra do dono, 17/11/2026: o Planejador punha atirador de 3 e 4 na 1ª fileira e ele apanhava
+// primeiro). Sem distância (corpo a corpo, a frontline/tanque) → 1ª fileira; distância 2 (soldado, assassino) → 2ª ou
+// 3ª; distância 3 → 4ª (a penúltima); distância 4 → 5ª (a última). Se a fileira lotar, vai para a vizinha.
+const FILAS_ALC = { 1: [0], 2: [1, 2], 3: [3], 4: [4] };
+const FILAS_FOLGA = { 1: [1], 2: [0, 3], 3: [2, 4], 4: [3] };
+const alcN = (a) => Math.min(4, Math.max(1, Math.round(a || 1)));
+const ORDEM_CASAS = [...TB_F0, ...TB_F1, ...TB_F2, ...TB_F3, ...TB_F4]; // o meio de cada fileira primeiro
+// As casas que cada um do time pode usar (as da fileira dele; com a fileira cheia de gente do mesmo alcance, a vizinha também).
+function casasPermitidas(team) {
+  const porAlc = {}; team.forEach((m) => { const a = alcN(m.alcance); porAlc[a] = (porAlc[a] || 0) + 1; });
+  return team.map((m) => {
+    const a = alcN(m.alcance);
+    const cabe = FILAS_ALC[a].reduce((s, r) => s + PVP_ROWS[r], 0);
+    const filas = porAlc[a] > cabe ? [...FILAS_ALC[a], ...FILAS_FOLGA[a]] : FILAS_ALC[a];
+    // A fileira dele primeiro; a vizinha só depois (a ordem do Set é a ordem de escolha).
+    return new Set(filas.flatMap((r) => ORDEM_CASAS.filter((c) => TB_CASAS[c].r === r)));
+  });
+}
+// Põe cada um numa casa da fileira dele (mantém quem já está certo; os outros vão para a melhor casa livre da fileira).
+function legalizarCasas(casas, team, perm) {
+  perm = perm || casasPermitidas(team);
+  const out = casas.slice(0, team.length); const usadas = new Set();
+  team.forEach((_, i) => { const c = out[i]; if (c != null && perm[i].has(c) && !usadas.has(c)) usadas.add(c); else out[i] = null; });
+  team.forEach((m, i) => {
+    if (out[i] != null) return;
+    let c = [...perm[i]].find((x) => !usadas.has(x));
+    if (c == null) { const a = alcN(m.alcance); c = ORDEM_CASAS.filter((x) => !usadas.has(x)).sort((x, y) => Math.abs(TB_CASAS[x].r - FILAS_ALC[a][0]) - Math.abs(TB_CASAS[y].r - FILAS_ALC[a][0]))[0]; }
+    out[i] = c; usadas.add(c);
+  });
+  return out;
+}
 const distCasas = (minha, dele) => { const a = TB_CASAS[minha], b = TB_CASAS[dele]; if (!a || !b) return 99; return Math.max(Math.abs(a.cx - (29 - b.cx)), Math.abs(a.cy - (25 - b.cy))); };
 const nomeCasa = (c) => { const k = TB_CASAS[c]; return k ? `${k.r + 1}ª fileira, ${k.col + 1}ª casa da esquerda` : '—'; };
 
@@ -198,7 +229,9 @@ function papelDe(m, tk) {
   // Por que (curto, em números).
   const porque = [`aguenta ${Math.round(aguenta)} (HP ${hp}, defesas ${Math.round(def)}) × bate ${atq} (${(s.atk || 0) >= (s.spa || 0) ? 'ATK' : 'SP.ATK'})`, `Speed ${spe}`, alc > 1 ? `alcance ${alc} 🏹` : 'corpo a corpo 🗡️'];
   if (real) porque.push(`nas partidas reais, comparado aos outros ${real.grupo === 'longe' ? 'de longe' : 'corpo a corpo'}: causa ${Math.round(real.dano * 100)}% do dano típico, apanha ${String(Math.round(real.razao * 10) / 10).replace('.', ',')}× o normal para o dano que causa, sobrevive ${Math.round(real.sobrev * 100)}% do típico (winrate ${Math.round(real.wr * 100)}% em ${fmt(real.partidas)} partidas)`);
-  return { id: p, ...PAPEIS[p], porque, real: !!real };
+  // O lugar sai da distância (FILAS_ALC), não do papel.
+  const ONDE_ALC = { 1: 'na 1ª fileira (a frente)', 2: 'na 2ª ou 3ª fileira', 3: 'na 4ª fileira (a penúltima)', 4: 'na 5ª fileira (a última)' };
+  return { id: p, ...PAPEIS[p], onde: ONDE_ALC[alcN(alc)], porque, real: !!real };
 }
 // FORMAÇÃO POR PAPEL: a casa de partida de cada papel (a ordem de preferência, como o jogo faz por alcance).
 const PAPEL_CASAS = {
@@ -208,8 +241,10 @@ const PAPEL_CASAS = {
 function casasPorPapel(team, papeis) {
   const ordem = ['tanque', 'soldado', 'assassino', 'resistente', 'atirador', 'mago'];
   const usadas = new Set(), out = new Array(team.length).fill(null);
-  for (const p of ordem) team.forEach((m, i) => { if (papeis[i].id !== p || out[i] != null) return; const c = PAPEL_CASAS[p].find((x) => !usadas.has(x)) ?? TB_CASAS.findIndex((_, k) => !usadas.has(k)); out[i] = c; usadas.add(c); });
-  return out;
+  const perm = casasPermitidas(team);
+  // A casa do papel, mas sempre dentro da fileira da distância dele.
+  for (const p of ordem) team.forEach((m, i) => { if (papeis[i].id !== p || out[i] != null) return; const c = PAPEL_CASAS[p].find((x) => !usadas.has(x) && perm[i].has(x)); if (c == null) return; out[i] = c; usadas.add(c); });
+  return legalizarCasas(out, team, perm);
 }
 
 // A LUTA NO TEMPO (pedido do dono, 14/11/2026: o Planejador punha o Umbreon — o tank — na última fileira e o dano na
@@ -297,16 +332,22 @@ async function otimizarPos(team, alvos, inicial, extras) {
   const sorteio = () => { const l = [...TB_CASAS.keys()]; for (let i = l.length - 1; i > 0; i--) { const k = Math.floor(rnd() * (i + 1)); [l[i], l[k]] = [l[k], l[i]]; } return l.slice(0, n); };
   // Com a luta no tempo cada avaliação pesa mais: menos pontos de partida e menos voltas (continua rápido).
   const comTempo = alvos.some((x) => x.T);
+  // Só casas da fileira de cada um (FILAS_ALC): a busca nunca põe quem atira de longe na frente.
+  const perm = casasPermitidas(team);
+  const leg = (c) => legalizarCasas(c, team, perm);
   const inicios = [inicial, casasDaEquipe([], team.map((m) => m.alcance)), ...(extras || [])];
   for (let r = 0; r < (comTempo ? 4 : 14); r++) inicios.push(sorteio());
-  let best = inicial.slice(), bestV = val(best), contas = 0;
-  for (const ini of inicios) {
+  let best = leg(inicial), bestV = val(best), contas = 0;
+  for (const ini0 of inicios) {
+    const ini = leg(ini0);
     let cur = ini.slice(), v = val(cur), melhorou = true, voltas = 0;
     while (melhorou && voltas++ < (comTempo ? 8 : 30)) {
       melhorou = false;
-      for (let i = 0; i < n; i++) for (let c = 0; c < TB_CASAS.length; c++) {
+      for (let i = 0; i < n; i++) for (const c of perm[i]) {
         if (cur[i] === c) continue;
-        const t = cur.slice(); const k = t.indexOf(c); if (k >= 0) t[k] = t[i]; t[i] = c;
+        const k = cur.indexOf(c);
+        if (k >= 0 && !perm[k].has(cur[i])) continue; // a troca também tem que deixar o outro na fileira dele
+        const t = cur.slice(); if (k >= 0) t[k] = t[i]; t[i] = c;
         const vv = val(t); if (vv > v + 1e-9) { cur = t; v = vv; melhorou = true; }
         if (comTempo && ++contas % 60 === 0) await new Promise((r) => setTimeout(r, 0)); // a tela continua respondendo
       }
@@ -462,56 +503,120 @@ async function renderPvp(keepScroll) {
   root.scrollTop = scroll;
 }
 
-// ---------- 🏆 Tier list do Idleterino (PvP e PvE) ----------
-// A nota junta três fontes: os nossos dados (duelo do jogo contra o top 50, winrate real no Tracker e uso no top 50),
-// o jogo (efetividade nas hunts e ataque base, para o PvE) e as listas públicas da staff como referência (peso menor).
+// ---------- 🏆 Tier list do Idleterino (PvP na aba PvP, PvE na aba PvE) ----------
+// PvP: os nossos dados (duelo do jogo contra o top 50, winrate real no Tracker e uso no top 50) + as listas da staff;
+// e duas leituras do meta atual: os MAIS USADOS do top 50 e os COUNTERS deles (tabela de tipos do jogo + força).
+// PvE (farm): ataque/SP-ataque e velocidade pesam mais (quem mata rápido), os tipos contra as hunts depois; cada
+// pokémon mostra a hunt onde se pega e fica com 🔒 enquanto a conta escolhida não chega no nível dela.
 let tierRes = null, tierRodando = false;
-let tierModo = (() => { try { return localStorage.getItem('tierModo') || 'pvp'; } catch { return 'pvp'; } })();
 let tierSemLend = (() => { try { return localStorage.getItem('tierSemLend') === '1'; } catch { return false; } })();
+let tierSub = (() => { try { return localStorage.getItem('tierSub') || 'tier'; } catch { return 'tier'; } })();
+let tierNivel = null, tierNivelPedido = null; // { acc, L } da conta escolhida no PvE
+const TIER_CORES = { S: '#ff6b6b', A: '#ff9f43', B: '#ffd34d', C: '#4488c5', D: '#8a8f9e' };
 function renderTierList(root, modo0) {
+  const modo = modo0 === 'pve' ? 'pve' : 'pvp';
   const redesenhar = () => { if (page === 'pvp') renderPvp(true); else if (page === 'pve' && typeof renderPve === 'function') renderPve(); };
   if (!tierRes && !tierRodando) { tierRodando = true; call('poke:tier').then((r) => { tierRodando = false; tierRes = r; redesenhar(); }).catch(() => { tierRodando = false; }); }
-  const modo = modo0 === 'pve' || modo0 === 'pvp' ? (tierModo || modo0) : 'pvp';
+  // PvE: o nível da conta escolhida lá em cima (para o cadeado).
+  const accPve = typeof pveAcc !== 'undefined' ? pveAcc : null;
+  if (modo === 'pve' && accPve && (!tierNivel || tierNivel.acc !== accPve) && tierNivelPedido !== accPve) {
+    tierNivelPedido = accPve;
+    call('poke:pve', accPve, 'nivel').then((r) => { tierNivelPedido = null; if (r && r.L) { tierNivel = { acc: accPve, L: r.L }; redesenhar(); } }).catch(() => { tierNivelPedido = null; });
+  }
+  const L = modo === 'pve' && tierNivel && tierNivel.acc === accPve ? tierNivel.L : 0;
+  const sub = modo === 'pvp' ? tierSub : 'tier';
   const c = el('div', 'card');
-  c.append(el('div', 'ext-sec', '🏆 Tier list do Idleterino'));
-  c.append(el('div', 'sub up-lead', 'A nossa tier list, montada com três fontes: os NOSSOS dados (o duelo do jogo contra os times do top 50, o winrate real de cada espécie no Tracker oficial e quantos times do top usam), o JOGO (no PvE: em quantas hunts a espécie tira ×5,5 e ×2,5 e o ataque base) e as listas públicas da STAFF como referência. Cada espécie ganha uma nota de 0 a 100 e os tiers saem dela: S (os 10% melhores), A, B, C e D.'));
+  c.append(el('div', 'ext-sec', modo === 'pvp' ? '🏆 Tier list do PvP' : '🏆 Tier list do PvE (farm)'));
+  const lead = modo === 'pve'
+    ? 'Para farmar o que importa é matar rápido: o ATAQUE ou o SP-ATAQUE (o maior dos dois) e a VELOCIDADE pesam mais. Depois vêm os tipos (em quantas hunts a espécie tira ×5,5 e ×2,5). Pokémon de perfil tanque (HP e defesas altos, ataque baixo e lento) cai na nota: aguenta, mas mata devagar. Ao lado de cada um, a hunt onde se pega (a base ou uma pré-evolução) e um 🔒 enquanto a sua conta não chega no nível dela.'
+    : sub === 'usados' ? 'Os pokémon que mais aparecem nos times do top 50 do Ranqueado agora (o meta lido do jogo), com o winrate de cada espécie no Tracker oficial.'
+    : sub === 'counters' ? 'Quem bate SUPER EFETIVO (×2 ou mais, pela tabela de tipos do jogo) nos pokémon mais usados do top 50 e apanha pouco deles, com a força no duelo do jogo contra o top quando a gente tem. Bom para montar um time que vira o meta.'
+    : 'A nossa tier list de PvP: o duelo do jogo contra os times do top 50, o winrate real de cada espécie no Tracker oficial, quantos times do top usam e as listas públicas da staff como referência. Cada espécie ganha uma nota de 0 a 100 e os tiers saem dela: S (os 10% melhores), A, B, C e D.';
+  c.append(el('div', 'sub up-lead', lead));
   const barra = el('div', 'actions');
-  const modos = el('div', 'pvp-tabs');
-  for (const [k, l] of [['pvp', '⚔️ PvP'], ['pve', '🌿 PvE (hunt)']]) modos.append(button(l, modo === k ? 'on' : '', () => { tierModo = k; try { localStorage.setItem('tierModo', k); } catch {} redesenhar(); }));
+  if (modo === 'pvp') {
+    const subs = el('div', 'pvp-tabs');
+    for (const [k, l] of [['tier', '🏆 Tier list'], ['usados', '🔥 Mais usados no meta'], ['counters', '🛡️ Counters do meta']]) subs.append(button(l, sub === k ? 'on' : '', () => { tierSub = k; try { localStorage.setItem('tierSub', k); } catch {} redesenhar(); }));
+    barra.append(subs);
+  }
   const lb = el('label', 'tr-chk'); const ck = el('input'); ck.type = 'checkbox'; ck.checked = tierSemLend;
   ck.onchange = () => { tierSemLend = ck.checked; try { localStorage.setItem('tierSemLend', ck.checked ? '1' : '0'); } catch {} redesenhar(); };
   lb.append(ck, el('span', null, 'esconder lendários e míticos'));
-  barra.append(modos, lb, button(tierRodando ? 'Calculando…' : '↻ Recalcular', 'mini', async () => { tierRodando = true; redesenhar(); tierRes = await call('poke:tier', true).catch(() => tierRes); tierRodando = false; redesenhar(); }));
+  barra.append(lb, button(tierRodando ? 'Calculando…' : '↻ Recalcular', 'mini', async () => { tierRodando = true; tierNivel = null; redesenhar(); tierRes = await call('poke:tier', true).catch(() => tierRes); tierRodando = false; redesenhar(); }));
   c.append(barra);
   root.append(c);
   const r = tierRes;
-  if (!r) { root.append(emptyBox('Montando a tier list…', 'A conta principal junta o duelo contra o top 50, o Tracker, as hunts do jogo e as listas da staff (uns segundos).')); return; }
+  if (!r) { root.append(emptyBox('Montando a tier list…', 'A conta principal junta os dados do jogo, do top 50 e do Tracker (uns segundos).')); return; }
   if (r.erro) { root.append(emptyBox('Tier list', r.erro)); return; }
-  let lista = (modo === 'pve' ? r.pve : r.pvp) || [];
-  if (tierSemLend) lista = lista.filter((x) => !x.lend);
-  if (modo === 'pvp' && !r.fontes.metaEm) root.append(el('div', 'tip warn', 'O meta do top 50 ainda não foi lido: a tier de PvP está usando só o Tracker e a staff. Clique em "Atualizar meta" no topo para a nota completa.'));
-  const CORES = { S: '#ff6b6b', A: '#ff9f43', B: '#ffd34d', C: '#4488c5', D: '#8a8f9e' };
-  for (const t of ['S', 'A', 'B', 'C', 'D']) {
-    const doTier = lista.filter((x) => x.tier === t);
-    if (!doTier.length) continue;
-    const linha = el('div', 'card tier-linha');
-    const rot = el('div', 'tier-rot', t); rot.style.background = CORES[t];
-    const itens = el('div', 'tier-itens');
-    for (const x of doTier) {
+  const semLend = (l) => (tierSemLend ? l.filter((x) => !x.lend) : l);
+  const f = r.fontes || {};
+  if (modo === 'pvp' && !f.metaEm) root.append(el('div', 'tip warn', 'O meta do top 50 ainda não foi lido: clique em "Atualizar meta" no topo. Sem ele a tier usa só o Tracker e a staff, e "Mais usados" e "Counters" ficam vazios.'));
+  const tipos = (x) => { const tg = el('span', 'pm-tags'); for (const tt of x.tipos || []) tg.append(tipoChip(tt)); return tg; };
+  const emLinhas = (lista, item) => {
+    for (const t of ['S', 'A', 'B', 'C', 'D']) {
+      const doTier = lista.filter((x) => x.tier === t);
+      if (!doTier.length) continue;
+      const linha = el('div', 'card tier-linha');
+      const rot = el('div', 'tier-rot', t); rot.style.background = TIER_CORES[t];
+      const itens = el('div', 'tier-itens');
+      for (const x of doTier) itens.append(item(x));
+      linha.append(rot, itens);
+      root.append(linha);
+    }
+  };
+  if (modo === 'pve') {
+    const lista = semLend(r.pve || []);
+    if (L) {
+      const livres = lista.filter((x) => x.hunt && x.hunt.nivel <= L).length;
+      root.append(el('div', 'tip ok', `Sua conta está no Nv ${fmt(L)}: ${livres} de ${lista.length} já dá para pegar (os outros estão com 🔒 até você chegar no nível da hunt deles).`));
+    } else root.append(el('div', 'tip', 'Lendo o nível da conta escolhida lá em cima… (a conta precisa estar aberta e logada no app)'));
+    emLinhas(lista, (x) => {
+      const trancado = !!L && (!x.hunt || x.hunt.nivel > L);
+      const d = el('div', `tier-item${trancado ? ' trancado' : ''}`);
+      d.title = `${x.nome} · nota ${Math.round(x.nota * 100)}\n${(x.motivos || []).join('\n')}${x.hunt ? `\nOnde pegar: hunt ${x.hunt.nome} (Nv ${fmt(x.hunt.nivel)})${x.hunt.de ? `, como ${x.hunt.de}` : ''}` : '\nNão aparece nas hunts do jogo (evento, troca ou Market)'}`;
+      d.append(el('b', null, `${trancado ? '🔒 ' : ''}${x.nome}${x.lend ? ' 👑' : ''}`), tipos(x));
+      d.append(el('span', 'tier-hunt', x.hunt ? `🎯 Hunt Nv ${fmt(x.hunt.nivel)} · ${x.hunt.nome}${x.hunt.de ? ` (como ${x.hunt.de})` : ''}` : '🎯 não aparece em hunt'));
+      const s = x.st;
+      d.append(el('span', 'tier-st', s ? `ATK ${s.atk} · SP.ATK ${s.spa} · VEL ${s.spe}${x.perfil === 'tanque' ? ' · 🛡️ tanque' : x.perfil === 'rapido' ? ' · ⚡ rápido' : ''}` : (x.motivos || [])[0] || ''));
+      d.append(el('span', 'sub', `nota ${Math.round(x.nota * 100)}`));
+      return d;
+    });
+    root.append(el('p', 'small', `Fontes: os status base do jogo (ATK, SP.ATK, VEL, HP e defesas) · as ${f.hunts || 0} hunts do jogo (sem a Outland), com os tipos de cada espécie · listas de hunt/megas da staff como referência. Passe o mouse num pokémon para ver os motivos. Calculado ${new Date(r.em).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}.`));
+    return;
+  }
+  if (sub === 'usados') {
+    const lista = semLend(r.maisUsados || []);
+    if (!lista.length) { root.append(emptyBox('Mais usados no meta', 'Ainda sem o meta do top 50. Clique em "Atualizar meta".')); return; }
+    const box = el('div', 'card tier-linha'); const itens = el('div', 'tier-itens');
+    lista.forEach((x, i) => {
+      const d = el('div', 'tier-item');
+      d.append(el('span', 'tier-rank', `#${i + 1}`), el('b', null, `${x.nome}${x.lend ? ' 👑' : ''}`), tipos(x));
+      d.append(el('span', 'tier-hunt', `🔥 em ${x.n} de ${r.nTimes || 50} times do top${x.pct != null ? ` (${x.pct}%)` : ''}`));
+      d.append(el('span', 'sub', [x.wr != null ? `winrate ${x.wr}% em ${fmt(x.partidas)} partidas` : null, x.win != null ? `vence ${x.win}% dos duelos contra o top` : null].filter(Boolean).join(' · ') || 'sem partidas no Tracker'));
+      itens.append(d);
+    });
+    box.append(itens); root.append(box);
+  } else if (sub === 'counters') {
+    const lista = semLend(r.counters || []);
+    if (!lista.length) { root.append(emptyBox('Counters do meta', 'Ainda sem o meta do top 50. Clique em "Atualizar meta".')); return; }
+    emLinhas(lista, (x) => {
+      const d = el('div', 'tier-item');
+      d.title = `${x.nome} · nota ${Math.round(x.nota * 100)}\nBate super efetivo em: ${x.bate.join(', ')}\nApanha super efetivo de ${x.risco}% do uso do top${x.win != null ? `\nVence ${x.win}% dos duelos contra o top 50` : ''}`;
+      d.append(el('b', null, `${x.nome}${x.lend ? ' 👑' : ''}`), tipos(x));
+      d.append(el('span', 'tier-hunt', `🛡️ bate forte em ${x.vant}% do meta`));
+      d.append(el('span', 'sub', `${x.bate.slice(0, 3).map(shortName).join(', ')}${x.bate.length > 3 ? '…' : ''} · apanha forte de ${x.risco}%${x.win != null ? ` · vence ${x.win}% dos duelos` : ''}`));
+      return d;
+    });
+  } else {
+    emLinhas(semLend(r.pvp || []), (x) => {
       const d = el('div', 'tier-item');
       d.title = `${x.nome} · nota ${Math.round(x.nota * 100)}\n${(x.motivos || []).join('\n')}`;
-      d.append(el('b', null, `${x.nome}${x.lend ? ' 👑' : ''}`));
-      const tg = el('span', 'pm-tags'); for (const tt of x.tipos || []) tg.append(tipoChip(tt)); d.append(tg);
+      d.append(el('b', null, `${x.nome}${x.lend ? ' 👑' : ''}`), tipos(x));
       d.append(el('span', 'sub', `nota ${Math.round(x.nota * 100)} · ${(x.motivos || [])[0] || ''}`));
-      itens.append(d);
-    }
-    linha.append(rot, itens);
-    root.append(linha);
+      return d;
+    });
   }
-  const f = r.fontes || {};
-  const ft = el('p', 'small');
-  ft.textContent = `Fontes: ${modo === 'pvp' ? `duelo contra o top 50 ${f.metaEm ? `(meta de ${new Date(f.metaEm).toLocaleDateString('pt-BR')})` : '(meta não lido)'} · Tracker ${f.trackerEm ? `(${f.temporada ? `temporada ${f.temporada}, ` : ''}lido ${new Date(f.trackerEm).toLocaleDateString('pt-BR')})` : '(não lido)'} · uso no top 50` : `as ${f.hunts || 0} hunts do jogo (sem a Outland), com os tipos de cada espécie · ataque base`} · listas da staff: ${(f.staff || []).filter((s) => (modo === 'pvp' ? s.categoria === 'pvp' : s.categoria !== 'pvp')).map((s) => `"${s.titulo}"${s.autor ? ` de ${s.autor}` : ''}`).join(', ') || 'nenhuma no momento'}. Passe o mouse num pokémon para ver os motivos. Calculado ${new Date(r.em).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}.`;
-  root.append(ft);
+  root.append(el('p', 'small', `Fontes: duelo contra o top 50 ${f.metaEm ? `(meta de ${new Date(f.metaEm).toLocaleDateString('pt-BR')})` : '(meta não lido)'} · Tracker ${f.trackerEm ? `(${f.temporada ? `temporada ${f.temporada}, ` : ''}lido ${new Date(f.trackerEm).toLocaleDateString('pt-BR')})` : '(não lido)'} · uso no top 50 · tabela de tipos do jogo · listas da staff: ${(f.staff || []).filter((s) => s.categoria === 'pvp').map((s) => `"${s.titulo}"${s.autor ? ` de ${s.autor}` : ''}`).join(', ') || 'nenhuma no momento'}. Passe o mouse num pokémon para ver os motivos. Calculado ${new Date(r.em).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}.`));
 }
 
 const arqName = (a, meta) => a.core.slice(0, 3).map((id) => shortName((meta.info[id] || {}).nome || `#${id}`)).join(' + ');
@@ -986,8 +1091,11 @@ function porQueEssaPosicao(casas, team, sel, media, papeis, casasPapel) {
     const foraDoLugar = [];
     team.forEach((m, i) => {
       const r0 = TB_CASAS[casas[i]] ? TB_CASAS[casas[i]].r : 0, p = papeis[i];
-      if ((p.id === 'mago' || p.id === 'atirador') && r0 <= 0) foraDoLugar.push(`${p.ic} ${shortName(m.nome)} é ${p.nome} e está na 1ª fileira: ele ${p.faz.split(',')[0]}, mas ali é o primeiro a apanhar (lugar dele: ${p.onde}).`);
-      if (p.id === 'tanque' && r0 >= 2) foraDoLugar.push(`${p.ic} ${shortName(m.nome)} é Tanque e está na ${r0 + 1}ª fileira: ninguém chega nele no começo, então ele não segura nada (lugar dele: ${p.onde}).`);
+      const a = alcN(m.alcance);
+      if (FILAS_ALC[a].includes(r0)) return;
+      if (a > 1 && r0 < FILAS_ALC[a][0]) foraDoLugar.push(`${p.ic} ${shortName(m.nome)} tem distância ${a} e está na ${r0 + 1}ª fileira: é o primeiro a apanhar (lugar dele: ${p.onde}).`);
+      else if (a === 1) foraDoLugar.push(`${p.ic} ${shortName(m.nome)} não tem distância e está na ${r0 + 1}ª fileira: ninguém chega nele no começo, então ele não segura a frente (lugar dele: ${p.onde}).`);
+      else foraDoLugar.push(`${p.ic} ${shortName(m.nome)} tem distância ${a} e está na ${r0 + 1}ª fileira, atrás demais (lugar dele: ${p.onde}).`);
     });
     for (const t of foraDoLugar) out.push(el('div', 'tip warn', t));
     if (casasPapel && casasPapel.join() !== casas.join()) {

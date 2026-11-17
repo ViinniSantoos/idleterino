@@ -706,7 +706,7 @@ module.exports = function createPokeIdle(ctx) {
   ipcMain.handle('poke:anuncio:abrir', async (_e, id) => { const r = await api.abrirAnuncio(id).catch(() => ({ erro: 'Não deu para abrir o anúncio.' })); return r; });
   // Aba PvE: as contas leem os dados do próprio jogo (próximas hunts, evoluções).
   ipcMain.handle('poke:pve', async (_e, accId, o, arg) => {
-    if (!['proximas', 'evolucoes', 'meus', 'buscar', 'mercado', 'casas', 'shiny', 'boss', 'outland'].includes(o)) return null;
+    if (!['nivel', 'proximas', 'evolucoes', 'meus', 'buscar', 'mercado', 'casas', 'shiny', 'boss', 'outland'].includes(o)) return null;
     const v = views.get(accId) || views.get(mainAccId());
     if (!v || v.webContents.isDestroyed()) return { erro: 'Conta do PokeIdle fechada.' };
     return v.webContents.executeJavaScript(`window.__idleterinoMercado && window.__idleterinoMercado.pve ? window.__idleterinoMercado.pve(${JSON.stringify(o)}, ${JSON.stringify(arg == null ? null : arg)}) : null`).catch(() => null);
@@ -830,16 +830,20 @@ module.exports = function createPokeIdle(ctx) {
     const tracker = await trackerLer('todas').catch(() => null);
     const notaStaffPvp = staffNotas(staff.listas, ['pvp']);
     const notaStaffPve = staffNotas(staff.listas, ['hunt', 'megas']);
-    const ids = [...new Set([...Object.keys(notaStaffPvp), ...Object.keys(notaStaffPve), ...Object.keys((tracker && tracker.especies) || {})].map(Number))];
-    const jg = await v.webContents.executeJavaScript(`window.__idleterinoMercado && window.__idleterinoMercado.tierDados ? window.__idleterinoMercado.tierDados(${JSON.stringify(ids)}) : null`).catch(() => null);
+    // Uso no top 50 (quantos times usam cada espécie): vai para o jogo calcular os counters.
+    const uso = {};
+    if (pvpMeta && pvpMeta.perfis) for (const p of Object.values(pvpMeta.perfis)) { const vs = new Set(); for (const k of (p && p.time) || []) if (k.speciesId != null && !vs.has(k.speciesId)) { vs.add(k.speciesId); uso[k.speciesId] = (uso[k.speciesId] || 0) + 1; } }
+    const nTimes = pvpMeta && pvpMeta.perfis ? Object.values(pvpMeta.perfis).filter((p) => p && Array.isArray(p.time) && p.time.length).length : 0;
+    const usoLista = Object.entries(uso).map(([id, n]) => ({ id: Number(id), n }));
+    const ids = [...new Set([...Object.keys(notaStaffPvp), ...Object.keys(notaStaffPve), ...Object.keys((tracker && tracker.especies) || {}), ...Object.keys(uso)].map(Number))];
+    const jg = await v.webContents.executeJavaScript(`window.__idleterinoMercado && window.__idleterinoMercado.tierDados ? window.__idleterinoMercado.tierDados(${JSON.stringify(ids)}, ${JSON.stringify(usoLista)}) : null`).catch(() => null);
     if (!jg || !jg.pronto) return { erro: (jg && jg.erro) || 'A conta principal precisa estar logada no jogo.' };
     const fichaDe = (id) => jg.nomes[id] || (jg.pve || []).find((x) => x.id === Number(id)) || null;
     // ---- PvP ----
     const cand = new Map(((pvpMeta && pvpMeta.candidatos) || []).map((x) => [Number(x.speciesId), x]));
-    const uso = {};
-    if (pvpMeta && pvpMeta.perfis) for (const p of Object.values(pvpMeta.perfis)) { const vs = new Set(); for (const k of (p && p.time) || []) if (k.speciesId != null && !vs.has(k.speciesId)) { vs.add(k.speciesId); uso[k.speciesId] = (uso[k.speciesId] || 0) + 1; } }
     const maxUso = Math.max(1, ...Object.values(uso));
     const tr = (tracker && tracker.especies) || {};
+    const wrDe = (id) => { const t = tr[id]; if (!t || !(Number(t.partidas) >= 10)) return null; let wr = Number(t.winrate); if (wr > 1) wr /= 100; return { wr, n: Number(t.partidas) }; };
     const trIds = Object.entries(tr).filter(([, x]) => Number(x.partidas) >= 30).sort((a, b) => b[1].partidas - a[1].partidas).slice(0, 80).map(([id]) => Number(id));
     const idsPvp = new Set([...cand.keys(), ...trIds, ...Object.keys(notaStaffPvp).map(Number), ...Object.keys(uso).map(Number).filter((id) => uso[id] >= 2)]);
     const pvp = [];
@@ -849,13 +853,11 @@ module.exports = function createPokeIdle(ctx) {
       const partes = []; const motivos = [];
       const c = cand.get(id);
       if (c && c.win != null) { partes.push([0.4, limitar((c.win - 0.3) / 0.5)]); motivos.push(`vence ${Math.round(c.win * 100)}% dos duelos contra o top 50`); }
-      const t = tr[id];
-      if (t && Number(t.partidas) >= 10) {
-        let wr = Number(t.winrate); if (wr > 1) wr /= 100;
-        const nP = Number(t.partidas);
-        const wrAj = (wr * nP + 0.5 * 50) / (nP + 50); // amostra pequena puxa para 50%
+      const w = wrDe(id);
+      if (w) {
+        const wrAj = (w.wr * w.n + 0.5 * 50) / (w.n + 50); // amostra pequena puxa para 50%
         partes.push([0.25, limitar((wrAj - 0.4) / 0.25)]);
-        motivos.push(`winrate ${Math.round(wr * 100)}% em ${nP.toLocaleString('pt-BR')} partidas no Tracker`);
+        motivos.push(`winrate ${Math.round(w.wr * 100)}% em ${w.n.toLocaleString('pt-BR')} partidas no Tracker`);
       }
       if (uso[id]) { partes.push([0.15, uso[id] / maxUso]); motivos.push(`${uso[id]} time(s) do top 50 usam`); }
       // A staff só SOMA (estar no D da lista deles não é pior do que não estar): ×0,90 fora da lista, até ×1,00 no topo.
@@ -863,26 +865,56 @@ module.exports = function createPokeIdle(ctx) {
       if (st != null) motivos.push(`na lista de PvP da staff (${st >= 0.8 ? 'no topo' : st >= 0.5 ? 'no meio' : 'embaixo'})`);
       const fontes = partes.length;
       if (!fontes && st == null) continue;
-      const pw = partes.reduce((s2, [w]) => s2 + w, 0);
-      const base = pw ? partes.reduce((s2, [w, x]) => s2 + w * x, 0) / pw : 0.45; // só a staff, sem dado nosso: nota neutra
+      const pw = partes.reduce((s2, [w2]) => s2 + w2, 0);
+      const base = pw ? partes.reduce((s2, [w2, x]) => s2 + w2 * x, 0) / pw : 0.45; // só a staff, sem dado nosso: nota neutra
       const nota = base * (0.85 + 0.05 * Math.min(3, fontes)) * (st != null ? 0.9 + 0.1 * st : 0.9);
       pvp.push({ id, nome: f.nome, tipos: f.tipos || [], lend: !!f.lend, mega: /^Mega /.test(f.nome), nota: Math.round(nota * 1000) / 1000, fontes, motivos });
     }
     pvp.sort((a, b) => b.nota - a.nota);
-    // ---- PvE ----
+    // ---- PvP: os MAIS USADOS do top 50 ----
+    const maisUsados = Object.entries(uso).map(([id, n]) => {
+      const f = fichaDe(id) || (cand.get(Number(id)) ? { nome: cand.get(Number(id)).nome, tipos: cand.get(Number(id)).tipos || [] } : null);
+      if (!f || !f.nome) return null;
+      const w = wrDe(id); const c = cand.get(Number(id));
+      return { id: Number(id), nome: f.nome, tipos: f.tipos || [], lend: !!f.lend, n, pct: nTimes ? Math.round((n / nTimes) * 100) : null,
+        wr: w ? Math.round(w.wr * 100) : null, partidas: w ? w.n : null, win: c && c.win != null ? Math.round(c.win * 100) : null };
+    }).filter(Boolean).sort((a, b) => b.n - a.n || (b.wr || 0) - (a.wr || 0)).slice(0, 40);
+    // ---- PvP: COUNTERS do meta (bate super efetivo nos mais usados, apanha pouco deles, e tem força para isso) ----
+    const porId = new Map((jg.pve || []).map((x) => [x.id, x]));
+    const counters = (jg.counters || []).map((k) => {
+      const f = porId.get(k.id); if (!f) return null;
+      const c = cand.get(k.id);
+      const forca = c && c.win != null ? limitar((c.win - 0.3) / 0.5) : limitar((f.bst - 450) / 250) * 0.7;
+      const nota = 0.6 * limitar((k.vant - 0.5 * k.risco) / 0.6) + 0.4 * forca;
+      const nomeDe = (id) => { const g = fichaDe(id); return g && g.nome ? g.nome : `#${id}`; };
+      return { id: k.id, nome: f.nome, tipos: f.tipos, lend: !!f.lend, nota: Math.round(nota * 1000) / 1000, vant: Math.round(k.vant * 100), risco: Math.round(k.risco * 100),
+        win: c && c.win != null ? Math.round(c.win * 100) : null, bate: k.bate.map(nomeDe) };
+    }).filter((x) => x && x.vant >= 15).sort((a, b) => b.nota - a.nota).slice(0, 60);
+    // ---- PvE (farm) ----
+    // Pedido do dono (17/11/2026): para farmar o que importa é BATER e ser RÁPIDO — ataque ou SP-ataque (o maior) e
+    // velocidade. Tanque (HP e defesas altos, ataque baixo, lento) não serve para farm, mesmo com bons tipos. Os tipos
+    // contra as hunts (×5,5 / ×2,5) ainda contam, mas pesam menos que os status.
     const lista = jg.pve || [];
     const maxCob = Math.max(1, ...lista.map((x) => x.x55 + 0.4 * x.x25));
-    const maxAtk = Math.max(1, ...lista.map((x) => x.atk));
     const pve = lista.map((x) => {
+      const s = x.st || { atk: x.atk, spa: 0, spe: 60, hp: 60, def: 60, spd: 60 };
+      const ofens = Math.max(s.atk, s.spa), aguenta = (s.hp + s.def + s.spd) / 3;
+      const ofN = limitar((ofens - 60) / 110), spN = limitar((s.spe - 40) / 100);
+      const farm = 0.55 * ofN + 0.45 * spN;
       const cob = (x.x55 + 0.4 * x.x25) / maxCob;
-      const motivos = [`tira ×5,5 em ${x.x55} e ×2,5 em ${x.x25} das ${jg.hunts} hunts`, `ataque base ${x.atk}`];
+      const tanque = aguenta > ofens * 1.05 && s.spe < 80;
+      const perfil = tanque ? 'tanque' : s.spe >= 95 && ofens >= 110 ? 'rapido' : ofens >= 120 ? 'forte' : s.spe < 55 ? 'lento' : 'medio';
+      const motivos = [`ATK ${s.atk} · SP.ATK ${s.spa} · VEL ${s.spe}`, `tira ×5,5 em ${x.x55} e ×2,5 em ${x.x25} das ${jg.hunts} hunts`];
+      if (tanque) motivos.push(`perfil de tanque (HP e defesas ${Math.round(aguenta)} × ataque ${ofens}): aguenta, mas mata devagar`);
+      else if (s.spe < 55) motivos.push(`lento (VEL ${s.spe}): ataca menos vezes`);
       const st = notaStaffPve[x.id];
       if (st != null) motivos.push(`na lista de hunt/megas da staff (${st >= 0.8 ? 'no topo' : st >= 0.5 ? 'no meio' : 'embaixo'})`);
-      const base = 0.6 * cob + 0.4 * (x.atk / maxAtk);
-      return { id: x.id, nome: x.nome, tipos: x.tipos, lend: x.lend, mega: x.mega, nota: Math.round(base * (st != null ? 0.9 + 0.1 * st : 0.9) * 1000) / 1000, motivos };
+      const base = (0.25 * cob + 0.75 * farm) * (tanque ? 0.8 : 1);
+      return { id: x.id, nome: x.nome, tipos: x.tipos, lend: x.lend, mega: x.mega, st: s, perfil, hunt: x.hunt || null,
+        nota: Math.round(base * (st != null ? 0.95 + 0.05 * st : 0.95) * 1000) / 1000, motivos };
     }).sort((a, b) => b.nota - a.nota);
     tierCache = {
-      em: Date.now(), pvp: emTiers(pvp.slice(0, 60)), pve: emTiers(pve.slice(0, 60)),
+      em: Date.now(), pvp: emTiers(pvp.slice(0, 60)), pve: emTiers(pve.slice(0, 80)), maisUsados, counters: emTiers(counters), nTimes,
       fontes: { metaEm: pvpMeta ? pvpMeta.at : null, trackerEm: tracker ? tracker.em : null, trackerAmostra: tracker ? tracker.amostra : null, temporada: tracker ? tracker.temporada : null,
         staff: staff.listas.map((l) => ({ titulo: l.titulo, categoria: l.categoria, autor: l.autor, atualizadaEm: l.atualizadaEm })), hunts: jg.hunts },
     };

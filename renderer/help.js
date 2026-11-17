@@ -133,7 +133,7 @@ window.HELP = [
   ['PvP', 'O que tem na aba PvP?', [
     'Meta: a tier list dos arquétipos do top 50 (times que dividem 3 ou mais pokémon), com quantos usam, PR médio, taxa de vitória e se subiu ou caiu nos últimos dias; os pokémon e tipos mais usados; e o top 50 com as equipes.',
     'Meu time: o seu time contra cada arquétipo do topo (simulado), o melhor time com o que você tem, o Upgrade (quem trocar e por quem), o time anti-meta sem limite de pokémon com o preço no Market, o orçamento em gemas e quem mais vence cada arquétipo.',
-    'Planejador: escolha até 5, escolha o adversário (um arquétipo) e veja os dois lados do tabuleiro: o time dele como costuma ficar e o seu posicionamento contra ele, com a chance de vencer e dicas.',
+    'Planejador: escolha até 5, escolha o adversário (um arquétipo) e veja os dois lados do tabuleiro: o time dele como costuma ficar e o seu posicionamento contra ele, com a chance de vencer e dicas. Cada um fica na fileira da distância dele: sem distância na 1ª (a frente), distância 2 na 2ª ou 3ª, distância 3 na 4ª e distância 4 na 5ª (a última).',
     'Histórico: tier, PR, pico, vitórias e derrotas, sequência, quando o PR começa a cair e o gráfico do PR dos últimos 30 dias.',
   ]],
   ['PvP', 'Como o app calcula quem vence?', [

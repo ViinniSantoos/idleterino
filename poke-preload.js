@@ -993,7 +993,7 @@ contextBridge.executeInMainWorld({
     // PvE: em quantas hunts do jogo (todas, menos a Outland) a espécie tira ×5,5 e ×2,5 com os tipos dela, e o ataque
     // base (o maior entre físico e especial). Devolve também nome, tipos e se é lendária/Mega das ids pedidas (as da
     // lista da staff), para o app juntar com o duelo contra o top 50 e o Tracker.
-    async function tierDados(ids) {
+    async function tierDados(ids, meta) {
       if (!jogo.hunts || !jogo.tabelaTipos) return { pronto: false };
       const { map } = await catalogoNota();
       let mis = null; try { mis = await import('/shared/mistico.mjs'); } catch {}
@@ -1002,7 +1002,37 @@ contextBridge.executeInMainWorld({
         const esp2 = h.especies.map((e) => ({ t: tiposDe(map.get(e.pokeId) || {}), w: Number(e.pontos) || 1 })).filter((e) => e.t.length);
         return esp2.length ? { nivel: Number(h.nivel) || 0, peso: 1, esp: esp2 } : null;
       }).filter(Boolean);
-      const ficha = (c) => ({ id: c.pokeId, nome: c.name, tipos: tiposDe(c), bst: bst(c), atk: Math.max(Number(c.baseAtk) || 0, Number(c.baseSpAtk) || 0), lend: lend(c.pokeId), mega: /^Mega /.test(c.name || '') });
+      const n0 = (c, k) => Number(c[k]) || 0;
+      const ficha = (c) => ({ id: c.pokeId, nome: c.name, tipos: tiposDe(c), bst: bst(c), atk: Math.max(n0(c, 'baseAtk'), n0(c, 'baseSpAtk')),
+        st: { hp: n0(c, 'baseHp'), atk: n0(c, 'baseAtk'), def: n0(c, 'baseDef'), spa: n0(c, 'baseSpAtk'), spd: n0(c, 'baseSpDef'), spe: n0(c, 'baseSpeed') },
+        lend: lend(c.pokeId), mega: /^Mega /.test(c.name || '') });
+      // ONDE PEGAR: a hunt de menor nível em que aparece alguém da linha (a base, as evoluções e a Mega da forma final).
+      const onde = new Map();
+      try {
+        const { ram } = await catalogoPve();
+        const megasDe = (c) => [...map.values()].filter((m2) => m2 && m2.name && (m2.name === `Mega ${c.name}` || m2.name.startsWith(`Mega ${c.name} `)));
+        const linhaDe = new Map();
+        const linha = (esp) => {
+          if (linhaDe.has(esp.pokeId)) return linhaDe.get(esp.pokeId);
+          const ids = [esp.pokeId]; const vistos = new Set([esp.pokeId]);
+          const anda = (e2, prof) => { let ds = []; try { ds = ram.destinosDeEvolucao(e2, (id) => map.get(id)); } catch {}
+            for (const d of ds) { if (!d.especie || vistos.has(d.especie.pokeId) || prof > 4) continue; vistos.add(d.especie.pokeId); ids.push(d.especie.pokeId); anda(d.especie, prof + 1); } };
+          anda(esp, 0);
+          for (const id of [...ids]) { const c2 = map.get(id); if (c2) for (const m2 of megasDe(c2)) if (!vistos.has(m2.pokeId)) { vistos.add(m2.pokeId); ids.push(m2.pokeId); } }
+          linhaDe.set(esp.pokeId, ids);
+          return ids;
+        };
+        let k = 0;
+        for (const h of jogo.hunts || []) {
+          if (!Array.isArray(h.especies) || String(h.area || '').toLowerCase() === 'outland') continue;
+          const nv = Number(h.nivel) || 0; const nome = String(h.nome || h.name || h.slug || '?');
+          for (const e of h.especies) {
+            const esp = map.get(e.pokeId); if (!esp) continue;
+            for (const id of linha(esp)) { const cur = onde.get(id); if (!cur || nv < cur.nivel) onde.set(id, { nivel: nv, nome, de: esp.pokeId === id ? null : esp.name }); }
+            if (++k % 80 === 0) await espera(0);
+          }
+        }
+      } catch {}
       const pedidos = new Set((ids || []).map(Number));
       const pve = [];
       let n = 0;
@@ -1012,12 +1042,25 @@ contextBridge.executeInMainWorld({
         const f = ficha(c);
         if (!f.tipos.length) continue;
         const cob = coberturaHunts(f.tipos, alvo);
-        pve.push({ ...f, x55: cob.x55, x25: cob.x25 });
+        pve.push({ ...f, x55: cob.x55, x25: cob.x25, hunt: onde.get(c.pokeId) || null });
         if (++n % 60 === 0) await espera(0); // não trava a página do jogo
       }
       const nomes = {};
       for (const id of pedidos) { const c = map.get(id); if (c) nomes[id] = ficha(c); }
-      return { pronto: true, hunts: alvo.length, pve, nomes };
+      // COUNTERS DO META: quem bate super efetivo (×2+) nos mais usados do top e apanha pouco deles (tabela de tipos do jogo).
+      const counters = [];
+      if (Array.isArray(meta) && meta.length) {
+        const mt = meta.map((m) => ({ id: Number(m.id), t: tiposDe(map.get(Number(m.id)) || {}), w: Number(m.n) || 1 })).filter((m) => m.t.length);
+        const W = mt.reduce((s2, m) => s2 + m.w, 0) || 1;
+        const xPvp = (atks, defs) => Math.max(0, ...atks.map((t) => fxTipo(t, defs)));
+        for (const x of pve) {
+          let vant = 0, risco = 0; const bate = [];
+          for (const m of mt) { if (m.id === x.id) continue; if (xPvp(x.tipos, m.t) >= 2) { vant += m.w; bate.push(m.id); } if (xPvp(m.t, x.tipos) >= 2) risco += m.w; }
+          if (!vant) continue;
+          counters.push({ id: x.id, vant: vant / W, risco: risco / W, bate: bate.slice(0, 6) });
+        }
+      }
+      return { pronto: true, hunts: alvo.length, pve, nomes, counters };
     }
 
     // ---- RADAR DE ATUALIZAÇÕES DO JOGO ----
@@ -1841,11 +1884,11 @@ contextBridge.executeInMainWorld({
         ler() { return JSON.parse(JSON.stringify(keep)); },
         // Radar de atualizações do jogo (versão, texto do "!" e os números que o app usa).
         radar() { return radar().catch(() => null); },
-        tierDados(ids) { return tierDados(ids).then((r) => JSON.parse(JSON.stringify(r))).catch((e) => ({ erro: String(e && e.message || e) })); },
+        tierDados(ids, meta) { return tierDados(ids, meta).then((r) => JSON.parse(JSON.stringify(r))).catch((e) => ({ erro: String(e && e.message || e) })); },
         canais() { return JSON.parse(JSON.stringify(canais)); },
         // Aba PvE do app (só leitura).
         pve(o, arg) {
-          const f = o === 'proximas' ? pveProximas : o === 'evolucoes' ? () => pveEvolucoes(arg) : o === 'meus' ? pveMeus : o === 'buscar' ? () => pveBuscar(arg) : o === 'casas' ? () => pveCasas(arg) : o === 'shiny' ? () => pveShiny(arg) : o === 'boss' ? () => pveBoss(arg) : o === 'outland' ? () => pveOutland(arg) : o === 'mercado' ? () => (arg && typeof arg === 'object' ? pveMercado(arg.moeda, arg.dias, arg.valor) : pveMercado(arg)) : null;
+          const f = o === 'nivel' ? async () => ({ L: Number(jogo.eu.level) || 0 }) : o === 'proximas' ? pveProximas : o === 'evolucoes' ? () => pveEvolucoes(arg) : o === 'meus' ? pveMeus : o === 'buscar' ? () => pveBuscar(arg) : o === 'casas' ? () => pveCasas(arg) : o === 'shiny' ? () => pveShiny(arg) : o === 'boss' ? () => pveBoss(arg) : o === 'outland' ? () => pveOutland(arg) : o === 'mercado' ? () => (arg && typeof arg === 'object' ? pveMercado(arg.moeda, arg.dias, arg.valor) : pveMercado(arg)) : null;
           return f ? f().catch((e) => ({ erro: String(e && e.message || e) })) : null;
         },
         // Comércio: nota, stats e espécie da ficha de um anúncio (mesma conta da ficha do jogo).
