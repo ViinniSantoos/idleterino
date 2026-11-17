@@ -54,5 +54,11 @@ article p { color: var(--muted); margin: 0; font-size: 15px; }
 footer.wrap { margin-top: 84px; margin-bottom: 40px; padding-top: 24px; color: var(--muted); font-size: 14px; }
 footer::before { content: ""; display: block; border-top: 1px solid var(--line); margin-bottom: 24px; }
 footer p { margin: 0 0 8px; }
-@media (max-width: 880px) { .grid { grid-template-columns: 1fr 1fr; } .split { grid-template-columns: 1fr; } }
+.btn.android { background: linear-gradient(90deg, #3ddc84, #2bb673); color: #062814; border: 0; }
+.cta.small .btn { padding: 10px 18px; font-size: 14.5px; }
+.note.left { text-align: left; margin: 12px 0 0; }
+section .lead.left + .grid { margin-top: 6px; }
+.card-dl { background: var(--s1); border: 1px solid var(--line); border-radius: 16px; padding: 20px; display: grid; gap: 12px; }
+.card-dl .steps { padding-left: 20px; }
+.card-dl .btn { text-align: center; }@media (max-width: 880px) { .grid { grid-template-columns: 1fr 1fr; } .split { grid-template-columns: 1fr; } }
 @media (max-width: 600px) { .grid { grid-template-columns: 1fr; } nav a:not(:last-child) { display: none; } }

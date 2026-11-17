@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Idleterino — PokeIdle, Twitch e Kick num só app</title>
-  <meta name="description" content="App gratuito para Windows e Linux que junta suas contas do PokeIdle, os pontos da Twitch e os da Kick num só lugar, leve e organizado.">
+  <meta name="description" content="App gratuito para Windows, Linux e Android que junta suas contas do PokeIdle, os pontos da Twitch e os da Kick, com análises de PvE e PvP feitas com os números do próprio jogo.">
   <link rel="icon" href="icon.png">
   <link rel="stylesheet" href="style.css">
 </head>
@@ -14,7 +14,9 @@
     <a class="brand" href="#"><img src="icon.png" alt="" width="32" height="32"> Idleterino</a>
     <nav>
       <a href="#recursos">Recursos</a>
-      <a href="#leve">Leveza</a>
+      <a href="#pve">PvE</a>
+      <a href="#pvp">PvP</a>
+      <a href="#android">Android</a>
       <a href="#seguranca">Segurança</a>
       <a href="https://github.com/ViinniSantoos/idleterino">GitHub</a>
     </nav>
@@ -24,31 +26,90 @@
     <section class="hero wrap">
       <span class="kicker"><i class="d pk"></i> PokeIdle <i class="d tw"></i> Twitch <i class="d kk"></i> Kick</span>
       <h1>Tudo do PokeIdle num <span class="grad">só app</span>.</h1>
-      <p class="lead">Suas contas do jogo, os pontos da Twitch e os da Kick juntos, leves e organizados. Você escolhe o modo de cada conta e o app cuida do resto.</p>
+      <p class="lead">Suas contas do jogo, os pontos da Twitch e os da Kick juntos e leves. E agora com análises de hunt, shiny, Outland e PvP feitas com os números do próprio jogo. No PC e no celular.</p>
       <div class="cta">
-        <a class="btn primary" href="https://github.com/ViinniSantoos/idleterino/releases/latest/download/Idleterino-Setup.exe">Baixar para Windows</a>
-        <a class="btn" href="https://github.com/ViinniSantoos/idleterino/releases/latest/download/Idleterino-portatil.exe">Versão portátil</a>
+        <a class="btn primary" href="https://github.com/ViinniSantoos/idleterino/releases/latest/download/Idleterino-Setup.exe">⊞ Baixar para Windows</a>
+        <a class="btn android" href="https://github.com/ViinniSantoos/idleterino-android/releases/latest/download/Idleterino-android.apk">🤖 Baixar para Android (APK)</a>
       </div>
       <div class="cta small">
+        <a class="btn" href="https://github.com/ViinniSantoos/idleterino/releases/latest/download/Idleterino-portatil.exe">Windows portátil</a>
         <a class="btn" href="https://github.com/ViinniSantoos/idleterino/releases/latest/download/Idleterino-linux.AppImage">🐧 Linux (AppImage)</a>
         <a class="btn" href="https://github.com/ViinniSantoos/idleterino/releases/latest/download/Idleterino-linux.deb">🐧 Linux (.deb)</a>
       </div>
-      <p class="note">Grátis e de código aberto · Windows 10/11 ou Linux 64 bits · <a href="https://github.com/ViinniSantoos/idleterino/releases">Todas as versões</a></p>
+      <p class="note">Grátis e de código aberto · Windows 10/11, Linux 64 bits ou Android 8+ · Atualiza sozinho · <a href="https://github.com/ViinniSantoos/idleterino/releases">Versões do PC</a> · <a href="https://github.com/ViinniSantoos/idleterino-android/releases">Versões do Android</a></p>
       <img class="shot" src="app.png" alt="Tela do Idleterino com as contas do PokeIdle e os pontos da Twitch e da Kick" width="1440" height="878">
     </section>
 
     <section id="recursos" class="wrap">
       <h2>Um app, três mundos</h2>
       <div class="grid">
-        <article class="pk"><b class="ico">◓</b><h3>Contas do PokeIdle</h3><p>Até 4 contas (a regra do jogo), cada uma com o login separado. Entre com Google, Discord ou e-mail e senha.</p></article>
-        <article class="pk"><b class="ico">🎚</b><h3>Modo de cada conta</h3><p>Cena, Otimizado, Economia ou ULTRA: os modos do próprio jogo, escolhidos por conta. O app sugere, você decide.</p></article>
-        <article class="pk"><b class="ico">❄</b><h3>Congelar as ALTs</h3><p>A conta vira uma foto e continua caçando. Um clique e ela volta ao vivo.</p></article>
-        <article class="tw"><b class="ico">🎁</b><h3>Twitch completa</h3><p>Lives em segundo plano, preço real dos bônus de cada canal, pacotes de 1h a 10h e o baú de +50 pego sozinho.</p></article>
-        <article class="kk"><b class="ico">⚡</b><h3>Kick completa</h3><p>Lives em segundo plano, foco no próximo bônus, prioridade para subs e chat dos canais.</p></article>
-        <article><b class="ico">⏱</b><h3>Bônus lidos do jogo</h3><p>O tempo do Bônus Twitch e do Bônus na Kick vem direto do PokeIdle, conta por conta.</p></article>
-        <article><b class="ico">🧩</b><h3>Suas extensões</h3><p>Instale as extensões que você já usa no jogo (.zip, .crx ou pasta). Elas valem só nas contas do PokeIdle.</p></article>
-        <article><b class="ico">❓</b><h3>Ajuda dentro do app</h3><p>As dúvidas mais comuns com busca: como conectar extensão, qual modo usar, limite de contas e mais.</p></article>
-        <article><b class="ico">🎨</b><h3>Limpo e bonito</h3><p>Menu lateral, cada coisa no seu lugar e só o essencial na tela. Ligue só o que você usa.</p></article>
+        <article class="pk"><b class="ico">◓</b><h3>Contas do PokeIdle</h3><p>Até 4 contas (a regra do jogo), cada uma com o login separado. Ver as ALTs juntas, lado a lado, zoom por conta e modo foco (F11).</p></article>
+        <article class="pk"><b class="ico">🎚</b><h3>Modo de cada conta</h3><p>Cena, Otimizado, Economia ou ULTRA, por conta. "ULTRA automático no fundo", congelar ALTs e otimizar a memória sozinho.</p></article>
+        <article class="pk"><b class="ico">🏠</b><h3>Início que resume tudo</h3><p>Farm de cada conta, XP/h, previsão de shiny, bônus acabando, voto do TopIdle e o seu Market (anúncios e vendas).</p></article>
+        <article class="tw"><b class="ico">🎁</b><h3>Twitch completa</h3><p>Lives em segundo plano, preço real dos bônus de cada canal, pacotes de 1 h a 10 h e o baú pego sozinho.</p></article>
+        <article class="kk"><b class="ico">⚡</b><h3>Kick completa</h3><p>Lives em segundo plano, foco no próximo bônus, pacotes de 1 h a 10 h e prioridade para subs.</p></article>
+        <article><b class="ico">📡</b><h3>Canais oficiais do jogo</h3><p>Streamer que entra no PokeIdle entra no app sozinho. O tempo dos seus bônus vem direto do jogo, conta por conta.</p></article>
+        <article><b class="ico">🆕</b><h3>Radar de atualizações</h3><p>O app lê as Novidades do jogo (o "!") e os números que ele usa. Quando o PokeIdle atualiza, avisa o que mudou e já usa os valores novos.</p></article>
+        <article><b class="ico">🌙</b><h3>Modo noite e avisos</h3><p>Diário de horas e XP, relatório da noite, avisos no celular (ntfy ou Discord) e painel pelo Wi-Fi de casa.</p></article>
+        <article><b class="ico">🎥</b><h3>Modo Streamer</h3><p>Overlay leve para o OBS com nível, barra de XP, XP na live e animação de shiny e de nível.</p></article>
+        <article><b class="ico">🛒</b><h3>Comércio da guild</h3><p>Seus anúncios do Market postados no canal de comércio da guild no Discord, com a ficha do pokémon e o link "Abrir no Idleterino".</p></article>
+        <article><b class="ico">🧩</b><h3>Suas extensões</h3><p>Rotom Sniper e /hunt já reconhecidos, e qualquer extensão (.zip, .crx ou pasta). Só nas contas do PokeIdle.</p></article>
+        <article><b class="ico">❓</b><h3>Ajuda dentro do app</h3><p>As dúvidas mais comuns com busca. Backup automático das configurações e "voltar de versão" se algo der errado.</p></article>
+      </div>
+    </section>
+
+    <section id="pve" class="wrap">
+      <h2>PvE com os números do jogo</h2>
+      <p class="lead left">Hunts, tipos, evoluções, Megas, casas e bosses lidos do próprio PokeIdle, pela conta que você escolher.</p>
+      <div class="grid">
+        <article class="pk"><b class="ico">🎯</b><h3>Hunt agora e próximas</h3><p>A melhor hunt para o seu pokémon em campo (×5,5, ×2,5, AoE, bike e Dia Sazonal) e as que abrem nos próximos níveis.</p></article>
+        <article class="pk"><b class="ico">🏆</b><h3>Tier list de farm</h3><p>Quem mata mais rápido (ataque, SP-ataque e velocidade), a hunt onde cada um se pega e 🔒 no que a sua conta ainda não alcança.</p></article>
+        <article class="pk"><b class="ico">🏝️</b><h3>Outland × Shiny × Upar</h3><p>"Fico na Outland, vou atrás de shiny ou upo?": simula 7 e 30 dias e responde qual rende mais.</p></article>
+        <article class="pk"><b class="ico">🧬</b><h3>Evoluir para qual?</h3><p>Com os IVs do seu pokémon, qual evolução e qual Mega valem mais no PvE e no PvP.</p></article>
+        <article class="pk"><b class="ico">✨</b><h3>Procurar shiny</h3><p>As espécies mais fáceis de pegar shiny com os seus bônus, quanto tempo leva e quanto vale no Market.</p></article>
+        <article class="pk"><b class="ico">🏠</b><h3>Casas</h3><p>Quanto cada casa rende de XP, com os seus buffs, e quando cada pokémon chega no nível que você quer.</p></article>
+        <article class="pk"><b class="ico">🧮</b><h3>Calculadora Boss</h3><p>Lucro de cada boss com os preços de agora no Market e qual compensa mais.</p></article>
+        <article class="pk"><b class="ico">🛍️</b><h3>Comprar para farmar</h3><p>Com o seu orçamento, o que está à venda agora que mais rende na sua região.</p></article>
+        <article class="pk"><b class="ico">📊</b><h3>Laboratório de hunts</h3><p>Compare hunts com o tempo medido de verdade e veja qual dá mais XP e ouro.</p></article>
+      </div>
+    </section>
+
+    <section id="pvp" class="wrap">
+      <h2>PvP lido do top 50</h2>
+      <div class="grid">
+        <article class="tw"><b class="ico">⚔️</b><h3>Meta do Ranqueado</h3><p>Os times do top 50 lidos do jogo todo dia, arquétipos com tier e tendência, e o meta real pelo seu elo.</p></article>
+        <article class="tw"><b class="ico">🏆</b><h3>Tier list, mais usados e counters</h3><p>A tier do PvP, os pokémon mais usados do meta e os counters deles, pela tabela de tipos do jogo.</p></article>
+        <article class="tw"><b class="ico">📐</b><h3>Planejador</h3><p>Seu time contra cada time do top, com a luta simulada no tabuleiro real e cada um na fileira da distância dele.</p></article>
+        <article class="tw"><b class="ico">🎬</b><h3>Minhas partidas</h3><p>O replay de cada partida resumido: quem bateu em quem, quem caiu e por quê.</p></article>
+        <article class="tw"><b class="ico">💰</b><h3>Meu time e compras</h3><p>Quem do seu time vale trocar e o que comprar no Market com o seu orçamento para subir.</p></article>
+        <article class="tw"><b class="ico">📈</b><h3>Histórico</h3><p>Sua pontuação e o seu elo ao longo dos dias.</p></article>
+      </div>
+    </section>
+
+    <section id="android" class="wrap">
+      <h2>No celular também</h2>
+      <div class="split">
+        <div>
+          <p class="lead left">O <b>Idleterino para Android</b> farma o PokeIdle no celular, com as mesmas contas do PC.</p>
+          <ul class="checks">
+            <li>Até 4 contas do PokeIdle, cada uma com o login separado (a ALT em modo ULTRA).</li>
+            <li>Continua farmando ao trocar de app e, se você quiser, com a tela desligada.</li>
+            <li>Abas da Twitch e da Kick, com o baú da Twitch pego sozinho (só no Wi-Fi, para não gastar dados).</li>
+            <li>PvP com o meta do top 50, Casas, Calculadora Boss e Evoluir para qual?.</li>
+            <li>"Levar contas para o celular": um QR Code no PC e um PIN, sem digitar senha.</li>
+            <li>Atualiza sozinho e confere a assinatura de cada versão.</li>
+          </ul>
+        </div>
+        <div class="card-dl">
+          <b>Como instalar o APK</b>
+          <ol class="steps">
+            <li><a href="https://github.com/ViinniSantoos/idleterino-android/releases/latest/download/Idleterino-android.apk">Baixe o Idleterino-android.apk</a> no celular.</li>
+            <li>Abra o arquivo. Se o Android pedir, permita "instalar apps desta fonte" para o navegador ou o gerenciador de arquivos.</li>
+            <li>Toque em Instalar, abra o app e entre nas suas contas.</li>
+          </ol>
+          <a class="btn android" href="https://github.com/ViinniSantoos/idleterino-android/releases/latest/download/Idleterino-android.apk">🤖 Baixar o APK</a>
+          <p class="note left">Android 8 ou mais novo. O app não está na Play Store: baixe só por aqui ou pelo GitHub oficial.</p>
+        </div>
       </div>
     </section>
 
@@ -77,26 +138,27 @@
     </section>
 
     <section class="wrap">
-      <h2>Como instalar</h2>
+      <h2>Como instalar no PC</h2>
       <ol class="steps">
         <li>Baixe o instalador acima.</li>
         <li>Se o Windows mostrar "O Windows protegeu o computador", clique em <strong>Mais informações</strong> e depois em <strong>Executar assim mesmo</strong> (o app ainda não tem assinatura digital).</li>
         <li>No Linux, dê permissão ao AppImage (botão direito &gt; Propriedades &gt; <strong>Permitir executar como programa</strong>, ou <code>chmod +x</code>). Se não abrir, instale o <code>libfuse2</code>.</li>
-        <li>Entre na Twitch e na Kick e adicione suas contas do PokeIdle. Pronto.</li>
+        <li>Entre na Twitch e na Kick e adicione suas contas do PokeIdle. Pronto: as próximas versões chegam sozinhas.</li>
       </ol>
+      <p class="tip">Algum antivírus reclamou? Como o app ainda não tem assinatura digital, alguns antivírus desconfiam de programas novos. Baixe só por este site ou pelo GitHub, e se o antivírus mandar para a quarentena, restaure e adicione a pasta do Idleterino como exceção.</p>
     </section>
 
     <section id="seguranca" class="wrap">
       <h2>Suas contas ficam com você</h2>
       <ul class="checks">
         <li>Login sempre nas páginas oficiais (Google, Discord, Twitch, Kick, PokeIdle). O app nunca lê nem guarda senhas.</li>
-        <li>Não existe servidor do Idleterino: os logins ficam só no seu PC, criptografados pelo Windows.</li>
+        <li>Não existe servidor do Idleterino: os logins ficam só no seu PC ou no seu celular, criptografados.</li>
         <li>Cada conta tem a sua sessão separada. Extensões nunca entram na Twitch e na Kick.</li>
         <li>O app confere a própria integridade ao abrir e bloqueia download de programas dentro das contas.</li>
         <li>Respeita as regras: até 4 contas do PokeIdle por pessoa e uma conta por plataforma na Twitch e na Kick.</li>
-        <li>O <a href="https://github.com/ViinniSantoos/idleterino">código é aberto</a>, para qualquer pessoa conferir.</li>
+        <li>O código é aberto (<a href="https://github.com/ViinniSantoos/idleterino">PC</a> e <a href="https://github.com/ViinniSantoos/idleterino-android">Android</a>), para qualquer pessoa conferir.</li>
       </ul>
-      <p class="tip">Baixe só por este site ou pelo GitHub oficial. Instaladores enviados em grupos podem ter sido alterados.</p>
+      <p class="tip">Baixe só por este site ou pelo GitHub oficial. Instaladores e APKs enviados em grupos podem ter sido alterados.</p>
     </section>
   </main>
 
