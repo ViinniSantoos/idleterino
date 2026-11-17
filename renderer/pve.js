@@ -45,19 +45,186 @@ async function renderPve() {
   act.append(sel);
   head.append(t, act);
   const tabs = el('div', 'pvp-tabs');
-  for (const [k, l] of [['agora', '🎯 Hunt agora'], ['proximas', '🗺️ Próximas hunts'], ['evo', '🧬 Evoluir para qual?'], ['casas', '🏠 Casas'], ['shiny', '✨ Procurar shiny'], ['boss', '🧮 Calculadora Boss'], ['mercado', '🛒 Comprar para farmar']]) {
+  const radarNovo = pveRadar && pveRadar.historico && pveRadar.historico[0] && pveRadar.historico[0].id !== pveRadar.visto;
+  for (const [k, l] of [['agora', '🎯 Hunt agora'], ['proximas', '🗺️ Próximas hunts'], ['outland', '🏝️ Outland × Shiny × Upar'], ['tier', '🏆 Tier list'], ['evo', '🧬 Evoluir para qual?'], ['casas', '🏠 Casas'], ['shiny', '✨ Procurar shiny'], ['boss', '🧮 Calculadora Boss'], ['mercado', '🛒 Comprar para farmar'], ['radar', `🆕 Atualizações do jogo${radarNovo ? ' •' : ''}`]]) {
     tabs.append(button(l, pveTab === k ? 'on' : '', () => { pveTab = k; try { localStorage.setItem('pveTab', k); } catch {} renderPve(); }));
   }
   root.append(head, tabs);
+  if (radarNovo && pveTab !== 'radar') {
+    const h0 = pveRadar.historico[0];
+    const aviso = el('div', 'tip ok');
+    aviso.append(el('b', null, `🆕 O PokeIdle atualizou${h0.versao ? ` (v${h0.versao})` : ''}: `), el('span', null, `${h0.titulo}. ${h0.mudancas && h0.mudancas.length ? `${h0.mudancas.length} número(s) do jogo mudaram e o app já usa os novos.` : 'O app já leu a novidade.'} `),
+      button('Ver o que mudou', 'mini', () => { pveTab = 'radar'; try { localStorage.setItem('pveTab', 'radar'); } catch {} renderPve(); }));
+    root.append(aviso);
+  }
   const corpo = el('div', 'pve-corpo');
   root.append(corpo);
   if (pveTab === 'agora') pveAgora(corpo, accs.find((a) => a.id === pveAcc));
+  else if (pveTab === 'outland') pveOutlandTela(corpo);
+  else if (pveTab === 'radar') pveRadarTela(corpo);
+  else if (pveTab === 'tier') renderTierList(corpo, 'pve');
   else if (pveTab === 'proximas') await pveProximas(corpo);
   else if (pveTab === 'mercado') pveMercado(corpo, accs.find((a) => a.id === pveAcc));
   else if (pveTab === 'casas') await pveCasas(corpo);
   else if (pveTab === 'shiny') pveShiny(corpo);
   else if (pveTab === 'boss') await pveBossTela(corpo);
   else await pveEvo(corpo);
+}
+
+// ---------- 🆕 Atualizações do jogo (radar) ----------
+// A conta principal lê a versão do jogo, o texto do "!" e os números que o app usa a cada 30 min. Mudou: o app mostra
+// o que mudou e onde (as contas do app já leem os números do próprio jogo e passam a usar os novos sozinhas).
+let pveRadar = null;
+(async () => { try { pveRadar = await call('poke:radar:get'); } catch {} })();
+if (window.idle && window.idle.on) window.idle.on('poke:radar', (r) => { pveRadar = r; if (typeof page !== 'undefined' && page === 'pve') renderPve(); });
+function pveRadarTela(box) {
+  const r = pveRadar;
+  const c = el('div', 'card');
+  c.append(el('div', 'ext-sec', '🆕 Atualizações do jogo'));
+  c.append(el('div', 'sub up-lead', 'O app lê sozinho as Novidades do jogo (o "!" no canto de baixo) e os números que ele usa nas contas: velocidade das bikes, escada e drops da Outland, chance de shiny, taxas do Market, casas, bosses e mais. Quando o jogo atualiza, aparece aqui o que mudou e em que parte do app. As contas (sugestão de hunt, Outland, shiny, Trader, Calculadora Boss) já leem os números do próprio jogo, então passam a usar os novos na hora, sem precisar de versão nova do app.'));
+  const acoes = el('div', 'actions');
+  acoes.append(button('🔄 Conferir agora', null, async () => { toast('Conferindo a versão do jogo…'); pveRadar = await call('poke:radar:agora').catch(() => pveRadar); renderPve(); }));
+  c.append(acoes);
+  if (r && r.versao) c.append(el('p', 'small', `Versão do jogo agora: ${r.versao}${r.build && r.build !== r.versao ? ` (build ${r.build})` : ''} · conferido ${r.em ? new Date(r.em).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—'}.`));
+  box.append(c);
+  const hist = (r && r.historico) || [];
+  if (!hist.length) { box.append(emptyBox('Ainda sem leitura', 'Com a conta principal aberta e logada, o app lê a versão do jogo em até 2 minutos (ou clique em "Conferir agora").')); return; }
+  for (const h of hist.slice(0, 10)) {
+    const d = el('div', 'card');
+    d.append(el('div', 'ext-sec', `${h.titulo}${h.versao ? ` · v${h.versao}` : ''}${h.data ? ` · ${h.data.split('-').reverse().join('/')}` : ''}`));
+    if (h.primeira) d.append(el('div', 'sub', 'Primeira leitura: esta é a novidade que estava no jogo quando o radar começou. Daqui para frente, cada mudança aparece comparada com a anterior.'));
+    if (h.mudancas && h.mudancas.length) {
+      d.append(el('div', 'tr-rot', `📊 O que mudou nos números (${h.mudancas.length}) — o app já usa os novos:`));
+      const l = el('div', 'cand-list');
+      for (const m of h.mudancas) {
+        const row = el('div', 'cand');
+        const n = el('div', 'pu-n');
+        n.append(el('b', null, m.nome), el('span', 'sub', `Afeta: ${m.area}`));
+        const v = el('div', 'price');
+        v.append(el('b', null, m.tipo === 'novo' ? `novo: ${m.depois}` : m.tipo === 'saiu' ? `saiu (era ${m.antes})` : `${m.antes} → ${m.depois}`));
+        row.append(n, v); l.append(row);
+      }
+      d.append(l);
+    } else if (!h.primeira) d.append(el('div', 'sub', 'Nenhum dos números que o app usa mudou nesta versão.'));
+    if (h.modulos && h.modulos.length) d.append(el('div', 'tip warn', `🧩 O jogo também mexeu em regras usadas por: ${[...new Set(h.modulos.map((x) => x.area))].join(', ')}. As contas do app que leem essas regras do jogo já usam a nova; se algo parecer estranho nessas partes, avise.`));
+    if (h.textos && h.textos.length) {
+      const det = el('details');
+      det.append(el('summary', null, '📜 Texto da novidade (do "!" do jogo)'));
+      for (const t of h.textos) if (t.t && !/^(Ok|Fita|N\dS?)$/.test(t.k)) det.append(el('p', 'small', t.t));
+      d.append(det);
+    }
+    box.append(d);
+  }
+  if (r && r.historico && r.historico[0] && r.historico[0].id !== r.visto) call('poke:radar:visto').then((x) => { pveRadar = x; }).catch(() => {});
+}
+
+// ---------- 🏝️ Outland × Shiny × Upar: o que rende mais por hora (estatística, quem decide é você) ----------
+let pveOutRes = null, pveOutRodando = false;
+function pveOutlandTela(box) {
+  const c = el('div', 'card');
+  c.append(el('div', 'ext-sec', '🏝️ Continuar na Outland, caçar shiny ou upar? Em números'));
+  c.append(el('div', 'sub up-lead', 'Com o pokémon que está em campo agora, o app calcula quanto cada caminho rende por hora: na Outland (os drops raros × o multiplicador do seu degrau × o preço de agora no Market, já sem a taxa, mais as coins da hunt), na melhor hunt para upar (XP/h) e caçando shiny (chance de achar). É estatística: o jogo sorteia, e a escolha é sua — tem quem prefira o shiny do pokémon que gosta, tem quem queira gemas.'));
+  const go = button(pveOutRodando ? 'Calculando… (lendo os preços do Market)' : '📊 Calcular agora', 'primary', async () => {
+    pveOutRodando = true; renderPve();
+    const r = await call('poke:pve', pveAcc, 'outland', {}).catch(() => null);
+    pveOutRodando = false;
+    pveOutRes = r && !r.erro && r.pronto !== false ? { ...r, acc: pveAcc } : null;
+    if (!r || r.erro || r.pronto === false) toast(`⚠ ${(r && r.erro) || 'A conta precisa estar aberta e logada.'}`);
+    if (page === 'pve' && pveTab === 'outland') renderPve();
+  });
+  go.disabled = pveOutRodando;
+  c.append(go);
+  box.append(c);
+  const r = pveOutRes;
+  if (!r || r.acc !== pveAcc) { box.append(emptyBox('Outland × Shiny × Upar', 'Deixe em campo o pokémon com que você farma e clique em "Calcular agora".')); return; }
+  if (r.semPokemon) { box.append(emptyBox('Sem pokémon em campo', 'Coloque um pokémon em campo no jogo e calcule de novo.')); return; }
+  const g = (v) => (v == null ? '—' : `${shinyMoedaTxt(v, 'gold')} coins`);
+  const o = (v) => (v == null ? '—' : shinyMoedaTxt(v, 'orb'));
+  const pct = (a, b) => (b > 0 ? Math.round(((a - b) / b) * 100) : null);
+  const deg = r.escolhida || r.maxLib;
+  const res = el('div', 'card');
+  res.append(el('div', 'sub up-lead', `${r.pokemon} em campo · Treinador Nv ${fmt(r.L)} · ${r.bike ? `bike ${r.bike} (+${Math.round(r.vel * 100)}% na caminhada)` : 'a pé'} · Outlands liberadas: ${r.liberadas} de ${r.escada.length}.`));
+  if (!r.huntOut) res.append(el('div', 'tip warn', r.L < 150 ? 'A Outland libera no Nv 150 de treinador.' : 'O app não achou a hunt da Outland para este pokémon (ele não consegue caçar lá agora).'));
+  // 🧭 A RESPOSTA: "fico na Outland ou vou upar para chegar numa Outland melhor?" — simulado em 7 e 30 dias.
+  if (r.plano) {
+    const v = el('div', 'card');
+    v.style.border = '1px solid var(--accent, #7c5cff)';
+    v.append(el('div', 'ext-sec', '🧭 A resposta: ficar na Outland ou upar?'));
+    const frase = (p, quando) => {
+      const m = p.melhor, f = p.ficar;
+      if (!m) return '';
+      if (m.k === 'ficar') return `${quando}: o que mais rende é FICAR na Outland ${f.tier} — ${g(m.coins)}. Upar agora não compensa nesse prazo (o próximo degrau demora para chegar ou rende pouco a mais).`;
+      return `${quando}: o que mais rende é ${m.txt.charAt(0).toLowerCase() + m.txt.slice(1)} — ${g(m.coins)}${f && p.ganhoPct != null ? `, ${p.ganhoPct >= 0 ? '+' : ''}${p.ganhoPct}% do que ficar onde está (${g(f.coins)})` : ''}.`;
+    };
+    v.append(el('div', 'tip ok', `📅 ${frase(r.plano.semana, 'Nos próximos 7 dias')}`));
+    v.append(el('div', 'tip ok', `🗓️ ${frase(r.plano.mes, 'Nos próximos 30 dias')}`));
+    const mx = r.plano.semana.maisXp;
+    if (mx) v.append(el('div', 'tip', `⬆️ Se o seu objetivo é LEVEL: ${mx.txt.charAt(0).toLowerCase() + mx.txt.slice(1)} leva você ao Nv ${fmt(mx.nv)} em 7 dias (ficando na Outland: Nv ${fmt(r.plano.semana.ficar ? r.plano.semana.ficar.nv : r.L)}). Level alto libera os degraus de cima da Outland e hunts melhores.`));
+    v.append(el('div', 'tip', `✨ Se o seu objetivo é SHINY: na Outland o app não conta shiny. Upando ou caçando nas hunts do Mapa, cada abate é um arremesso com chance de shiny${r.shiny ? ` — o mais fácil para o seu ${r.pokemon} agora é ${r.shiny.melhor.nome} (1 a cada ~${shinyHoras(r.shiny.melhor.umEmH)})` : ''}.`));
+    const tab = el('details');
+    tab.append(el('summary', null, 'Ver todos os planos comparados (7 dias)'));
+    for (const op of r.plano.semana.opcoes) tab.append(el('p', 'small', `${op === r.plano.semana.melhor ? '🏆 ' : ''}${op.txt}: ${g(op.coins)}${op.gemas ? ` ou ${o(op.gemas)} vendendo os drops em gemas` : ''} · Nv ${fmt(op.nv)} no fim`));
+    v.append(tab);
+    v.append(el('p', 'small', 'Conta: os abates/h e o XP/h do seu pokémon em campo agora, os drops × o multiplicador de cada Outland × o preço de agora no Market (sem a taxa), e as coins das hunts. Trocar de pokémon, bônus ou preço muda a resposta — calcule de novo.'));
+    res.append(v);
+  }
+  // Os 3 caminhos lado a lado.
+  const grade = el('div', 'tr-faixas');
+  const cartao = (tit, linhas) => { const d = el('div', 'tip ok'); d.append(el('b', null, tit)); for (const x of linhas) if (x) d.append(el('div', 'small', x)); grade.append(d); };
+  if (r.huntOut && deg) {
+    const coinsTot = (deg.goldDropsH || 0) + (r.huntOut.goldH || 0);
+    cartao(`🏝️ Outland ${deg.numero} (×${String(deg.mult).replace('.', ',')})`, [
+      `~${fmt(r.huntOut.kph)} abates/h`,
+      `Drops vendidos: ${g(deg.goldDropsH)}/h ou ${o(deg.orbDropsH)}/h`,
+      `Coins da hunt: ${g(r.huntOut.goldH)}/h → total ${g(coinsTot)}/h`,
+      `XP: ${fmt(r.xp.out)}/h → Nv ${fmt(r.xp.nvOut7d)} em 7 dias`,
+    ]);
+  }
+  if (r.huntXp) cartao(`⬆️ Upar: ${r.huntXp.nome} (Nv ${fmt(r.huntXp.nivel)})`, [
+    `~${fmt(r.huntXp.kph)} abates/h`, `XP: ${fmt(r.xp.up)}/h → Nv ${fmt(r.xp.nvUp7d)} em 7 dias`, `Coins da hunt: ${g(r.huntXp.goldH)}/h`, 'Sem drops raros da Outland',
+  ]);
+  if (r.shiny) cartao(`✨ Caçar shiny: ${r.shiny.melhor.nome}`, [
+    `Hunt ${r.shiny.melhor.hunt.nome} · ${fmt(r.shiny.melhor.hunt.kph)} abates/h`,
+    `1 shiny a cada ~${shinyHoras(r.shiny.melhor.umEmH)} (${r.shiny.melhor.chance24}% em 24 h)`,
+    `Chance: 1 em ${fmt(Math.round(1 / (r.shiny.chanceS * r.shiny.multS)))} arremessos com os bônus de agora`,
+    'Valor: o preço do shiny no Market — veja em ✨ Procurar shiny',
+  ]);
+  res.append(grade);
+  // Resumo estatístico.
+  const pts = el('div', 'tr-faixas');
+  pts.append(el('span', 'tr-rot', '📊 Resumo estatístico'));
+  const dica = (t, cls = 'tip') => pts.append(el('div', cls, t));
+  if (r.huntOut && deg && r.huntXp) {
+    const coinsOut = (deg.goldDropsH || 0) + (r.huntOut.goldH || 0);
+    const melhorOuro = r.huntOuro ? r.huntOuro.goldH : r.huntXp.goldH;
+    const dc = pct(coinsOut, melhorOuro);
+    dica(`💰 Coins por hora: a Outland ${deg.numero} (drops vendidos + coins da hunt) rende ${g(coinsOut)}/h contra ${g(melhorOuro)}/h na melhor hunt de coins${r.huntOuro ? ` (${r.huntOuro.nome})` : ''}${dc != null ? ` — ${dc >= 0 ? `+${dc}%` : `${dc}%`} na Outland` : ''}.`);
+    const dx = pct(r.xp.out, r.xp.up);
+    dica(`⬆️ XP por hora: a melhor hunt para upar dá ${fmt(r.xp.up)}/h contra ${fmt(r.xp.out)}/h na Outland${dx != null ? ` (${dx >= 0 ? `+${dx}%` : `${dx}%`} na Outland)` : ''}. Em 7 dias: Nv ${fmt(r.xp.nvUp7d)} upando contra Nv ${fmt(r.xp.nvOut7d)} na Outland.`);
+    const top = [...deg.drops].filter((x) => x.gold != null || x.orb != null).sort((a, b) => (b.gold || 0) - (a.gold || 0))[0];
+    if (top) dica(`🎁 O drop que mais pesa na Outland ${deg.numero}: ${top.nome} (1 em ${fmt(top.umEm)} abates, ~${String(Math.round(top.porDia * 10) / 10).replace('.', ',')} por dia, ${g(top.gold)}/h).`);
+    if (r.escolhida && r.maxLib && r.maxLib.numero > r.escolhida.numero) dica(`⚠️ Você está na Outland ${r.escolhida.numero} (×${String(r.escolhida.mult).replace('.', ',')}), mas já libera a ${r.maxLib.numero} (×${String(r.maxLib.mult).replace('.', ',')}): mesmos selvagens e ${pct(r.maxLib.mult, r.escolhida.mult)}% mais drops. Suba no seletor da Outland, no Mapa.`, 'tip warn');
+    if (r.proxima) dica(`🔜 Próximo degrau: Outland ${r.proxima.numero} no Nv ${fmt(r.proxima.nivel)} (×${String(r.proxima.mult).replace('.', ',')}, +${pct(r.proxima.mult, deg.mult)}% de drops). Upando é o caminho para chegar nele.`);
+  }
+  if (r.semPrecos) dica('Feche o Market dentro do jogo para o app ler os preços dos drops (com ele aberto, a consulta apareceria na sua tela).', 'tip warn');
+  dica('A Outland rende em ITENS: o valor só vira coins/gemas se você vender, e o preço cai se muita gente vender junto. Upar é o que libera os degraus de cima (mais drops) e hunts de mais XP. Shiny é sorte: a média aqui vale para muitas horas de caçada. O Loot Boost multiplica os drops por cima (não entra na conta).', 'sub');
+  res.append(pts);
+  // Tabela dos drops do degrau.
+  if (deg && deg.drops) {
+    res.append(el('div', 'ext-sec mk-sub', `Drops na Outland ${deg.numero} (×${String(deg.mult).replace('.', ',')}) com ~${fmt(r.huntOut.kph)} abates/h`));
+    const l = el('div', 'cand-list');
+    for (const x of deg.drops) {
+      const row = el('div', 'cand');
+      const n = el('div', 'pu-n');
+      n.append(el('b', null, x.nome), el('span', 'sub', `1 em ${fmt(x.umEm)} abates · ~${String(Math.round(x.porDia * 100) / 100).replace('.', ',')} por dia · 1 a cada ~${shinyHoras(x.horasPorDrop)}`));
+      const p = el('div', 'price');
+      p.append(el('b', null, x.gold != null ? `${g(x.gold)}/h` : '—'), el('span', 'sub', x.orb != null ? `${o(x.orb)}/h` : 'sem preço em gemas'));
+      row.append(n, p); l.append(row);
+    }
+    res.append(l);
+  }
+  res.append(el('p', 'small', `Calculado ${new Date(r.em).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}. Escada, chances e preços vêm do jogo e do Market de agora; abates/h e XP/h são a estimativa da sugestão de hunt para o seu pokémon em campo.`));
+  box.append(res);
 }
 
 // ---------- 🏠 Casas: em quanto tempo o pokémon da casa chega no nível que você quer ----------

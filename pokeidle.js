@@ -356,6 +356,60 @@ module.exports = function createPokeIdle(ctx) {
     if (r && r.pronto) { const cur = info.get(id); if (cur) { cur.huntRank = r; send('status', snapshot()); } }
   }
 
+  // ---------- Radar de atualizações do jogo ----------
+  // A conta principal lê, a cada 30 min, a versão do jogo, o texto do "!" (Novidades) e os números que o app usa
+  // (bikes, Outland, drops, shiny, taxas, casas, bosses) mais a impressão digital dos módulos do jogo. Mudou a versão:
+  // compara com a foto anterior, guarda o que mudou (e em que parte do app) e avisa. As contas do app já leem os
+  // números do próprio jogo, então elas passam a usar os novos sozinhas; o radar mostra o que mudou.
+  const radarPath = () => path.join(app.getPath('userData'), 'radar-jogo.json');
+  let radarDados = { ultimo: null, historico: [], visto: null };
+  try { const d = JSON.parse(fs.readFileSync(radarPath(), 'utf8')); if (d && Array.isArray(d.historico)) radarDados = { ultimo: d.ultimo || null, historico: d.historico, visto: d.visto || null }; } catch {}
+  const radarSalvar = () => { try { fs.writeFileSync(radarPath(), JSON.stringify(radarDados)); } catch {} };
+  const radarGet = () => ({ historico: radarDados.historico, visto: radarDados.visto, versao: radarDados.ultimo && radarDados.ultimo.versao, build: radarDados.ultimo && radarDados.ultimo.build, em: radarDados.ultimo && radarDados.ultimo.em });
+  function radarComparar(antes, agora) {
+    const mudancas = [];
+    const na = (antes && antes.numeros) || {}, nb = agora.numeros || {};
+    for (const k of Object.keys(nb)) {
+      if (!na[k]) { if (antes && antes.numeros) mudancas.push({ k, nome: nb[k].nome, area: nb[k].area, antes: null, depois: nb[k].v, tipo: 'novo' }); continue; }
+      if (na[k].v !== nb[k].v) mudancas.push({ k, nome: nb[k].nome, area: nb[k].area, antes: na[k].v, depois: nb[k].v, tipo: 'mudou' });
+    }
+    for (const k of Object.keys(na)) if (!nb[k]) mudancas.push({ k, nome: na[k].nome, area: na[k].area, antes: na[k].v, depois: null, tipo: 'saiu' });
+    const ma = (antes && antes.modulos) || {}, mb = agora.modulos || {};
+    const modulos = Object.keys(mb).filter((f) => ma[f] && ma[f] !== mb[f]).map((f) => ({ arquivo: f, area: (agora.areasModulos || {})[f] || '' }));
+    return { mudancas, modulos };
+  }
+  let radarRodando = false;
+  async function radarCheck(forcar) {
+    if (radarRodando) return;
+    const v = views.get(mainAccId());
+    if (!v || v.webContents.isDestroyed()) return;
+    radarRodando = true;
+    try {
+      const r = await v.webContents.executeJavaScript('window.__idleterinoMercado && window.__idleterinoMercado.radar ? window.__idleterinoMercado.radar() : null').catch(() => null);
+      if (!r || (!r.build && r.aviso == null) || !r.numeros || !Object.keys(r.numeros).length) return;
+      const antes = radarDados.ultimo;
+      const mesmaVersao = antes && antes.build === r.build && antes.aviso === r.aviso;
+      const { mudancas, modulos } = radarComparar(antes, r);
+      // Mesma versão e nada mudou: só atualiza a foto (sem histórico novo).
+      if (mesmaVersao && !mudancas.length && !modulos.length) { radarDados.ultimo = r; if (forcar) radarSalvar(); return; }
+      const titulo = (r.textos.find((t) => t.k === 'Titulo') || r.textos.find((t) => /titulo/i.test(t.k)) || {}).t || (r.versao ? `Versão ${r.versao}` : 'Atualização do jogo');
+      const ent = { id: `${r.build || ''}|${r.aviso || ''}|${Date.now()}`, em: Date.now(), build: r.build, versao: r.versao, aviso: r.aviso, data: r.data, titulo,
+        textos: r.textos, mudancas, modulos, primeira: !antes, novaNovidade: !antes || antes.aviso !== r.aviso };
+      // A mesma novidade de antes, só com números mexidos (patch pequeno): junta na entrada dela.
+      const topo = radarDados.historico[0];
+      if (topo && topo.aviso === r.aviso && !ent.novaNovidade && topo.build !== r.build) { ent.textos = []; ent.titulo = `Ajuste na versão ${r.build || ''}`.trim(); }
+      radarDados.historico.unshift(ent);
+      radarDados.historico = radarDados.historico.slice(0, 30);
+      radarDados.ultimo = r;
+      radarSalvar();
+      send('radar', radarGet());
+      if (antes && (ent.novaNovidade || mudancas.length || modulos.length) && ctx.notify) {
+        const resumo = mudancas.slice(0, 3).map((m) => `${m.nome}: ${m.antes ?? '—'} → ${m.depois ?? '—'}`).join(' · ');
+        ctx.notify(`🆕 PokeIdle atualizou${r.versao ? ` (v${r.versao})` : ''}`, `${titulo}${resumo ? ` — ${resumo}` : ''}. O app já usa os números novos. Veja em PvE › Atualizações do jogo.`);
+      }
+    } finally { radarRodando = false; }
+  }
+
   // ---------- PvP: meta do top 50, lida pela conta principal uma vez por dia ----------
   // Só as consultas que o jogo faz na tela de PvP (a tabela) e no perfil público de um jogador, uma a
   // cada 5 s. O resultado fica salvo neste PC (pvp-meta.json) e a aba PvP mostra sem esperar.
@@ -645,11 +699,14 @@ module.exports = function createPokeIdle(ctx) {
   });
   ipcMain.handle('poke:optimizeEvery', (_e, min) => { config.optimizeEvery = [0, 30, 60, 120, 300].includes(Number(min)) ? Number(min) : 0; saveConfig(); return snapshot(); });
   ipcMain.handle('poke:pvp:get', (_e, accId) => pvpGet(accId));
+  ipcMain.handle('poke:radar:get', () => radarGet());
+  ipcMain.handle('poke:radar:agora', async () => { await radarCheck(true).catch(() => {}); return radarGet(); });
+  ipcMain.handle('poke:radar:visto', () => { radarDados.visto = radarDados.historico[0] ? radarDados.historico[0].id : null; radarSalvar(); return radarGet(); });
   // "Ver no Market": abre o anúncio no jogo (o mesmo caminho do link do #comércio).
   ipcMain.handle('poke:anuncio:abrir', async (_e, id) => { const r = await api.abrirAnuncio(id).catch(() => ({ erro: 'Não deu para abrir o anúncio.' })); return r; });
   // Aba PvE: as contas leem os dados do próprio jogo (próximas hunts, evoluções).
   ipcMain.handle('poke:pve', async (_e, accId, o, arg) => {
-    if (!['proximas', 'evolucoes', 'meus', 'buscar', 'mercado', 'casas', 'shiny', 'boss'].includes(o)) return null;
+    if (!['proximas', 'evolucoes', 'meus', 'buscar', 'mercado', 'casas', 'shiny', 'boss', 'outland'].includes(o)) return null;
     const v = views.get(accId) || views.get(mainAccId());
     if (!v || v.webContents.isDestroyed()) return { erro: 'Conta do PokeIdle fechada.' };
     return v.webContents.executeJavaScript(`window.__idleterinoMercado && window.__idleterinoMercado.pve ? window.__idleterinoMercado.pve(${JSON.stringify(o)}, ${JSON.stringify(arg == null ? null : arg)}) : null`).catch(() => null);
@@ -691,7 +748,8 @@ module.exports = function createPokeIdle(ctx) {
   const trackerPath = () => path.join(app.getPath('userData'), 'pvp-tracker.json');
   const FAIXAS_TRACKER = new Set(['todas', 'baixo', 'alto', 'bronze', 'prata', 'ouro', 'platina', 'diamante', 'mestre']);
   let trackerCache = null; // { [faixa]: { em, ... } }
-  ipcMain.handle('poke:pvp:tracker', async (_e, faixa0) => {
+  ipcMain.handle('poke:pvp:tracker', (_e, faixa0) => trackerLer(faixa0));
+  async function trackerLer(faixa0) {
     const faixa = FAIXAS_TRACKER.has(faixa0) ? faixa0 : 'todas';
     if (!trackerCache) trackerCache = readJson(trackerPath(), {}) || {};
     const c = trackerCache[faixa];
@@ -719,6 +777,116 @@ module.exports = function createPokeIdle(ctx) {
       try { fs.writeFileSync(trackerPath(), JSON.stringify(trackerCache)); } catch {}
       return out;
     } catch { return c || null; }
+  }
+
+  // ---------- Tier list do Idleterino (PvP e PvE) ----------
+  // Três fontes, cada uma com o seu peso, e a nota final vira S/A/B/C/D:
+  //  · NOSSOS dados: o duelo do jogo contra os times do top 50 (candidatos do meta), o Tracker oficial (winrate real
+  //    em partidas, com a amostra) e quantos times do top 50 usam a espécie;
+  //  · o JOGO: em quantas hunts a espécie tira ×5,5/×2,5 com os tipos dela e o ataque base (PvE);
+  //  · a STAFF (pokeidleguide.io, listas públicas de PvP e de hunt): referência, com peso menor.
+  const staffPath = () => path.join(app.getPath('userData'), 'tier-staff.json');
+  let staffCache = null;
+  async function staffLer() {
+    if (!staffCache) staffCache = readJson(staffPath(), null);
+    if (staffCache && Date.now() - staffCache.em < 6 * 3600 * 1000) return staffCache;
+    try {
+      const r = await fetch('https://pokeidleguide.io/api/tier-staff', { headers: { accept: 'application/json' } });
+      if (!r.ok) return staffCache;
+      const j = await r.json();
+      const listas = (j.listas || []).filter((l) => l && Array.isArray(l.linhas) && ['pvp', 'hunt', 'megas', 'comeco'].includes(l.categoria)).map((l) => ({
+        id: l.id, categoria: l.categoria, titulo: String(l.titulo || ''), autor: l.autor ? `${l.autor.nome || ''}${l.autor.cargo ? ` (${l.autor.cargo})` : ''}` : '', atualizadaEm: l.atualizadaEm || l.criadaEm || null,
+        linhas: l.linhas.map((x) => ({ rotulo: String(x.rotulo || ''), itens: (x.itens || []).map((s) => String(s)).filter((s) => /^[ps]:\d+$/.test(s)).map((s) => Number(s.slice(2))) })),
+      }));
+      staffCache = { em: Date.now(), listas };
+      try { fs.writeFileSync(staffPath(), JSON.stringify(staffCache)); } catch {}
+      return staffCache;
+    } catch { return staffCache; }
+  }
+  // Nota de 0 a 1 pela posição na lista da staff (a 1ª linha vale 1, a última ~0,15). Várias listas: a média.
+  function staffNotas(listas, cats) {
+    const soma = {}, qtd = {};
+    for (const l of listas.filter((x) => cats.includes(x.categoria))) {
+      const n = l.linhas.length;
+      l.linhas.forEach((ln, i) => { const v = n > 1 ? 1 - (i / (n - 1)) * 0.85 : 1; for (const id of ln.itens) { soma[id] = (soma[id] || 0) + v; qtd[id] = (qtd[id] || 0) + 1; } });
+    }
+    const out = {}; for (const id of Object.keys(soma)) out[id] = soma[id] / qtd[id];
+    return out;
+  }
+  const limitar = (x) => Math.max(0, Math.min(1, x));
+  // Tiers pela posição na lista ordenada pela nota: S (10%), A (20%), B (30%), C (25%), D (o resto).
+  function emTiers(lista) {
+    const n = lista.length; const cortes = [['S', 0.1], ['A', 0.3], ['B', 0.6], ['C', 0.85], ['D', 1]];
+    // Quantos em cada tier (no mínimo 1 no S): o corte é pela posição, não por um valor fixo da nota.
+    const ate = cortes.map(([t, c]) => [t, Math.max(1, Math.round(n * c))]);
+    return lista.map((x, i) => ({ ...x, tier: (ate.find(([, k]) => i < k) || ['D'])[0] }));
+  }
+  let tierCache = null;
+  ipcMain.handle('poke:tier', async (_e, forcar) => {
+    if (!forcar && tierCache && Date.now() - tierCache.em < 30 * 60 * 1000) return tierCache;
+    const v = views.get(mainAccId());
+    if (!v || v.webContents.isDestroyed()) return { erro: 'A conta principal precisa estar aberta no app.' };
+    const staff = (await staffLer()) || { listas: [] };
+    const tracker = await trackerLer('todas').catch(() => null);
+    const notaStaffPvp = staffNotas(staff.listas, ['pvp']);
+    const notaStaffPve = staffNotas(staff.listas, ['hunt', 'megas']);
+    const ids = [...new Set([...Object.keys(notaStaffPvp), ...Object.keys(notaStaffPve), ...Object.keys((tracker && tracker.especies) || {})].map(Number))];
+    const jg = await v.webContents.executeJavaScript(`window.__idleterinoMercado && window.__idleterinoMercado.tierDados ? window.__idleterinoMercado.tierDados(${JSON.stringify(ids)}) : null`).catch(() => null);
+    if (!jg || !jg.pronto) return { erro: (jg && jg.erro) || 'A conta principal precisa estar logada no jogo.' };
+    const fichaDe = (id) => jg.nomes[id] || (jg.pve || []).find((x) => x.id === Number(id)) || null;
+    // ---- PvP ----
+    const cand = new Map(((pvpMeta && pvpMeta.candidatos) || []).map((x) => [Number(x.speciesId), x]));
+    const uso = {};
+    if (pvpMeta && pvpMeta.perfis) for (const p of Object.values(pvpMeta.perfis)) { const vs = new Set(); for (const k of (p && p.time) || []) if (k.speciesId != null && !vs.has(k.speciesId)) { vs.add(k.speciesId); uso[k.speciesId] = (uso[k.speciesId] || 0) + 1; } }
+    const maxUso = Math.max(1, ...Object.values(uso));
+    const tr = (tracker && tracker.especies) || {};
+    const trIds = Object.entries(tr).filter(([, x]) => Number(x.partidas) >= 30).sort((a, b) => b[1].partidas - a[1].partidas).slice(0, 80).map(([id]) => Number(id));
+    const idsPvp = new Set([...cand.keys(), ...trIds, ...Object.keys(notaStaffPvp).map(Number), ...Object.keys(uso).map(Number).filter((id) => uso[id] >= 2)]);
+    const pvp = [];
+    for (const id of idsPvp) {
+      const f = fichaDe(id) || (cand.get(id) ? { id, nome: cand.get(id).nome, tipos: cand.get(id).tipos || [], lend: !!cand.get(id).lend } : tr[id] ? { id, nome: tr[id].nome, tipos: [] } : null);
+      if (!f || !f.nome) continue;
+      const partes = []; const motivos = [];
+      const c = cand.get(id);
+      if (c && c.win != null) { partes.push([0.4, limitar((c.win - 0.3) / 0.5)]); motivos.push(`vence ${Math.round(c.win * 100)}% dos duelos contra o top 50`); }
+      const t = tr[id];
+      if (t && Number(t.partidas) >= 10) {
+        let wr = Number(t.winrate); if (wr > 1) wr /= 100;
+        const nP = Number(t.partidas);
+        const wrAj = (wr * nP + 0.5 * 50) / (nP + 50); // amostra pequena puxa para 50%
+        partes.push([0.25, limitar((wrAj - 0.4) / 0.25)]);
+        motivos.push(`winrate ${Math.round(wr * 100)}% em ${nP.toLocaleString('pt-BR')} partidas no Tracker`);
+      }
+      if (uso[id]) { partes.push([0.15, uso[id] / maxUso]); motivos.push(`${uso[id]} time(s) do top 50 usam`); }
+      // A staff só SOMA (estar no D da lista deles não é pior do que não estar): ×0,90 fora da lista, até ×1,00 no topo.
+      const st = notaStaffPvp[id];
+      if (st != null) motivos.push(`na lista de PvP da staff (${st >= 0.8 ? 'no topo' : st >= 0.5 ? 'no meio' : 'embaixo'})`);
+      const fontes = partes.length;
+      if (!fontes && st == null) continue;
+      const pw = partes.reduce((s2, [w]) => s2 + w, 0);
+      const base = pw ? partes.reduce((s2, [w, x]) => s2 + w * x, 0) / pw : 0.45; // só a staff, sem dado nosso: nota neutra
+      const nota = base * (0.85 + 0.05 * Math.min(3, fontes)) * (st != null ? 0.9 + 0.1 * st : 0.9);
+      pvp.push({ id, nome: f.nome, tipos: f.tipos || [], lend: !!f.lend, mega: /^Mega /.test(f.nome), nota: Math.round(nota * 1000) / 1000, fontes, motivos });
+    }
+    pvp.sort((a, b) => b.nota - a.nota);
+    // ---- PvE ----
+    const lista = jg.pve || [];
+    const maxCob = Math.max(1, ...lista.map((x) => x.x55 + 0.4 * x.x25));
+    const maxAtk = Math.max(1, ...lista.map((x) => x.atk));
+    const pve = lista.map((x) => {
+      const cob = (x.x55 + 0.4 * x.x25) / maxCob;
+      const motivos = [`tira ×5,5 em ${x.x55} e ×2,5 em ${x.x25} das ${jg.hunts} hunts`, `ataque base ${x.atk}`];
+      const st = notaStaffPve[x.id];
+      if (st != null) motivos.push(`na lista de hunt/megas da staff (${st >= 0.8 ? 'no topo' : st >= 0.5 ? 'no meio' : 'embaixo'})`);
+      const base = 0.6 * cob + 0.4 * (x.atk / maxAtk);
+      return { id: x.id, nome: x.nome, tipos: x.tipos, lend: x.lend, mega: x.mega, nota: Math.round(base * (st != null ? 0.9 + 0.1 * st : 0.9) * 1000) / 1000, motivos };
+    }).sort((a, b) => b.nota - a.nota);
+    tierCache = {
+      em: Date.now(), pvp: emTiers(pvp.slice(0, 60)), pve: emTiers(pve.slice(0, 60)),
+      fontes: { metaEm: pvpMeta ? pvpMeta.at : null, trackerEm: tracker ? tracker.em : null, trackerAmostra: tracker ? tracker.amostra : null, temporada: tracker ? tracker.temporada : null,
+        staff: staff.listas.map((l) => ({ titulo: l.titulo, categoria: l.categoria, autor: l.autor, atualizadaEm: l.atualizadaEm })), hunts: jg.hunts },
+    };
+    return tierCache;
   });
   ipcMain.handle('poke:pvp:refresh', () => {
     if (pvpRunning) return { ok: true, running: true };
@@ -771,6 +939,9 @@ module.exports = function createPokeIdle(ctx) {
     setTimeout(() => pvpSnapshotMe().catch(() => {}), 2 * 60 * 1000);
     timers.push(setInterval(() => pvpSnapshotMe().catch(() => {}), 60 * 60 * 1000));
     timers.push(setInterval(() => pvpWatch().catch(() => {}), 30 * 60 * 1000));
+    // Radar de atualizações do jogo: 90 s depois de abrir e a cada 30 min.
+    setTimeout(() => radarCheck().catch(() => {}), 90 * 1000);
+    timers.push(setInterval(() => radarCheck().catch(() => {}), 30 * 60 * 1000));
     // Com o comércio da guild ligado, a leitura dos anúncios vem a cada 5 min (senão, 10 min).
     timers.push(setInterval(() => { const cada = ctx.comercioAtivo && ctx.comercioAtivo() ? 5 * 60 * 1000 : MARKET_MS; if (Date.now() - lastMarket >= cada - 5000) askMarket(); }, 60 * 1000));
   }

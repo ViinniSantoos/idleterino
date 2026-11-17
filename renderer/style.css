@@ -927,3 +927,11 @@ body.foco .glow { display: none; }
 
 .tr-achado.shiny-op { border-left: 3px solid #ffd166; background: rgba(255, 209, 102, 0.06); }
 
+
+/* Tier list do Idleterino */
+.tier-linha{display:flex;gap:10px;align-items:stretch;padding:8px}
+.tier-rot{min-width:44px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:22px;color:#111;border-radius:8px}
+.tier-itens{display:flex;flex-wrap:wrap;gap:6px;flex:1}
+.tier-item{display:flex;flex-direction:column;gap:2px;padding:6px 8px;border-radius:8px;background:var(--panel2,rgba(255,255,255,.04));min-width:150px;max-width:230px;cursor:help}
+.tier-item .sub{font-size:11px}
+

@@ -33,7 +33,7 @@ contextBridge.executeInMainWorld({
 
     // ---- estado leve do jogador: o que a sugestão de hunt e o PvP precisam ----
     const jogo = { hunts: null, tabelaTipos: null, amp: 1.5, multHp: 5, eu: {}, pks: new Map(), keys: [] };
-    const CAMPOS_EU = ['diaSazonal', 'guild', 'xp', 'xpNivel', 'xpProximo', 'gold', 'orbs', 'nick', 'level', 'activeId', 'bicicleta', 'pvp', 'pvpRank', 'pvpPosicao', 'pvpHistorico', 'pvpTime', 'huntSlug', 'hunt', 'huntAtual', 'area'];
+    const CAMPOS_EU = ['diaSazonal', 'guild', 'xp', 'xpNivel', 'xpProximo', 'gold', 'orbs', 'nick', 'level', 'activeId', 'bicicleta', 'pvp', 'pvpRank', 'pvpPosicao', 'pvpHistorico', 'pvpTime', 'huntSlug', 'hunt', 'huntAtual', 'area', 'outlandTier'];
     const DUELO = (k) => ({ ivs: k.ivs || null, quality: k.quality ?? k.qualidade ?? null, potencia: k.potencia ?? null, refino: k.refino || null, tmElemental: k.tmElemental || null, tmFisico: !!k.tmFisico });
     const slimPk = (k) => ({
       ...DUELO(k),
@@ -42,6 +42,7 @@ contextBridge.executeInMainWorld({
       el: k.tmElemental || k.tm_elemental || null, apelido: k.apelido || null, poder: Number(k.poder || k.power) || 0,
       xp: Number(k.xp) || 0, xpNivel: Number(k.xpNivel) || 0, // aba Casas: quanto falta para o nível pedido
       slot: k.slot ?? null, // na EQUIPE (0–4); fora dela, Depot ou Coleção
+      heldItemId: k.heldItemId ?? null, // item que ele segura (o XP Share é o 70050)
     });
     function aplicarEstado(p, cheioForcado) {
       if (!p || typeof p !== 'object') return;
@@ -50,6 +51,8 @@ contextBridge.executeInMainWorld({
       for (const k of CAMPOS_EU) if (k in p) jogo.eu[k] = p[k];
       // Casas (aba Casas): junta por cima, porque o jogo pode mandar só o pedaço que mudou (ex.: só "dentro").
       if (p.casa && typeof p.casa === 'object') jogo.eu.casa = { ...(jogo.eu.casa || {}), ...p.casa };
+      // Itens da bolsa (id -> quantidade): o XP Share segurável é o 70050.
+      if (p.items && typeof p.items === 'object') jogo.eu.items = { ...(cheioForcado ? {} : jogo.eu.items || {}), ...p.items };
       if (p.bonusXp && Array.isArray(p.bonusXp.partes)) jogo.eu.bonusXpBruto = p.bonusXp;
       // Shiny Secret Lure da Loja: só o fim dele (o resto da Loja não interessa ao app).
       if (p.loja && p.loja.boosts && 'shiny' in p.loja.boosts) jogo.eu.lureAte = Number(p.loja.boosts.shiny) || 0;
@@ -236,6 +239,12 @@ contextBridge.executeInMainWorld({
                   // Calculadora de Boss: os bosses (token de entrada e drops com a chance) e a taxa do Market.
                   if (Array.isArray(m.bossesJogaveis)) jogo.bosses = m.bossesJogaveis;
                   if (m.economia && typeof m.economia === 'object') jogo.economia = m.economia;
+                  // Outland (escada de degraus e chance de cada drop) e o resto que o radar de atualizações compara.
+                  if (m.chanceBossToken != null) jogo.chanceBossToken = Number(m.chanceBossToken) || 0;
+                  if (Array.isArray(m.outlandTiers)) jogo.outlandTiers = m.outlandTiers;
+                  if (m.casas && typeof m.casas === 'object') jogo.casasCfg = m.casas;
+                  if (m.bicicletas && typeof m.bicicletas === 'object') jogo.bicicletasCfg = m.bicicletas;
+                  if (m.xpShareHeld && typeof m.xpShareHeld === 'object') jogo.xpShareHeldCfg = m.xpShareHeld;
                 }
                 aplicarEstado(est, m.t === 'welcome');
                 const bx = est && est.bonusXp;
@@ -866,6 +875,210 @@ contextBridge.executeInMainWorld({
           ativos: { lure: jogo.eu.lureAte || 0, kick: fimB('kick', 'shiny'), twitch: fimB('twitch', 'shiny'), captura: jogo.eu.capturaAte || 0 } };
       } finally { shinyBuscando = false; }
     }
+    // ---- OUTLAND × SHINY × UPAR: o que rende mais por hora, em números (pedido de 16/11/2026) ----
+    // A Outland (v1.426, 16/11/2026) é uma escada de 40 degraus: o nível do treinador libera cada degrau e o degrau
+    // MULTIPLICA os drops raros da área (×1 no Nv 150 até ×20 no Nv 65.000). Mesmo mapa e mesmos selvagens em todos:
+    // os abates/h não mudam, só a chance de cada drop. Tudo vem do jogo (escada, chances, preços no Market);
+    // o app só junta com os abates/h e o XP/h do pokémon em campo. O Loot Boost multiplica por cima (não entra aqui).
+    const DROPS_OUTLAND = [
+      { k: 'boss', id: 70000, nome: 'Bronze Boss Token', chance: () => Number(jogo.chanceBossToken) || 0.0001 },
+      { k: 'chave', id: 70011, nome: 'Fragmento de Chave', chance: () => Number(jogo.casasCfg && jogo.casasCfg.fragmento && jogo.casasCfg.fragmento.chanceDrop) || 0.000004 },
+      { k: 'shiny', id: 70012, nome: 'Fragmento de Shiny Stone', chance: () => Number(jogo.shinyStone && jogo.shinyStone.chanceDrop) || 0.000004 },
+      { k: 'bike', id: 70013, nome: 'Fragmento de Bicicleta', chance: () => Number(jogo.bicicletasCfg && jogo.bicicletasCfg.fragmento && jogo.bicicletasCfg.fragmento.chanceDrop) || 0.000004 },
+      { k: 'osso', id: 70018, nome: 'Osso do Sacrifício', chance: () => chanceOsso },
+    ];
+    let chanceOsso = 0.000004;
+    import('/shared/sacrificio.mjs').then((s) => { const c = Number(s && s.CHANCE_OSSO_SACRIFICIO); if (c > 0) chanceOsso = c; }).catch(() => {});
+    async function escadaOutland() {
+      let l = Array.isArray(jogo.outlandTiers) && jogo.outlandTiers.length ? jogo.outlandTiers : null;
+      if (!l) { try { l = (await import('/shared/outland-tiers.mjs')).OUTLAND_TIERS; } catch {} }
+      return (l || [{ tier: 101, numero: 1, nivel: 150, mult: 1 }]).map((x, i) => ({ tier: Number(x.tier), numero: Number(x.numero) || i + 1, nivel: Number(x.nivel) || 0, mult: Number(x.mult) || 1 }))
+        .sort((a, b) => a.nivel - b.nivel);
+    }
+    async function pveOutland(arg) {
+      const o = arg && typeof arg === 'object' ? arg : {};
+      if (!jogo.hunts || !jogo.tabelaTipos) return { pronto: false };
+      const rk = await huntRank({ todas: true });
+      if (!rk || !rk.pronto) return { pronto: false };
+      if (rk.semPokemon) return { pronto: true, semPokemon: true };
+      const L = Number(jogo.eu.level) || 0;
+      const porSlug = new Map((jogo.hunts || []).map((h) => [h.slug, h]));
+      const linhas = (rk.todas || []).filter((h) => h.kph > 0).map((h) => ({ ...h, area: String((porSlug.get(h.slug) || {}).area || '').toLowerCase() }));
+      const outs = linhas.filter((h) => h.area === 'outland').sort((a, b) => b.kph - a.kph);
+      const normais = linhas.filter((h) => h.area !== 'outland');
+      const huntOut = outs[0] || null;
+      const huntXp = [...normais].sort((a, b) => b.xpH - a.xpH)[0] || null;
+      const huntOuro = [...normais].sort((a, b) => b.goldH - a.goldH)[0] || null;
+      const escada = await escadaOutland();
+      const liberadas = escada.filter((x) => L >= x.nivel);
+      const maxLib = liberadas[liberadas.length - 1] || null;
+      const escolhida = escada.find((x) => x.tier === Number(jogo.eu.outlandTier)) || null;
+      const proxima = escada.find((x) => x.nivel > L) || null;
+      // Preços de agora no Market (aba de itens: menor anúncio; sem anúncio, a média vendida em 7 dias), já sem a taxa.
+      const ic = await precosItensCore(60 * 1000);
+      const precos = {};
+      for (const d of DROPS_OUTLAND) {
+        precos[d.k] = {};
+        for (const moeda of ['gold', 'orb']) {
+          const p = precoItemCore(ic, d.id, moeda);
+          const ref = p.agora != null ? p.agora : p.media;
+          precos[d.k][moeda] = ref != null ? { bruto: ref, liq: ref * (1 - taxaMercadoPct(ref, moeda) / 100), vendidos7d: p.vendidos7d, anuncios: p.anuncios } : null;
+        }
+      }
+      const doDegrau = (t) => {
+        if (!t || !huntOut) return null;
+        const drops = DROPS_OUTLAND.map((d) => {
+          const ch = d.chance() * t.mult;
+          const porH = huntOut.kph * ch;
+          return { k: d.k, id: d.id, nome: d.nome, umEm: Math.round(1 / ch), porH, porDia: porH * 24, horasPorDrop: porH > 0 ? 1 / porH : null,
+            gold: precos[d.k].gold ? porH * precos[d.k].gold.liq : null, orb: precos[d.k].orb ? porH * precos[d.k].orb.liq : null };
+        });
+        const soma = (m) => drops.reduce((s, x) => s + (x[m] || 0), 0);
+        return { ...t, drops, goldDropsH: soma('gold'), orbDropsH: soma('orb'), faltaPreco: drops.filter((x) => x.gold == null && x.orb == null).map((x) => x.nome) };
+      };
+      const xpH = (h) => (h ? h.xpH : 0);
+      const nvEm = (h, horas) => (h && h.xpH > 0 ? nivelDepoisDe(L, horas, h.xpH) : L);
+      // Shiny: a mesma conta do "Procurar shiny", sem consultar o Market (o valor vem da última busca, se houver).
+      let shiny = null;
+      try {
+        const s = await pveShiny({ horas: 24, precos: false });
+        if (s && s.pronto && Array.isArray(s.lista) && s.lista.length) {
+          const melhor = [...s.lista].sort((a, b) => b.porH - a.porH)[0];
+          const totalH = s.lista.reduce((t, x) => t + (x.porH || 0), 0);
+          shiny = { especies: s.lista.length, melhor: { nome: melhor.nome, hunt: melhor.hunt, umEmH: melhor.umEmH, chance24: Math.round(melhor.chance * 100) },
+            porDiaMelhor: melhor.porH * 24, chanceS: s.chanceS, multS: s.multS };
+          void totalH;
+        }
+      } catch {}
+      // VEREDITO (pedido do dono, 16/11/2026: "fico na Outland 2 ou vou upar para chegar numa Outland melhor?"): simula
+      // 7 e 30 dias. Planos: ficar na Outland de agora; ir já para a melhor liberada; upar (na melhor hunt de XP) até o
+      // nível de um degrau de cima e passar o resto do tempo nele; só upar. Ganha o que junta mais coins no período
+      // (drops vendidos + coins das hunts); o XP de cada plano vai junto. Mesmos selvagens em toda Outland: só o
+      // multiplicador muda os drops.
+      let plano = null;
+      const atual = escolhida || maxLib;
+      if (huntOut && atual && huntXp) {
+        const base = doDegrau(atual);
+        const dropsUmX = (base.goldDropsH || 0) / atual.mult; // coins/h de drops com ×1
+        const orbUmX = (base.orbDropsH || 0) / atual.mult;
+        const coinsOutH = (t) => dropsUmX * t.mult + (huntOut.goldH || 0);
+        const horasAte = (nivel) => (nivel <= L ? 0 : huntXp.xpH > 0 ? Math.max(0, (xpTotalNv(nivel) - xpTotalNv(L)) / huntXp.xpH) : Infinity);
+        const simular = (H) => {
+          const opcoes = [];
+          const add = (o) => opcoes.push({ ...o, coins: Math.round(o.coins), gemas: Math.round(o.gemas || 0) });
+          add({ k: 'ficar', txt: `Ficar na Outland ${atual.numero} (×${atual.mult})`, coins: coinsOutH(atual) * H, gemas: orbUmX * atual.mult * H, nv: nivelDepoisDe(L, H, huntOut.xpH), tier: atual.numero });
+          if (maxLib && maxLib.numero > atual.numero) add({ k: 'subirJa', txt: `Subir AGORA para a Outland ${maxLib.numero} (×${maxLib.mult}), que você já libera`, coins: coinsOutH(maxLib) * H, gemas: orbUmX * maxLib.mult * H, nv: nivelDepoisDe(L, H, huntOut.xpH), tier: maxLib.numero });
+          for (const t of escada.filter((x) => x.nivel > L).slice(0, 8)) {
+            const hu = horasAte(t.nivel);
+            if (!(hu < H)) break;
+            const resto = H - hu;
+            add({ k: `upar${t.numero}`, txt: `Upar ~${hu < 48 ? `${Math.ceil(hu)} h` : `${Math.round(hu / 24)} dias`} (até o Nv ${t.nivel.toLocaleString('pt-BR')}) e ir para a Outland ${t.numero} (×${t.mult})`, horasUpar: hu,
+              coins: (huntXp.goldH || 0) * hu + coinsOutH(t) * resto, gemas: orbUmX * t.mult * resto, nv: nivelDepoisDe(nivelDepoisDe(L, hu, huntXp.xpH), resto, huntOut.xpH), tier: t.numero });
+          }
+          add({ k: 'soUpar', txt: `Só upar (${huntXp.nome})`, coins: (huntXp.goldH || 0) * H, gemas: 0, nv: nivelDepoisDe(L, H, huntXp.xpH), tier: null });
+          opcoes.sort((a, b) => b.coins - a.coins);
+          const ficar = opcoes.find((o) => o.k === 'ficar');
+          return { horas: H, opcoes, melhor: opcoes[0], ficar, ganhoPct: ficar && ficar.coins > 0 ? Math.round((opcoes[0].coins / ficar.coins - 1) * 100) : null,
+            maisXp: [...opcoes].sort((a, b) => b.nv - a.nv)[0] };
+        };
+        plano = { semana: simular(24 * 7), mes: simular(24 * 30) };
+      }
+      return { pronto: true, plano, pokemon: rk.pokemon, L, bike: rk.bike || null, vel: rk.vel || 0, emOutland: !!(rk.atual && outs.some((h) => h.slug === rk.atual)),
+        huntOut, huntXp, huntOuro, escada, liberadas: liberadas.length, maxLib: doDegrau(maxLib), escolhida: doDegrau(escolhida), proxima: doDegrau(proxima),
+        xp: { out: xpH(huntOut), up: xpH(huntXp), nvOut24: nvEm(huntOut, 24), nvUp24: nvEm(huntXp, 24), nvOut7d: nvEm(huntOut, 24 * 7), nvUp7d: nvEm(huntXp, 24 * 7) },
+        shiny, semPrecos: !ic, em: Date.now() };
+    }
+
+    // ---- TIER LIST (PvP e PvE): a parte do JOGO ----
+    // PvE: em quantas hunts do jogo (todas, menos a Outland) a espécie tira ×5,5 e ×2,5 com os tipos dela, e o ataque
+    // base (o maior entre físico e especial). Devolve também nome, tipos e se é lendária/Mega das ids pedidas (as da
+    // lista da staff), para o app juntar com o duelo contra o top 50 e o Tracker.
+    async function tierDados(ids) {
+      if (!jogo.hunts || !jogo.tabelaTipos) return { pronto: false };
+      const { map } = await catalogoNota();
+      let mis = null; try { mis = await import('/shared/mistico.mjs'); } catch {}
+      const lend = (id) => { try { return !!(mis && mis.ehLendarioOuMitico && mis.ehLendarioOuMitico(id)); } catch { return false; } };
+      const alvo = (jogo.hunts || []).filter((h) => Array.isArray(h.especies) && h.especies.length && String(h.area || '').toLowerCase() !== 'outland').map((h) => {
+        const esp2 = h.especies.map((e) => ({ t: tiposDe(map.get(e.pokeId) || {}), w: Number(e.pontos) || 1 })).filter((e) => e.t.length);
+        return esp2.length ? { nivel: Number(h.nivel) || 0, peso: 1, esp: esp2 } : null;
+      }).filter(Boolean);
+      const ficha = (c) => ({ id: c.pokeId, nome: c.name, tipos: tiposDe(c), bst: bst(c), atk: Math.max(Number(c.baseAtk) || 0, Number(c.baseSpAtk) || 0), lend: lend(c.pokeId), mega: /^Mega /.test(c.name || '') });
+      const pedidos = new Set((ids || []).map(Number));
+      const pve = [];
+      let n = 0;
+      for (const c of map.values()) {
+        if (!c || !c.name || c.pokeId >= 10000) continue; // espelhos/legado ficam de fora
+        if (bst(c) < 480 && !pedidos.has(c.pokeId)) continue;
+        const f = ficha(c);
+        if (!f.tipos.length) continue;
+        const cob = coberturaHunts(f.tipos, alvo);
+        pve.push({ ...f, x55: cob.x55, x25: cob.x25 });
+        if (++n % 60 === 0) await espera(0); // não trava a página do jogo
+      }
+      const nomes = {};
+      for (const id of pedidos) { const c = map.get(id); if (c) nomes[id] = ficha(c); }
+      return { pronto: true, hunts: alvo.length, pve, nomes };
+    }
+
+    // ---- RADAR DE ATUALIZAÇÕES DO JOGO ----
+    // O "!" do jogo (Novidades) vem de /shared/aviso-jogo.mjs (versão e data) com o texto em /i18n.mjs. Os números que
+    // o app usa vêm dos módulos do jogo e do welcome. A cada versão nova o radar tira uma "foto" de tudo isso; o app
+    // compara com a anterior e mostra o que mudou e em que parte do app (as contas já usam os números novos sozinhas).
+    const MODULOS_RADAR = {
+      'bicicletas.mjs': 'Hunt (bike)', 'outland-tiers.mjs': 'Outland', 'sacrificio.mjs': 'Sacrifício / bônus de XP', 'casas.mjs': 'Casas / Trader',
+      'xp-share-held.mjs': 'XP Share / Trader', 'taxa-mercado.mjs': 'Trader / Precificação / Boss', 'tipo-efetividade.mjs': 'Hunt (efetividade)',
+      'recompensa-hunt.mjs': 'Hunt (XP e coins)', 'ginasios.mjs': 'PvE (poder do pokémon)', 'cooldown-golpes.mjs': 'Hunt e PvP (golpes)',
+      'pvp-tabuleiro.mjs': 'PvP (duelo)', 'pvp-rank.mjs': 'PvP (elo)', 'captura-degrau.mjs': 'Procurar shiny (captura)', 'pity-shiny.mjs': 'Procurar shiny',
+      'megas.mjs': 'Megas / PvP', 'dia-sazonal.mjs': 'Dia Sazonal', 'nota-pokemon.mjs': 'Nota / Precificação / Trader', 'bosses-lendarios.mjs': 'Calculadora Boss',
+      'tm-elemental.mjs': 'TMs / Hunt', 'evolucoes-ramificadas.mjs': 'Evoluir para qual?', 'teto-captura.mjs': 'Procurar shiny',
+    };
+    const hashTxt = (s) => { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(36); };
+    const umEmTxt = (c) => (Number(c) > 0 ? `1 em ${Math.round(1 / Number(c)).toLocaleString('pt-BR')}` : '—');
+    const limparHtml = (s) => String(s || '').replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim();
+    let radarCache = null;
+    async function radar() {
+      const src = [...document.scripts].map((s) => s.src).find((s) => /\/app\.js/.test(s)) || '';
+      const build = (src.match(/[?&]v=([\w.\-]+)/) || [])[1] || null;
+      let nov = null;
+      try { const av = await import('/shared/aviso-jogo.mjs'); nov = av && Array.isArray(av.NOVIDADES) ? av.NOVIDADES[0] : null; } catch {}
+      const chave = `${build}|${nov && nov.aviso}`;
+      if (radarCache && radarCache.chave === chave && Date.now() - radarCache.em < 6 * 3600 * 1000) return radarCache.r;
+      // Texto da novidade (português: o primeiro bloco do i18n).
+      const textos = [];
+      if (nov && nov.aviso != null) {
+        try {
+          const i18 = await (await fetch('/i18n.mjs', { cache: 'no-cache' })).text();
+          const re = new RegExp(`'aviso\\.v${Number(nov.aviso)}([A-Za-z0-9]*)'\\s*:\\s*'((?:[^'\\\\]|\\\\.)*)'`, 'g');
+          const vistos = new Set();
+          for (const m of i18.matchAll(re)) { if (vistos.has(m[1])) continue; vistos.add(m[1]); textos.push({ k: m[1], t: limparHtml(m[2].replace(/\\'/g, "'").replace(/\\n/g, ' ')) }); if (textos.length >= 60) break; }
+        } catch {}
+      }
+      // Os números que o app usa, cada um com a parte do app que depende dele.
+      const num = {};
+      const porNum = (k, nome, area, v) => { if (v != null && v !== '') num[k] = { nome, area, v: String(v) }; };
+      try { const b = await import('/shared/bicicletas.mjs'); for (const r of b.RARIDADES_BICICLETA || []) porNum(`bike.${r.id}`, `Bike ${r.rotulo || r.id}: velocidade na hunt`, 'Hunt (sugestão de hunt, Outland)', `+${Math.round(Number(r.velocidade) * 100)}%`); } catch {}
+      const esc = await escadaOutland();
+      porNum('outland.qtd', 'Outlands (degraus)', 'Outland', `${esc.length} (×${esc[0] ? esc[0].mult : 1} no Nv ${esc[0] ? esc[0].nivel : '?'} até ×${esc.length ? esc[esc.length - 1].mult : 1} no Nv ${esc.length ? esc[esc.length - 1].nivel.toLocaleString('pt-BR') : '?'})`);
+      porNum('outland.escada', 'Escada das Outlands (nível × multiplicador)', 'Outland', esc.map((x) => `${x.nivel}:${x.mult}`).join(' '));
+      for (const d of DROPS_OUTLAND) porNum(`drop.${d.k}`, `${d.nome}: chance por abate (Outland 1)`, 'Outland', umEmTxt(d.chance()));
+      porNum('shiny.chance', 'Shiny: chance por arremesso', 'Procurar shiny', umEmTxt(jogo.chanceShiny));
+      porNum('hunt.multHp', 'Vida dos selvagens (multiplicador)', 'Hunt', jogo.multHp);
+      porNum('hunt.amp', 'Efetividade ampliada na hunt', 'Hunt', jogo.amp);
+      const e = jogo.economia || {};
+      porNum('taxa.gold', 'Taxa do Market em coins', 'Trader / Precificação / Boss', e.taxaMercadoGoldPct != null ? `${e.taxaMercadoGoldPct}%` : null);
+      if (Array.isArray(e.faixasMercadoOrb)) porNum('taxa.orb', 'Taxa do Market em gemas (faixas)', 'Trader / Precificação / Boss', e.faixasMercadoOrb.map((f) => `${f.pct}%${f.ate != null ? ` até ${f.ate}` : ' acima'}`).join(' · '));
+      try { const cs = await import('/shared/casas.mjs'); if (cs.xpShareDaRaridade) for (const r of ['comum', 'incomum', 'rara', 'mitica', 'lendaria']) porNum(`casa.${r}`, `Casa ${r}: XP Share`, 'Casas / Trader', `${Math.round(Number(cs.xpShareDaRaridade(r)) * (Number(cs.xpShareDaRaridade(r)) <= 1 ? 100 : 1))}%`); } catch {}
+      try { const sc = await import('/shared/sacrificio.mjs'); porNum('sac.mult', 'Sacrifício: bônus de XP', 'Bônus de XP', sc.SACRIFICIO_MULT_XP != null ? `×${sc.SACRIFICIO_MULT_XP}` : null); porNum('sac.osso', 'Osso do Sacrifício: pontos', 'Sacrifício', sc.PONTOS_OSSO_SACRIFICIO); } catch {}
+      try { const ps = await import('/shared/pity-shiny.mjs'); porNum('shiny.pity', 'Garantia de shiny (bolas por hora)', 'Procurar shiny', ps.PITY_SHINY_BOLAS); } catch {}
+      if (Array.isArray(jogo.bosses)) for (const b of jogo.bosses) porNum(`boss.${b.key || b.nome}`, `Boss ${b.nome || b.key}: drops`, 'Calculadora Boss', (b.drops || []).map((d) => `${d.nome} ${umEmTxt(d.chance)}`).join(' · '));
+      // Impressão digital dos módulos do jogo que o app usa: pega qualquer mudança que não seja um número da lista.
+      const modulos = {};
+      await Promise.all(Object.keys(MODULOS_RADAR).map(async (f) => { try { const t = await (await fetch(`/shared/${f}`, { cache: 'no-cache' })).text(); modulos[f] = hashTxt(t); } catch {} }));
+      const r = { build, aviso: nov ? Number(nov.aviso) : null, versao: nov ? nov.versao : null, data: nov ? nov.data : null, textos, numeros: num, modulos, areasModulos: MODULOS_RADAR, em: Date.now() };
+      radarCache = { chave, em: Date.now(), r };
+      return r;
+    }
+
     // ---- CALCULADORA DE BOSS (ideia do 369, 13/11/2026; a dele era toda à mão) ----
     // O jogo diz, para cada boss: o token de entrada (ex.: Bronze Boss Token × 1) e os drops com a CHANCE por luta
     // (ex.: Articuno 0,5% de peça de TM e 0,5% de peça de AoE). Os preços são os de AGORA na aba de itens do Market
@@ -1031,7 +1244,13 @@ contextBridge.executeInMainWorld({
     // selvagens — causa o dobro de dano e recebe ¼ (dobro de defesa e de vida). Vira às 18:00 de Brasília.
     const tipoDoDia = () => { const d = jogo.eu.diaSazonal; return d && d.tipo && (!d.fim || Number(d.fim) > Date.now()) ? String(d.tipo).toUpperCase() : null; };
     const multSazonal = (tipoDia, atq, def) => (!tipoDia ? 1 : (atq.includes(tipoDia) ? 2 : 1) / (def.includes(tipoDia) ? 4 : 1));
-    const VEL_BIKE = { comum: 0.15, incomum: 0.25, rara: 0.5, mitica: 0.75, lendaria: 1 };
+    // Velocidade da bike NA HUNT (o passo divide por 1 + velocidade). Corrigida pelo jogo em 16/11/2026 (v1.426):
+    // Comum +100%, Incomum +120%, Rara +160%, Mítica +200%, Lendária +250%. Os números de antes (+15% a +100%) eram
+    // os da praça. Lidos do próprio jogo (/shared/bicicletas.mjs): se ele mudar de novo, o app acompanha sozinho.
+    const VEL_BIKE = { comum: 1, incomum: 1.2, rara: 1.6, mitica: 2, lendaria: 2.5 };
+    import('/shared/bicicletas.mjs').then((b) => {
+      for (const r of (b && b.RARIDADES_BICICLETA) || []) { const v = Number(r && r.velocidade); if (r && r.id && Number.isFinite(v) && v >= 0) VEL_BIKE[r.id] = v; }
+    }).catch(() => {});
     const tiposDe = (c) => [c && c.type1, c && c.type2].filter((x) => x && x !== 'NONE').map((x) => String(x).toUpperCase());
     let modTab = null;
     const tabuleiro = () => (modTab || (modTab = import('/shared/pvp-tabuleiro.mjs').catch(() => null)));
@@ -1238,7 +1457,7 @@ contextBridge.executeInMainWorld({
         bonus: r.bonusXp && r.bonusXp.treinador ? r.bonusXp.treinador : 1, tipoDia, seuDoDia: !!(tipoDia && tipos.includes(tipoDia)),
         calibrado: 0, ritmo: 0, top: out.slice(0, 8), atual: atualSlug, atualEst,
         topOuro: [...out].sort((a, b) => b.goldLiq - a.goldLiq).slice(0, 8),
-        todas: opts && opts.todas ? out.map((h) => ({ slug: h.slug, nome: h.nome, nivel: h.nivel, kph: h.kph })) : undefined,
+        todas: opts && opts.todas ? out.map((h) => ({ slug: h.slug, nome: h.nome, nivel: h.nivel, kph: h.kph, xpH: h.xpH, goldH: h.goldLiq })) : undefined,
       };
     }
 
@@ -1381,7 +1600,7 @@ contextBridge.executeInMainWorld({
         calibrado: out.filter((h) => h.medidoMin).length, ritmo: Math.round(ritmo), fator: Math.round(fator * 100) / 100, hpExtra: Math.round(hpExtra * 100) / 100,
         top: out.slice(0, 8), atual: atualSlug, atualEst,
         topOuro: [...out].sort((a, b) => ordem(b, 'goldLiq') - ordem(a, 'goldLiq')).slice(0, 8),
-        todas: opts && opts.todas ? out.map((h) => ({ slug: h.slug, nome: h.nome, nivel: h.nivel, kph: h.kph })) : undefined,
+        todas: opts && opts.todas ? out.map((h) => ({ slug: h.slug, nome: h.nome, nivel: h.nivel, kph: h.kph, xpH: h.xpH, goldH: h.goldLiq })) : undefined,
       };
     }
 
@@ -1620,10 +1839,13 @@ contextBridge.executeInMainWorld({
           return true;
         },
         ler() { return JSON.parse(JSON.stringify(keep)); },
+        // Radar de atualizações do jogo (versão, texto do "!" e os números que o app usa).
+        radar() { return radar().catch(() => null); },
+        tierDados(ids) { return tierDados(ids).then((r) => JSON.parse(JSON.stringify(r))).catch((e) => ({ erro: String(e && e.message || e) })); },
         canais() { return JSON.parse(JSON.stringify(canais)); },
         // Aba PvE do app (só leitura).
         pve(o, arg) {
-          const f = o === 'proximas' ? pveProximas : o === 'evolucoes' ? () => pveEvolucoes(arg) : o === 'meus' ? pveMeus : o === 'buscar' ? () => pveBuscar(arg) : o === 'casas' ? () => pveCasas(arg) : o === 'shiny' ? () => pveShiny(arg) : o === 'boss' ? () => pveBoss(arg) : o === 'mercado' ? () => (arg && typeof arg === 'object' ? pveMercado(arg.moeda, arg.dias, arg.valor) : pveMercado(arg)) : null;
+          const f = o === 'proximas' ? pveProximas : o === 'evolucoes' ? () => pveEvolucoes(arg) : o === 'meus' ? pveMeus : o === 'buscar' ? () => pveBuscar(arg) : o === 'casas' ? () => pveCasas(arg) : o === 'shiny' ? () => pveShiny(arg) : o === 'boss' ? () => pveBoss(arg) : o === 'outland' ? () => pveOutland(arg) : o === 'mercado' ? () => (arg && typeof arg === 'object' ? pveMercado(arg.moeda, arg.dias, arg.valor) : pveMercado(arg)) : null;
           return f ? f().catch((e) => ({ erro: String(e && e.message || e) })) : null;
         },
         // Comércio: nota, stats e espécie da ficha de um anúncio (mesma conta da ficha do jogo).

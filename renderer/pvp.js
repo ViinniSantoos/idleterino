@@ -431,12 +431,13 @@ async function renderPvp(keepScroll) {
   root.append(head);
 
   const tabs = el('div', 'pvp-tabs');
-  for (const [k, l] of [['meta', 'Meta'], ['time', 'Meu time'], ['plan', 'Planejador'], ['jogos', '🎬 Minhas partidas'], ['hist', 'Histórico']]) {
+  for (const [k, l] of [['meta', 'Meta'], ['tier', '🏆 Tier list'], ['time', 'Meu time'], ['plan', 'Planejador'], ['jogos', '🎬 Minhas partidas'], ['hist', 'Histórico']]) {
     tabs.append(button(l, pvpTab === k ? 'on' : '', () => { if (k === 'plan') pvpPlan = null; pvpTab = k; try { localStorage.setItem('pvpTab', k); } catch {} renderPvp(); }));
   }
   root.append(tabs);
 
   if (running) setTimeout(() => page === 'pvp' && renderPvp(true), 8000);
+  if (pvpTab === 'tier') { renderTierList(root, 'pvp'); root.scrollTop = scroll; return; }
   if (pvpTab === 'hist') { renderPvpHist(root); root.scrollTop = scroll; return; }
   if (pvpTab === 'jogos') { renderPvpPartidas(root, meta); root.scrollTop = scroll; return; }
   if (!meta) {
@@ -459,6 +460,58 @@ async function renderPvp(keepScroll) {
   else if (pvpTab === 'time') renderPvpTime(root, ctx2);
   else renderPvpPlan(root, ctx2);
   root.scrollTop = scroll;
+}
+
+// ---------- 🏆 Tier list do Idleterino (PvP e PvE) ----------
+// A nota junta três fontes: os nossos dados (duelo do jogo contra o top 50, winrate real no Tracker e uso no top 50),
+// o jogo (efetividade nas hunts e ataque base, para o PvE) e as listas públicas da staff como referência (peso menor).
+let tierRes = null, tierRodando = false;
+let tierModo = (() => { try { return localStorage.getItem('tierModo') || 'pvp'; } catch { return 'pvp'; } })();
+let tierSemLend = (() => { try { return localStorage.getItem('tierSemLend') === '1'; } catch { return false; } })();
+function renderTierList(root, modo0) {
+  const redesenhar = () => { if (page === 'pvp') renderPvp(true); else if (page === 'pve' && typeof renderPve === 'function') renderPve(); };
+  if (!tierRes && !tierRodando) { tierRodando = true; call('poke:tier').then((r) => { tierRodando = false; tierRes = r; redesenhar(); }).catch(() => { tierRodando = false; }); }
+  const modo = modo0 === 'pve' || modo0 === 'pvp' ? (tierModo || modo0) : 'pvp';
+  const c = el('div', 'card');
+  c.append(el('div', 'ext-sec', '🏆 Tier list do Idleterino'));
+  c.append(el('div', 'sub up-lead', 'A nossa tier list, montada com três fontes: os NOSSOS dados (o duelo do jogo contra os times do top 50, o winrate real de cada espécie no Tracker oficial e quantos times do top usam), o JOGO (no PvE: em quantas hunts a espécie tira ×5,5 e ×2,5 e o ataque base) e as listas públicas da STAFF como referência. Cada espécie ganha uma nota de 0 a 100 e os tiers saem dela: S (os 10% melhores), A, B, C e D.'));
+  const barra = el('div', 'actions');
+  const modos = el('div', 'pvp-tabs');
+  for (const [k, l] of [['pvp', '⚔️ PvP'], ['pve', '🌿 PvE (hunt)']]) modos.append(button(l, modo === k ? 'on' : '', () => { tierModo = k; try { localStorage.setItem('tierModo', k); } catch {} redesenhar(); }));
+  const lb = el('label', 'tr-chk'); const ck = el('input'); ck.type = 'checkbox'; ck.checked = tierSemLend;
+  ck.onchange = () => { tierSemLend = ck.checked; try { localStorage.setItem('tierSemLend', ck.checked ? '1' : '0'); } catch {} redesenhar(); };
+  lb.append(ck, el('span', null, 'esconder lendários e míticos'));
+  barra.append(modos, lb, button(tierRodando ? 'Calculando…' : '↻ Recalcular', 'mini', async () => { tierRodando = true; redesenhar(); tierRes = await call('poke:tier', true).catch(() => tierRes); tierRodando = false; redesenhar(); }));
+  c.append(barra);
+  root.append(c);
+  const r = tierRes;
+  if (!r) { root.append(emptyBox('Montando a tier list…', 'A conta principal junta o duelo contra o top 50, o Tracker, as hunts do jogo e as listas da staff (uns segundos).')); return; }
+  if (r.erro) { root.append(emptyBox('Tier list', r.erro)); return; }
+  let lista = (modo === 'pve' ? r.pve : r.pvp) || [];
+  if (tierSemLend) lista = lista.filter((x) => !x.lend);
+  if (modo === 'pvp' && !r.fontes.metaEm) root.append(el('div', 'tip warn', 'O meta do top 50 ainda não foi lido: a tier de PvP está usando só o Tracker e a staff. Clique em "Atualizar meta" no topo para a nota completa.'));
+  const CORES = { S: '#ff6b6b', A: '#ff9f43', B: '#ffd34d', C: '#4488c5', D: '#8a8f9e' };
+  for (const t of ['S', 'A', 'B', 'C', 'D']) {
+    const doTier = lista.filter((x) => x.tier === t);
+    if (!doTier.length) continue;
+    const linha = el('div', 'card tier-linha');
+    const rot = el('div', 'tier-rot', t); rot.style.background = CORES[t];
+    const itens = el('div', 'tier-itens');
+    for (const x of doTier) {
+      const d = el('div', 'tier-item');
+      d.title = `${x.nome} · nota ${Math.round(x.nota * 100)}\n${(x.motivos || []).join('\n')}`;
+      d.append(el('b', null, `${x.nome}${x.lend ? ' 👑' : ''}`));
+      const tg = el('span', 'pm-tags'); for (const tt of x.tipos || []) tg.append(tipoChip(tt)); d.append(tg);
+      d.append(el('span', 'sub', `nota ${Math.round(x.nota * 100)} · ${(x.motivos || [])[0] || ''}`));
+      itens.append(d);
+    }
+    linha.append(rot, itens);
+    root.append(linha);
+  }
+  const f = r.fontes || {};
+  const ft = el('p', 'small');
+  ft.textContent = `Fontes: ${modo === 'pvp' ? `duelo contra o top 50 ${f.metaEm ? `(meta de ${new Date(f.metaEm).toLocaleDateString('pt-BR')})` : '(meta não lido)'} · Tracker ${f.trackerEm ? `(${f.temporada ? `temporada ${f.temporada}, ` : ''}lido ${new Date(f.trackerEm).toLocaleDateString('pt-BR')})` : '(não lido)'} · uso no top 50` : `as ${f.hunts || 0} hunts do jogo (sem a Outland), com os tipos de cada espécie · ataque base`} · listas da staff: ${(f.staff || []).filter((s) => (modo === 'pvp' ? s.categoria === 'pvp' : s.categoria !== 'pvp')).map((s) => `"${s.titulo}"${s.autor ? ` de ${s.autor}` : ''}`).join(', ') || 'nenhuma no momento'}. Passe o mouse num pokémon para ver os motivos. Calculado ${new Date(r.em).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}.`;
+  root.append(ft);
 }
 
 const arqName = (a, meta) => a.core.slice(0, 3).map((id) => shortName((meta.info[id] || {}).nome || `#${id}`)).join(' + ');
