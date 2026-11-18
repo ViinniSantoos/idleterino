@@ -1,18 +1,20 @@
-// Idleterino — PACOTE EXTRA assinado (recursos que não vão no app público).
-// O dono do app gera um arquivo .idlpack assinado com a chave dele (que só existe no PC dele) e travado no nick
-// do jogo de quem vai usar. Aqui o app confere a assinatura com a chave PÚBLICA abaixo: arquivo alterado ou
-// feito por outra pessoa não abre. Só roda na conta principal com o nick do pacote.
-// O pacote fica em <dados>/pacotes e vale depois de cada atualização do app.
+// Idleterino — TRADER fora do app do dono. Dois jeitos, os dois ASSINADOS pela chave do dono (que só existe no PC dele):
+//  1) PACOTE EXTRA (.idlpack, o jeito antigo dos testadores): travado no nick do jogo; o app confere a assinatura com a
+//     chave PÚBLICA abaixo. Fica em <dados>/pacotes e vale depois de cada atualização do app.
+//  2) CÓDIGO DO PREMIUM (trader-codigo.idlcode, 18/11/2026): vai DENTRO de toda versão pública, criptografado. Só abre com
+//     a chave que vem na licença (licenca.js) e só roda com a licença do nick da principal em dia. Atualizar o app já
+//     entrega o Trader novo para quem pagou: ninguém recebe arquivo avulso.
 const crypto = require('crypto');
 const Module = require('module');
 
 const CHAVE_PUBLICA = 'MCowBQYDK2VwAyEA3aew5ylt7TT0GE4u+utf51KfyH27cU18GOqEdqf1psQ=';
 const ARQUIVOS = ['trader-main.js', 'trader-preload.js', 'trader.js'];
 
-module.exports = function criarPacotes({ app, ipcMain, fs, path, ctx, dialog }) {
+module.exports = function criarPacotes({ app, ipcMain, fs, path, ctx, dialog, chavePublica, arqCodigo }) {
   const dir = () => path.join(app.getPath('userData'), 'pacotes');
   const arq = () => path.join(dir(), 'trader.idlpack');
-  const chave = crypto.createPublicKey({ key: Buffer.from(CHAVE_PUBLICA, 'base64'), format: 'der', type: 'spki' });
+  const codigoArq = () => arqCodigo || path.join(__dirname, 'trader-codigo.idlcode');
+  const chave = crypto.createPublicKey({ key: Buffer.from(chavePublica || CHAVE_PUBLICA, 'base64'), format: 'der', type: 'spki' });
 
   // Lê e confere um pacote. Devolve { ok, p } ou { erro }.
   function conferir(texto) {
@@ -32,27 +34,50 @@ module.exports = function criarPacotes({ app, ipcMain, fs, path, ctx, dialog }) 
   }
   const resumo = (p) => ({ nome: p.nome, nicks: p.nicks, criado: p.criado || null, validoAte: p.validoAte || null, versao: p.versao || null });
 
-  let carregado = null; // o pacote em uso nesta sessão do app
-  let fonteTela = null;
+  // O código do Premium: confere a assinatura (do arquivo inteiro, ANTES de abrir) e abre com a chave da licença.
+  function abrirCodigo(licenca) {
+    let f;
+    try { f = JSON.parse(fs.readFileSync(codigoArq(), 'utf8')); } catch { return { erro: 'sem-codigo' }; }
+    if (!f || f.formato !== 'idleterino-codigo' || typeof f.dados !== 'string' || typeof f.assinatura !== 'string') return { erro: 'Código do Trader inválido.' };
+    const { assinatura, ...semAss } = f;
+    let ok = false;
+    try { ok = crypto.verify(null, Buffer.from(JSON.stringify(semAss), 'utf8'), chave, Buffer.from(assinatura, 'base64')); } catch {}
+    if (!ok) return { erro: 'Código do Trader alterado ou não oficial.' };
+    const k = licenca && licenca.chaveDoCodigo ? licenca.chaveDoCodigo(f.kid) : null;
+    if (!k) return { erro: 'sem-chave' };
+    try {
+      const b = Buffer.from(f.dados, 'base64');
+      const d = crypto.createDecipheriv('aes-256-gcm', k, Buffer.from(f.iv, 'base64'));
+      d.setAuthTag(b.subarray(b.length - 16));
+      const p = JSON.parse(Buffer.concat([d.update(b.subarray(0, b.length - 16)), d.final()]).toString('utf8'));
+      if (p.nome !== 'trader' || !p.arquivos || ARQUIVOS.some((n) => typeof p.arquivos[n] !== 'string')) return { erro: 'Código do Trader incompleto.' };
+      return { ok: true, p: { ...p, nicks: ['*'], exigeLicenca: true } };
+    } catch { return { erro: 'A chave da licença não abre este código (licença antiga: o app pega a nova sozinho).' }; }
+  }
 
-  // Carrega o Trader do pacote (se houver um válido). `nickPrincipal` devolve o nick da conta principal no jogo.
-  function carregarTrader(args, nickPrincipal) {
-    let texto;
-    try { texto = fs.readFileSync(arq(), 'utf8'); } catch { return null; }
-    const r = conferir(texto);
-    if (!r.ok) return null;
-    const p = r.p;
+  let carregado = null; // o pacote/código em uso nesta sessão do app
+  let fonteTela = null;
+  let janela = null;
+  let exige = false;
+
+  // Põe o Trader para rodar a partir de um pacote/código já conferido.
+  function rodar(p, args, nickPrincipal, licenca, pastaNome) {
     const nicks = p.nicks.map((n) => String(n).trim().toLowerCase());
+    // PREMIUM: pacote com `exigeLicenca` (ou nicks ['*'], o do código para todos) só libera com a licença do nick
+    // (licenca.js: teste, mensal em dia, vitalício). Os pacotes antigos dos testadores seguem só pelo nick.
+    exige = !!p.exigeLicenca || nicks.includes('*');
     // Nick conferido no jogo (guardado 1 min): fora do nick do pacote, o Trader não faz nada.
     let cache = { em: 0, ok: false };
     const liberado = async () => {
       if (Date.now() - cache.em < 60 * 1000) return cache.ok;
       const nick = await Promise.resolve(nickPrincipal()).catch(() => null);
-      cache = { em: Date.now(), ok: !!(nick && nicks.includes(String(nick).trim().toLowerCase())) };
+      const n = nick ? String(nick).trim().toLowerCase() : '';
+      const nickOk = !!n && (nicks.includes(n) || nicks.includes('*'));
+      cache = { em: Date.now(), ok: nickOk && (!exige || !!(licenca && licenca.permite(n))) };
       return cache.ok;
     };
     // Os arquivos saem do pacote CONFERIDO a cada abertura (mexer neles no disco não adianta: são reescritos).
-    const pasta = path.join(dir(), 'trader');
+    const pasta = path.join(dir(), pastaNome);
     fs.mkdirSync(pasta, { recursive: true });
     for (const n of ARQUIVOS) fs.writeFileSync(path.join(pasta, n), p.arquivos[n]);
     const principal = path.join(pasta, 'trader-main.js');
@@ -61,14 +86,34 @@ module.exports = function criarPacotes({ app, ipcMain, fs, path, ctx, dialog }) 
     const trader = criar({ ...args, liberado });
     carregado = resumo(p);
     fonteTela = p.arquivos['trader.js'];
+    // Carregado com o app já aberto (teste/Pix agora): a tela do Trader entra na janela na hora.
+    if (janela && !janela.isDestroyed()) janela.webContents.executeJavaScript(fonteTela).catch(() => {});
     return trader;
+  }
+
+  // Carrega o Trader: primeiro o código do Premium que veio NA ATUALIZAÇÃO (se a licença tem a chave: é sempre o mais
+  // novo), senão o pacote antigo (testadores que ainda não têm licença).
+  function carregarTrader(args, nickPrincipal, licenca) {
+    const c = abrirCodigo(licenca);
+    if (c.ok) return rodar(c.p, args, nickPrincipal, licenca, 'trader-premium');
+    let texto = null;
+    try { texto = fs.readFileSync(arq(), 'utf8'); } catch {}
+    if (texto) { const r = conferir(texto); if (r.ok) return rodar(r.p, args, nickPrincipal, licenca, 'trader'); }
+    return null;
+  }
+  // Sem o Trader ainda (a pessoa começou o teste/pagou com o app aberto): tenta de novo, sem reiniciar.
+  function tentarCodigo(args, nickPrincipal, licenca) {
+    if (carregado) return null;
+    const c = abrirCodigo(licenca);
+    return c.ok ? rodar(c.p, args, nickPrincipal, licenca, 'trader-premium') : null;
   }
 
   // A parte da tela vai para a janela do app a cada carga dela.
   function aoAbrirJanela(win) {
-    if (!win || !fonteTela) return;
+    if (!win) return;
+    janela = win;
     // Roda como um <script> da página (funções e variáveis no escopo global, igual ao trader.js do app do dono).
-    win.webContents.on('did-finish-load', () => { win.webContents.executeJavaScript(fonteTela).catch(() => {}); });
+    win.webContents.on('did-finish-load', () => { if (fonteTela) win.webContents.executeJavaScript(fonteTela).catch(() => {}); });
   }
 
   ipcMain.handle('app:pacote:info', () => {
@@ -94,5 +139,5 @@ module.exports = function criarPacotes({ app, ipcMain, fs, path, ctx, dialog }) 
   });
   ipcMain.handle('app:pacote:reiniciar', () => { app.relaunch(); if (ctx.quit) ctx.quit(); else app.quit(); return true; });
 
-  return { carregarTrader, aoAbrirJanela, conferir };
+  return { carregarTrader, tentarCodigo, aoAbrirJanela, conferir, abrirCodigo, exigeLicenca: () => exige };
 };

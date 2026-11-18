@@ -961,14 +961,53 @@ module.exports = function createPokeIdle(ctx) {
     const t = await v.webContents.executeJavaScript('window.__idleterinoMercado && window.__idleterinoMercado.treinador ? window.__idleterinoMercado.treinador() : null').catch(() => null);
     return t && t.nick ? t.nick : null;
   };
-  if (!trader) { try { trader = pacotes.carregarTrader(traderArgs, nickPrincipal); } catch { trader = null; } }
+  // PREMIUM (18/11/2026): a licença (licenca.js) diz se o nick da principal pode usar o Trader (teste, mensal, vitalício).
+  const licenca = require('./licenca')({ app, ipcMain, fs, path, ctx });
+  licenca.iniciar(nickPrincipal);
+  const doDono = !!trader;
+  if (!trader) { try { trader = pacotes.carregarTrader(traderArgs, nickPrincipal, licenca); } catch { trader = null; } }
+  // Começou o teste ou pagou com o app aberto: o código do Trader (que já veio no app) abre na hora, sem reiniciar.
+  let traderTick = null;
+  const ligarTick = () => { if (trader && !traderTick) { traderTick = setInterval(() => trader.tick().catch(() => {}), 30 * 1000); timers.push(traderTick); } };
+  const tentarTrader = () => {
+    if (trader) return;
+    try { trader = pacotes.tentarCodigo(traderArgs, nickPrincipal, licenca); } catch { trader = null; }
+    if (trader) { if (iniciado) ligarTick(); vigiarPlano(); }
+  };
+  licenca.aoMudar(tentarTrader);
+  setInterval(tentarTrader, 5 * 60 * 1000);
+  // O plano acabou com o Trader rodando: recarrega a página da principal UMA vez, e o código do Trader sai dela (ele só
+  // entra de novo se a licença voltar). Anúncios no Market e pokémon nas casas ficam como estão.
+  let vigiando = false;
+  function vigiarPlano() {
+    if (vigiando || doDono || !trader || !(pacotes.exigeLicenca && pacotes.exigeLicenca())) return;
+    vigiando = true;
+    let permitia = null;
+    setInterval(async () => {
+      const n = await nickPrincipal().catch(() => null);
+      if (!n) return;
+      const p = licenca.permite(n);
+      if (permitia === true && !p) {
+        const v = views.get(mainAccId());
+        if (v && !v.webContents.isDestroyed()) {
+          const tinha = await v.webContents.executeJavaScript('!!(window.__idleterinoMercado && window.__idleterinoMercado.extra && window.__idleterinoMercado.extra.traderConfig)').catch(() => false);
+          if (tinha) v.webContents.reload();
+        }
+        send('trader:licenca', licenca.situacao(n));
+      }
+      permitia = p;
+    }, 60 * 1000);
+  }
   const timers = [];
+  let iniciado = false;
+  vigiarPlano();
   function start() {
     loadConfig();
     for (const a of config.accounts) createView(a);
     timers.push(setInterval(readAll, READ_MS));
     timers.push(setInterval(autoOptimize, 60 * 1000));
-    if (trader) timers.push(setInterval(() => trader.tick().catch(() => {}), 30 * 1000));
+    iniciado = true;
+    ligarTick();
     setTimeout(askMarket, 60 * 1000);
     // PvP: confere de hora em hora se o meta tem mais de um dia; a primeira, 3 min depois de abrir.
     setTimeout(() => pvpCollect().catch(() => {}), 3 * 60 * 1000);

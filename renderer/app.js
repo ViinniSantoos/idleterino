@@ -47,6 +47,8 @@ function go(p) {
   if (p === 'pvp' && typeof renderPvp === 'function') renderPvp();
   if (p === 'pve' && typeof renderPve === 'function') renderPve();
   if (p === 'trader' && typeof renderTrader === 'function') renderTrader();
+  if (p === 'premium' && typeof renderPremium === 'function') renderPremium();
+  if (typeof premFaixa === 'function') premFaixa();
   if (p === 'help') renderHelp();
 }
 for (const b of document.querySelectorAll('.nav')) b.onclick = () => go(b.dataset.page);

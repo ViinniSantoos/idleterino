@@ -11,4 +11,6 @@ trader-preload.js
 renderer/trader.js
 electron-builder-trader.js
 dist-trader/
+# Premium: o código do Trader CRIPTOGRAFADO vai no app (build), mas é gerado a cada versão (trader-chave/gerar-codigo.js)
+trader-codigo.idlcode
 dist-local/
