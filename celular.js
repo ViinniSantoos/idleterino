@@ -28,7 +28,21 @@ const ELO_VALE_MS = 3 * 60 * 1000;
 const BAIXAR = 'https://github.com/ViinniSantoos/idleterino-android/releases/latest';
 const b64url = (buf) => Buffer.from(buf).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
-/** O endereço deste PC na rede de casa (Wi-Fi/cabo), preferindo as faixas privadas comuns. */
+const privado = (ip) => /^(192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.)/.test(ip || '');
+/**
+ * O endereço deste PC na rede de casa. Primeiro pergunta ao Windows qual placa ele USA para sair para a internet (um
+ * "connect" UDP não manda nada, só escolhe a rota) — assim não pega placa de VPN/ZeroTier/rede virtual com IP de casa,
+ * que o celular não alcança ("Não é possível acessar esse site", 17/11/2026). Sem isso, cai na lista das placas.
+ */
+function ipDaRota() {
+  return new Promise((ok) => {
+    let s; try { s = dgram.createSocket('udp4'); } catch { return ok(null); }
+    const fim = (v) => { try { s.close(); } catch {} ok(v); };
+    s.on('error', () => fim(null));
+    try { s.connect(53, '1.1.1.1', () => { try { const a = s.address().address; fim(privado(a) ? a : null); } catch { fim(null); } }); } catch { fim(null); }
+    setTimeout(() => fim(null), 1500);
+  });
+}
 function ipLocal() {
   const todos = [];
   for (const [nome, lista] of Object.entries(os.networkInterfaces())) {
@@ -140,7 +154,7 @@ module.exports = function criarCelular(ctx, poke) {
       contas.push({ nome: s.nick || a.name || 'Conta', curta: [String(s.nick || ''), String(s.token), String(s.provedor || '')] });
     }
     if (!contas.length) return { erro: 'Nenhuma das contas escolhidas está logada no PokeIdle.' };
-    const ip = ipLocal();
+    const ip = (await ipDaRota()) || ipLocal();
     if (!ip) return { erro: 'Este PC não está numa rede Wi-Fi/cabo de casa. Conecte o PC e o celular na mesma Wi-Fi e tente de novo.' };
     const exp = Date.now() + VALIDADE_MS;
     const pin = String(crypto.randomInt(0, 100000000)).padStart(8, '0');
@@ -158,6 +172,10 @@ module.exports = function criarCelular(ctx, poke) {
     const q = qrcode(0, 'M');
     q.addData(url);
     q.make();
-    return { qrSvg: q.createSvgTag({ cellSize: 8, margin: 4, scalable: true }), modulos: q.getModuleCount(), pin, exp, n: contas.length, nomes: contas.map((x) => x.nome), tamanho: url.length, ip, url };
+    // Plano B ("Não abriu no celular?"): o próprio pacote criptografado, para copiar ou ler com a câmera como TEXTO e
+    // colar no app ("Colar o código do PC"). Não depende da rede de casa; continua só abrindo com o PIN e por 5 min.
+    let codigoQrSvg = null;
+    try { const q2 = qrcode(0, 'L'); q2.addData(pacote); q2.make(); codigoQrSvg = q2.createSvgTag({ cellSize: 4, margin: 4, scalable: true }); } catch {}
+    return { qrSvg: q.createSvgTag({ cellSize: 8, margin: 4, scalable: true }), modulos: q.getModuleCount(), pin, exp, n: contas.length, nomes: contas.map((x) => x.nome), tamanho: url.length, ip, url, codigo: pacote, codigoQrSvg };
   });
 };

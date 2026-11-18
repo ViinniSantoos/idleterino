@@ -41,6 +41,19 @@ function mostrarQrCelular(r) {
     el('div', 'tip warn', '🔒 Não mostre este QR nem o PIN para ninguém: juntos, eles dão acesso às suas contas.'));
   meio.append(qr, lado);
   card.append(meio, el('p', 'small', 'Se o Windows perguntar se o Idleterino pode usar a rede, permita na rede PRIVADA (é a sua Wi-Fi de casa). A conta que entrar no celular sai do PC, igual quando você abre no navegador.'));
+  // Plano B: o celular mostrou "Não é possível acessar esse site" (a rede separa os aparelhos, o firewall bloqueou…).
+  if (r.codigo) {
+    const b = el('details', 'cel-planob');
+    b.append(el('summary', null, '📵 Não abriu no celular? ("Não é possível acessar esse site")'));
+    const qr2 = el('div', 'cel-qr'); if (r.codigoQrSvg) qr2.innerHTML = r.codigoQrSvg; // SVG gerado no processo principal
+    const ol2 = el('ol');
+    for (const t of ['Aponte a câmera para ESTE QR e toque em "Copiar texto" (ou use o botão abaixo e mande o código para você mesmo no WhatsApp/Discord e copie no celular).', 'Abra o Idleterino no celular › botão "I" › Contas › "Colar o código do PC".', 'Digite o PIN de 8 números acima.']) ol2.append(el('li', null, t));
+    const copiar = button('Copiar o código', null, async () => { try { await navigator.clipboard.writeText(r.codigo); toast('Código copiado. Ele só abre com o PIN e vale 5 minutos.'); } catch { toast('Não consegui copiar.'); } });
+    b.append(el('div', 'cel-meio', null), ol2);
+    b.querySelector('.cel-meio').append(qr2);
+    b.append(copiar, el('p', 'small', 'Funciona até fora da Wi-Fi de casa. O código vai criptografado: sem o PIN ninguém abre, e ele vence em 5 minutos.'));
+    card.append(b);
+  }
   const acts = el('div', 'actions');
   const fechar = () => { call('app:celular:fechar'); closeModal(); };
   acts.append(button('Baixar o app Android', null, () => window.open('https://github.com/ViinniSantoos/idleterino-android/releases/latest', '_blank')), button('Fechar', 'primary', fechar));
