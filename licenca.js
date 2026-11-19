@@ -26,8 +26,9 @@ const LOJA_URL = 'https://idleterino-loja.idleterino.workers.dev';
 const PREMIUM_LANCADO = true;
 const PLANOS = {
   teste: { nome: 'Teste grátis', dias: 3, preco: 0 },
-  mensal: { nome: 'Mensal', dias: 30, preco: 15.9 },
-  vitalicio: { nome: 'Vitalício', dias: null, preco: 49.9 },
+  // Preços desde a 0.3.35 (dono, 19/11/2026: entram o Auto hunt e o Auto catch). A loja (Worker) cobra o dela.
+  mensal: { nome: 'Mensal', dias: 30, preco: 24.9 },
+  vitalicio: { nome: 'Vitalício', dias: null, preco: 79.9 },
 };
 const TOLERANCIA_MS = 24 * 3600 * 1000; // mensal: 1 dia depois de vencer (o Pix pode demorar)
 const chavesRevogadas = new Set([]); // ids de certificados de chaves filhas que não valem mais

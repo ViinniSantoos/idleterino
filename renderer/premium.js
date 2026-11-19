@@ -67,7 +67,7 @@ async function renderPremium() {
   root.replaceChildren();
   const head = el('header', 'page-head');
   const hd = el('div');
-  hd.append(el('h1', null, '📈 Trader Premium'), el('p', 'sub', 'Pechinchas no Market com o preço justo calculado, compra dentro dos seus limites, sorteios, esteira de upar e revender.'));
+  hd.append(el('h1', null, '📈 Trader Premium'), el('p', 'sub', 'Pechinchas no Market com o preço justo calculado, compra dentro dos seus limites, sorteios, esteira de upar e revender, ⚡ Auto hunt (o pokémon sempre na melhor hunt) e 🎯 Auto catch (o Top Catch da semana sozinho).'));
   head.append(hd);
   root.append(head);
   if (!s) { root.append(el('p', 'sub', 'Carregando…')); return; }
@@ -104,7 +104,7 @@ async function renderPremium() {
   const pode = s.nick && s.loja;
   if (s.nick && (s.estado === 'nenhuma') && !s.testeUsado) {
     const t = el('div', 'card prem-teste');
-    t.append(el('b', null, '🎁 Teste grátis de 3 dias'), el('span', 'sub', 'Tudo liberado por 3 dias: pechinchas, compra dentro dos seus limites, sorteios e a esteira. Um teste por pessoa (uma conta por PC). No fim, se não assinar, o Trader para sozinho.'));
+    t.append(el('b', null, '🎁 Teste grátis de 3 dias'), el('span', 'sub', 'Tudo liberado por 3 dias: pechinchas, compra dentro dos seus limites, sorteios, a esteira, o Auto hunt e o Auto catch. Um teste por pessoa (uma conta por PC). No fim, se não assinar, o Trader para sozinho.'));
     const bt = button(s.loja ? 'Começar o teste grátis' : 'A loja abre em breve', 'primary', async () => {
       bt.disabled = true; bt.textContent = 'Liberando…';
       const r = await call('app:licenca:teste').catch(() => null);
@@ -131,7 +131,7 @@ async function renderPremium() {
       return c;
     };
     g.append(
-      card('mensal', 'Mensal', `${premReal(s.planos.mensal.preco)}/mês`, ['30 dias de Trader', 'Renovar soma 30 dias ao que falta', 'Sem renovação automática: você decide']),
+      card('mensal', 'Mensal', `${premReal(s.planos.mensal.preco)}/mês`, ['30 dias de Trader, ⚡ Auto hunt e 🎯 Auto catch', 'Renovar soma 30 dias ao que falta', 'Sem renovação automática: você decide']),
       card('vitalicio', 'Vitalício', premReal(s.planos.vitalicio.preco), ['Pague uma vez, use para sempre', 'Todas as atualizações incluídas', 'Vale ~3 meses do mensal'], 'melhor valor'),
     );
     root.append(g);

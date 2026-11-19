@@ -125,18 +125,33 @@ module.exports = function createPokeIdle(ctx) {
   const isShown = (id) => visible && (tiles ? !!tiles[id] : config.selected === id);
   function effectiveMode(a) {
     const inFront = isShown(a.id);
-    if (!inFront && config.autoBackgroundUltra) return 'ultra';
+    // A conta principal com o Trader (ele, o Auto hunt e os sorteios rodam nela) fica SEMPRE no modo dela: ir ao ULTRA
+    // no fundo recarregava o jogo a cada troca de aba do app — e o "Ver no Market" do Trader perdia o anúncio
+    // (vídeo de um usuário, 19/11/2026).
+    let comTrader = false; try { comTrader = !!trader && a.id === mainAccId(); } catch {} // (o Trader carrega depois)
+    if (!inFront && config.autoBackgroundUltra && !comTrader) return 'ultra';
     return a.mode;
   }
 
-  // Grava as preferências do jogo e recarrega quando elas não batem com o modo pedido.
+  // Grava as preferências do jogo e recarrega quando elas não batem com o modo pedido. SAIR do ULTRA não recarrega
+  // mais: o jogo troca na hora pelo botão "Sair do ULTRA" dele (as outras chaves já gravadas valem na mesma hora).
   async function applyMode(id) {
     const a = account(id); const v = views.get(id);
     if (!a || !v || v.webContents.isDestroyed() || !isPokeIdle(urlOf(a))) return;
     const want = MODES[effectiveMode(a)] || MODES.cena;
-    const changed = await v.webContents.executeJavaScript(`(() => { const p = ${JSON.stringify(want)}; let c = false;
-      for (const k in p) if (localStorage.getItem(k) !== p[k]) { localStorage.setItem(k, p[k]); c = true; } return c; })()`).catch(() => false);
-    if (changed) v.webContents.reload();
+    const r = await v.webContents.executeJavaScript(`(() => { const p = ${JSON.stringify(want)}; let c = false;
+      const eraUltra = localStorage.getItem('cfg-ultra') === '1';
+      for (const k in p) if (localStorage.getItem(k) !== p[k]) { localStorage.setItem(k, p[k]); c = true; }
+      if (!c) return 'igual';
+      // Só o ULTRA mudou, de ligado para desligado, com o jogo já aberto: o botão dele faz a troca sem recarregar.
+      const sair = document.getElementById('ultra-sair');
+      if (eraUltra && p['cfg-ultra'] === '0' && sair && document.documentElement.classList.contains('modo-ultra')) {
+        document.documentElement.classList.toggle('modo-economia', p['cfg-economia'] === '1');
+        sair.click();
+        return 'aovivo';
+      }
+      return 'recarregar'; })()`).catch(() => 'igual');
+    if (r === 'recarregar') v.webContents.reload();
   }
 
   function followUA(wc) {

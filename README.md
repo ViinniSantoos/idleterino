@@ -40,6 +40,16 @@ npm run dist:linux
 - `npm run dist` gera o instalador e a versão portátil em `dist/`.
 - `npm run dist:linux` gera o AppImage e o .deb. Rode no Linux ou no WSL.
 
+### Compilar do código (Mac, Linux) com o Trader Premium
+
+O código do Trader não fica no repositório: ele vai **criptografado** no arquivo `trader-codigo.idlcode`, que só abre com uma licença válida (teste grátis, mensal ou vitalício, na aba 📈 Trader do app).
+
+1. Use o código da mesma versão do release (ex.: `git checkout v0.3.35`).
+2. Baixe o `trader-codigo.idlcode` **desse release** no GitHub e coloque na raiz do projeto, do lado do `package.json`.
+3. Gere o app (ex.: `npx electron-builder --mac`).
+
+Sem o arquivo, o app funciona normalmente, só que sem o Trader.
+
 ### Estrutura
 
 | Arquivo | O que faz |
