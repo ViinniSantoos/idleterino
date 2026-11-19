@@ -34,6 +34,34 @@ async function premAtualizar(buscar) {
   if (nav) nav.hidden = !(s.lancado && !temTrader);
   if (page === 'premium') renderPremium();
   premFaixa();
+  // Liberado (teste, mensal ou vitalício) e a tela do Trader ainda não está aqui: leva até ela.
+  if (s.lancado && s.permite && !temTrader) premLevarAoTrader();
+}
+// LIBEROU E A TELA NÃO MUDOU (caso do L. Gabriel, 19/11/2026: "to lockado aqui", e um Ctrl+R resolveu). O teste/Pix
+// libera o Trader por trás, mas a tela ficava nos planos. Agora: assim que o Trader entra, vai direto para a aba dele;
+// se em 45 s a tela dele não chegou, a janela se atualiza sozinha (o mesmo Ctrl+R), no máximo 1 vez a cada 10 min.
+let premLevando = null;
+function premLevarAoTrader() {
+  if (premLevando) return;
+  const t0 = Date.now();
+  const irDepois = (() => { try { return sessionStorage.getItem('premIrTrader') === '1'; } catch { return false; } })();
+  premLevando = setInterval(() => {
+    const ok = typeof traderLiberado !== 'undefined' && traderLiberado;
+    if (ok) {
+      clearInterval(premLevando); premLevando = null;
+      try { sessionStorage.removeItem('premIrTrader'); } catch {}
+      if (page === 'premium' || irDepois) { go('trader'); if (typeof toast === 'function') toast('📈 Trader liberado! Bem-vindo ao Premium.'); }
+      premAtualizar(false);
+      return;
+    }
+    if (Date.now() - t0 < 45000) return;
+    clearInterval(premLevando); premLevando = null;
+    let ultima = 0; try { ultima = Number(localStorage.getItem('premRecarregouEm')) || 0; } catch {}
+    // Só atualiza a janela com a pessoa nos planos ou no Trader (nunca no meio de outra aba que ela está usando).
+    if (Date.now() - ultima < 10 * 60 * 1000 || !['premium', 'trader'].includes(page)) { if (typeof toast === 'function') toast('⚠ O Trader foi liberado, mas a tela dele não abriu: aperte Ctrl+R (ou feche e abra o Idleterino).'); return; }
+    try { localStorage.setItem('premRecarregouEm', String(Date.now())); sessionStorage.setItem('premIrTrader', '1'); } catch {}
+    location.reload();
+  }, 1000);
 }
 premAtualizar(false);
 setInterval(() => premAtualizar(false), 60 * 1000);
