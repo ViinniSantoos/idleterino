@@ -1141,7 +1141,8 @@ function renderPvpPlan(root, c) {
   const doJogo = mt && Array.isArray(mt.ids) ? mt.ids.filter((id) => mine.some((m) => m.id === id)).slice(0, 5) : [];
   // Começou pela sugestão porque o time do jogo ainda não tinha chegado? Quando ele chegar (e você não mexeu), troca.
   if (pvpPlan && pvpPlanSugestao && doJogo.length) pvpPlan = null;
-  if (!pvpPlan) { pvpPlanSugestao = !doJogo.length; pvpPlan = doJogo.length ? doJogo.slice() : pvpSuggest(mine, entries, tab, refLevel).map((x) => x.c.id); }
+  // Vazio também conta como "sem plano" (caso do 369, 20/11/2026: tirou todos e o planejador ficava 0/5 para sempre).
+  if (!pvpPlan || !pvpPlan.length) { pvpPlanSugestao = !doJogo.length; pvpPlan = doJogo.length ? doJogo.slice() : pvpSuggest(mine, entries, tab, refLevel).map((x) => x.c.id); }
   pvpPlan = pvpPlan.filter((id) => mine.some((m) => m.id === id)).slice(0, 5);
   const team = pvpPlan.map((id) => mine.find((m) => m.id === id)).filter(Boolean);
   const ehDoJogo = doJogo.length > 0 && doJogo.length === team.length && team.every((m) => doJogo.includes(m.id));
@@ -1169,7 +1170,19 @@ function renderPvpPlan(root, c) {
   vsSel.value = String(pvpArqSel);
   vsSel.onchange = () => { pvpArqSel = Number(vsSel.value); renderPvp(true); };
   const right = el('div', 'actions'); right.style.margin = '0';
-  right.append(el('span', 'sub', 'Contra:'), vsSel);
+  // ⭐ MELHOR TIME DO META (pedido do dono, 20/11/2026: "a formação que mais dá certo pelo meta, antes de mexer"): os 5
+  // que mais rendem contra o top 50 (a mesma conta do "Com o que você tem", só com quem a conta pode usar) já
+  // posicionados no modo "⭐ Melhor contra o top 50".
+  const melhor = button('⭐ Melhor time do meta', 'mini', () => {
+    const sug = pvpSuggest(mine, entries, tab, refLevel).map((x) => x.c.id);
+    if (!sug.length) { if (typeof toast === 'function') toast('Ainda não li os pokémon desta conta: abra a conta no PokeIdle e volte aqui.'); return; }
+    pvpPlan = sug; pvpPlanSugestao = false; pvpPosModo = 'top';
+    try { localStorage.setItem(`pvpPlan:${pvpAcc}`, JSON.stringify(pvpPlan)); localStorage.setItem('pvpPosModo', 'top'); } catch {}
+    if (typeof toast === 'function') toast('⭐ Montei o time que mais rende contra o top 50, já na melhor posição.');
+    renderPvp(true);
+  });
+  melhor.title = 'Os 5 da sua conta que mais rendem contra o top 50 do Ranqueado, já na posição que mais vence. Só entra quem a conta pode usar (nível até o do treinador + 5).';
+  right.append(melhor, el('span', 'sub', 'Contra:'), vsSel);
   ph.append(right);
   pc.append(ph);
   if (!doJogo.length) pc.append(el('div', 'tip', 'O seu time do PvP ainda não chegou do jogo: abra a aba PvP no jogo uma vez (ou espere uns segundos). Enquanto isso, o planejador começa com uma sugestão.'));
