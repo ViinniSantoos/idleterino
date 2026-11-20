@@ -364,6 +364,17 @@ function sideCol(ns, s) {
   const coming = withPts.filter((c) => c.watching && c.points < costOf(c) && c.earning !== 'idle')
     .map((c) => ({ c, min: (costOf(c) - c.points) / (P[ns].rate * (c.multiplier || 1)) })).sort((x, y) => x.min - y.min);
   section('Próximos bônus', 'Canais com pontos para comprar agora e quanto falta nos que estão tocando.');
+  // 🌙 ANTES DE DORMIR (era do Kickterino/Twitchterino; pedido do dono, 19/11/2026): só para quem ligou nos Ajustes.
+  if (s.storeSequence) {
+    const r = el('div', 'nb ready');
+    r.append(el('span', 'nb-name', `🌙 Loja ${s.storeSequence.done} de ${s.storeSequence.total} aberta`), el('span', 'nb-val', 'compre e feche: a próxima abre sozinha'));
+    r.append(button('Parar', null, async (e) => { e.stopPropagation(); apply(ns, await call(`${ns}:stores:cancel`)); }));
+    list.append(r);
+  } else if (s.sleepMode && ready.length) {
+    const b = button(`🌙 Antes de dormir · ${ready.length} ${ready.length === 1 ? 'canal' : 'canais'} com pontos`, 'primary', () => openSleep(ns));
+    b.style.width = '100%'; b.style.margin = '4px 0 6px';
+    list.append(b);
+  }
   if (!ready.length && !coming.length) list.append(el('div', 'side-empty', 'Ainda nenhum canal perto do bônus.'));
   for (const c of ready.slice(0, 4)) {
     const r = el('div', 'nb ready');
@@ -480,6 +491,7 @@ function openDrawer(ns) {
     card.append(rowOpt('Avisar baú', 'Com o automático desligado: avisa para você clicar.', sw(s.notifyChest, set('notifyChest'))));
   }
   card.append(rowOpt('Avisar bônus', 'Quando um canal alcança o preço do bônus.', sw(s.notifyBonus, set('notifyBonus'))));
+  card.append(rowOpt('🌙 Antes de dormir', 'Mostra em "Próximos bônus" o botão que lista os canais com pontos para o bônus e abre as lojas uma de cada vez. A compra é sempre sua.', sw(s.sleepMode, set('sleepMode'))));
   card.append(rowOpt('Menções e sorteios', 'Destaque no chat e aviso com a janela escondida.', sw(s.notifyChat, set('notifyChat'))));
   const g = el('select');
   for (const [v, l] of [['watching', 'Só nas lives tocando'], ['always', 'Em todos os canais'], ['never', 'Não mostrar']]) { const o = el('option', null, l); o.value = v; g.append(o); }
@@ -862,6 +874,48 @@ function confirmRemoveChannel(ns, ch) {
   $('#modal').hidden = false;
 }
 function closeModal() { $('#modal').hidden = true; if (page === 'poke') renderPoke(); }
+// 🌙 Antes de dormir: os canais com pontos para o bônus escolhido; as lojas abrem uma de cada vez (a pessoa compra e
+// fecha a janela da loja, e a próxima aparece). Nada é comprado sozinho.
+const sleepPicked = { twitch: new Set(), kick: new Set() };
+function openSleep(ns) {
+  const s = S[ns];
+  const card = $('#modal-card');
+  const costOf = (c) => (ns === 'twitch' ? (s.bonusTarget ? c.targetCost : Math.min(c.costs.xp, c.costs.capture, c.costs.lure)) : (s.targetCost || 200));
+  const rich = s.channels.filter((c) => c.points != null && (ns !== 'twitch' || c.hasBonus) && c.points >= costOf(c)).sort((a, b) => b.points - a.points);
+  const picked = sleepPicked[ns];
+  for (const slug of [...picked]) if (!rich.some((c) => c.slug === slug)) picked.delete(slug);
+  card.replaceChildren(el('h3', null, '🌙 Antes de dormir'));
+  if (!rich.length) {
+    card.append(el('p', null, 'Nenhum canal tem pontos para o bônus agora.'));
+    const a = el('div', 'actions'); a.append(button('Fechar', null, closeModal)); card.append(a);
+    $('#modal').hidden = false; return;
+  }
+  const total = rich.reduce((t, c) => t + Math.floor(c.points / costOf(c)), 0);
+  card.append(el('p', null, `Dá para comprar ${total} bônus. Escolha os canais: as lojas abrem uma de cada vez — você compra e fecha a janela, e a próxima aparece. A compra é sempre sua.`));
+  const lista = el('div');
+  lista.style.cssText = 'display:flex;flex-direction:column;gap:6px;max-height:50vh;overflow:auto;margin:8px 0';
+  for (const c of rich) {
+    const row = el('label');
+    row.style.cssText = 'display:flex;align-items:center;gap:10px;padding:6px 8px;border-radius:8px;background:rgba(255,255,255,.04);cursor:pointer';
+    const cb = el('input'); cb.type = 'checkbox'; cb.checked = picked.has(c.slug);
+    cb.onchange = () => { if (cb.checked) picked.add(c.slug); else picked.delete(c.slug); openSleep(ns); };
+    const pts = el('span', 'sub', `${fmt(c.points)} pts · ${Math.floor(c.points / costOf(c))}×`); pts.style.marginLeft = 'auto';
+    row.append(cb, el('b', null, c.displayName || c.slug), pts);
+    lista.append(row);
+  }
+  card.append(lista);
+  const a = el('div', 'actions');
+  const ir = button(`Abrir ${picked.size} loja${picked.size === 1 ? '' : 's'} em sequência`, 'primary', async () => {
+    const slugs = rich.filter((c) => picked.has(c.slug)).map((c) => c.slug);
+    closeModal();
+    apply(ns, await call(`${ns}:stores:sequence`, slugs));
+    toast('🌙 Lojas em sequência: compre o bônus e feche a janela da loja — a próxima abre sozinha.');
+  });
+  ir.disabled = !picked.size;
+  a.append(button('Marcar todos', null, () => { for (const c of rich) picked.add(c.slug); openSleep(ns); }), button('Fechar', null, closeModal), ir);
+  card.append(a);
+  $('#modal').hidden = false;
+}
 function openPokeDrawer() {
   pokeView(false);
   const s = S.poke;
