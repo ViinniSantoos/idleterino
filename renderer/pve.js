@@ -46,7 +46,7 @@ async function renderPve() {
   head.append(t, act);
   const tabs = el('div', 'pvp-tabs');
   const radarNovo = pveRadar && pveRadar.historico && pveRadar.historico[0] && pveRadar.historico[0].id !== pveRadar.visto;
-  for (const [k, l] of [['agora', '🎯 Hunt agora'], ['proximas', '🗺️ Próximas hunts'], ['outland', '🏝️ Outland × Shiny × Upar'], ['tier', '🏆 Tier list'], ['evo', '🧬 Evoluir para qual?'], ['casas', '🏠 Casas'], ['shiny', '✨ Procurar shiny'], ['boss', '🧮 Calculadora Boss'], ['mercado', '🛒 Comprar para farmar'], ['radar', `🆕 Atualizações do jogo${radarNovo ? ' •' : ''}`]]) {
+  for (const [k, l] of [['agora', '🎯 Hunt agora'], ['prey', '🧿 Prey e Bestiário'], ['proximas', '🗺️ Próximas hunts'], ['outland', '🏝️ Outland × Shiny × Upar'], ['tier', '🏆 Tier list'], ['evo', '🧬 Evoluir para qual?'], ['casas', '🏠 Casas'], ['shiny', '✨ Procurar shiny'], ['boss', '🧮 Calculadora Boss'], ['mercado', '🛒 Comprar para farmar'], ['radar', `🆕 Atualizações do jogo${radarNovo ? ' •' : ''}`]]) {
     tabs.append(button(l, pveTab === k ? 'on' : '', () => { pveTab = k; try { localStorage.setItem('pveTab', k); } catch {} renderPve(); }));
   }
   root.append(head, tabs);
@@ -68,6 +68,7 @@ async function renderPve() {
   else if (pveTab === 'casas') await pveCasas(corpo);
   else if (pveTab === 'shiny') pveShiny(corpo);
   else if (pveTab === 'boss') await pveBossTela(corpo);
+  else if (pveTab === 'prey') await pvePreyTela(corpo);
   else await pveEvo(corpo);
 }
 
@@ -903,4 +904,65 @@ function pveShiny(box) {
   res.append(lc);
   res.append(el('p', 'small', `Calculado ${new Date(r.em).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} com ${fmt(r.lista.length)} espécies. Market e raridade: das 20 mais fortes no PvP/PvE e mais fáceis (${r.consultas} consulta(s) agora; o resto fica guardado 45 min). Notas de 0 a 100.`));
   box.append(res);
+}
+
+// ---------- 🧿 PREY E BESTIÁRIO (jogo 1.457, 20/11/2026) ----------
+// Prey: qual dos 9 escolher para a hunt que mais rende para você (e quando vale roletar). Bestiário: o dano extra
+// contra cada tipagem pelos seus abates e os degraus mais perto. Tudo só de leitura: quem escolhe e roleta é você, no jogo.
+const PREY_NOME = { dano: '⚔️ Dano', defesa: '🛡️ Defensivo', captura: '🎯 Capture Boost', spawn: '🐾 Spawn' };
+const PREY_UNID = { dano: '% de dano', defesa: '% do dano dele', captura: '% de captura', spawn: ' a mais por onda' };
+async function pvePreyTela(box) {
+  box.append(el('p', 'sub', 'Lendo o Prey e o Bestiário da conta…'));
+  const [p, b] = await Promise.all([call('poke:pve', pveAcc, 'prey').catch(() => null), call('poke:pve', pveAcc, 'bestiario').catch(() => null)]);
+  if (page !== 'pve' || pveTab !== 'prey') return;
+  box.replaceChildren();
+  const c = el('div', 'card');
+  c.append(el('div', 'ext-sec', '🧿 Prey de hoje (vira às 18:00 de Brasília)'));
+  if (!p || !p.pronto) c.append(el('p', 'sub', 'A conta do PokeIdle não respondeu: abra e entre no jogo.'));
+  else if (!p.temPrey) c.append(el('p', 'sub', 'Ainda sem Prey hoje: abra a Mochila › Prey no jogo e dê a roletada grátis do dia. Depois volte aqui para ver qual dos 9 escolher.'));
+  else {
+    if (p.melhor) c.append(el('div', 'sub up-lead', `Sua melhor hunt agora: ${p.melhor.nome} (${fmt(p.melhor.xpH)} XP/h). Para Dano e Spawn, vale o pokémon que está nela (ou numa perto).`));
+    for (const ct of p.cartelas) {
+      const k = el('div', 'card'); k.style.margin = '8px 0';
+      if (ct.vazia) { k.append(el('b', null, `Cartela ${ct.cartela + 1}`), el('p', 'sub', 'Sem roletada ainda hoje (a grátis revela os 9 e o bônus).')); c.append(k); continue; }
+      k.append(el('b', null, `Cartela ${ct.cartela + 1} · ${PREY_NOME[ct.bonus] || ct.bonus} ${'★'.repeat(ct.est)}${'☆'.repeat(Math.max(0, 5 - ct.est))} · ${ct.bonus === 'spawn' ? `+${ct.valor}${PREY_UNID.spawn}` : `${ct.bonus === 'defesa' ? '−' : '+'}${ct.valor}${PREY_UNID[ct.bonus] || ''}`}`));
+      if (ct.escolhido) k.append(el('div', 'tip ok', `Escolhido: ${ct.escolhidoNome}${ct.recomendado && ct.recomendado.pokeId !== ct.escolhido ? ` · a sugestão era ${ct.recomendado.nome} (para trocar, só roletando a lista)` : ' ✓'}`));
+      else if (ct.recomendado) k.append(el('div', 'tip ok', `👉 Escolha ${ct.recomendado.nome}: ${ct.recomendado.porque}${ct.recomendado.ganho != null ? ` · até ~+${ct.recomendado.ganho}% de abates nessa hunt` : ''}.`));
+      const lista = el('div', 'rz-fila');
+      for (const o of ct.opcoes) {
+        const it = el('div', 'rz-item');
+        it.append(el('b', null, `${ct.recomendado && o.pokeId === ct.recomendado.pokeId ? '👉 ' : ''}${ct.escolhido === o.pokeId ? '✓ ' : ''}${o.nome}`),
+          el('span', 'sub', `${o.hunt ? `${o.hunt.nome} (Nv ${fmt(o.hunt.nivel)}) · ${fmt(o.hunt.xpH)} XP/h · ${o.pct}% da sua melhor` : 'não está numa hunt que você já libera'}${ct.bonus === 'captura' ? (o.capturado ? ' · já capturou' : ' · nunca capturou') : ''}`));
+        lista.append(it);
+      }
+      k.append(lista);
+      for (const d of ct.dicas || []) k.append(el('div', 'tip', d));
+      c.append(k);
+    }
+    c.append(el('span', 'sub', 'Spawn: +N do escolhido em cada onda, em manadas diferentes — numa hunt boa, mais abates por hora (a caminhada é o que segura o ritmo). Dano: luta mais curta. As duas cartelas nunca têm o mesmo pokémon. Roletar: a partir de 1 mi de coins, e o preço dobra a cada vez.'));
+  }
+  box.append(c);
+
+  const c2 = el('div', 'card');
+  c2.append(el('div', 'ext-sec', '📖 Bestiário: dano extra por tipagem'));
+  if (!b || !b.pronto) c2.append(el('p', 'sub', 'O Bestiário ainda não chegou do jogo (abra a conta).'));
+  else if (!b.temDex) c2.append(el('p', 'sub', 'A Pokédex da conta ainda não chegou ao app: abra a conta no PokeIdle e volte aqui em alguns segundos.'));
+  else {
+    if (b.aqui && b.aqui.tipos.length) c2.append(el('div', 'tip ok', `Na hunt de agora (${b.aqui.nome}): ${b.aqui.tipos.map((t) => `${t.tipo} +${String(t.pct.toFixed(2)).replace('.', ',')}%`).join(' · ')} de dano.`));
+    const g = el('div', 'rz-ocup');
+    for (const t of b.tipos) g.append(el('span', `rz-pill${t.bp ? '' : ' vazio'}`, `${t.tipo} +${String(t.pct.toFixed(2)).replace('.', ',')}% · ${t.comBonus}/${t.especies}`));
+    c2.append(g);
+    if (b.perto.length) {
+      c2.append(el('div', 'ext-sec', 'Degraus mais perto (nas hunts que você já libera)'));
+      const l = el('div', 'rz-fila');
+      for (const x of b.perto) {
+        const it = el('div', 'rz-item');
+        it.append(el('b', null, x.nome), el('span', 'sub', `${x.tipos.join('/')} · ${fmt(x.abates)}/${fmt(x.alvo)} abates · faltam ${fmt(x.falta)} · +${String(x.ganho.toFixed(2)).replace('.', ',')}% · caça: ${x.hunt.nome} (Nv ${fmt(x.hunt.nivel)})`));
+        l.append(it);
+      }
+      c2.append(l);
+    }
+    c2.append(el('span', 'sub', 'Cada espécie dá dano contra a tipagem dela: +0,05% com 25 mil abates, +0,15% com 150 mil e +0,5% com 500 mil (vale o maior). As espécies somam, e pokémon de duas tipagens conta nas duas. Vale no PvE das hunts do Mapa.'));
+  }
+  box.append(c2);
 }

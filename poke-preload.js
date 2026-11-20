@@ -62,6 +62,13 @@ contextBridge.executeInMainWorld({
       if (p.balls && typeof p.balls === 'object') jogo.eu.balls = { ...p.balls };
       // A COLEÇÃO do jogo são os pokémon travados (automation.pokemonTravado); fora da equipe e da coleção = Depot.
       if (p.automation && Array.isArray(p.automation.pokemonTravado)) jogo.eu.travados = p.automation.pokemonTravado.map(Number);
+      // PREY (jogo 1.457, 20/11/2026): as cartelas do dia (os 9 pokémon, o escolhido, o bônus e as estrelas).
+      if (p.automation && typeof p.automation === 'object') {
+        if ('prey' in p.automation) jogo.eu.prey = p.automation.prey || null;
+        if ('preyCartela2' in p.automation) jogo.eu.preyCartela2 = Number(p.automation.preyCartela2) || 0;
+      }
+      // BESTIÁRIO: os abates (k) de cada espécie vêm da Pokédex; o jogo pode mandar só o pedaço que mudou.
+      if (p.pokedex && typeof p.pokedex === 'object') jogo.eu.pokedex = { ...(cheio || cheioForcado ? {} : jogo.eu.pokedex || {}), ...p.pokedex };
       if ('nick' in p || 'xp' in p || 'level' in p) jogo.at = Date.now();
       if (Array.isArray(pokemons)) jogo.pks = new Map(pokemons.map((k) => [k.id, slimPk(k)]));
       for (const k of pkMud || []) jogo.pks.set(k.id, slimPk(k));
@@ -484,6 +491,87 @@ contextBridge.executeInMainWorld({
     const NOME_BUFF = { vip: 'VIP', boostXp: 'XP Boost (só treinador)', boostPokexp: 'XP Boost Pokémon', guildBoost: 'Boost da Guild', twitch: 'Bônus Twitch', kick: 'Bônus Kick', atrasados: 'Boost dos Atrasados', guild: 'Guild no ranking', evento: 'Evento', raid: 'Raid Gigantamax', sacrificio: 'Sacrifício', outros: 'Outro bônus' };
     // Só dá para renovar o que a pessoa compra ou resgata de novo. Evento, Raid, ranking da guild e Atrasados não.
     const RENOVAVEL = { vip: 1, boostXp: 1, boostPokexp: 1, guildBoost: 1, twitch: 1, kick: 1, sacrificio: 1 };
+    // ---- 🎯 PREY (jogo 1.457, 20/11/2026): qual dos 9 escolher, contra o pokémon que você farma ----
+    // Bônus contra o escolhido, nas hunts do Mapa: Dano +10–50%, Defensivo −10–50%, Capture Boost +2–10% e Spawn +1–5 dele
+    // em cada onda. A conta: para Dano e Spawn, vale o pokémon da hunt que rende mais XP para você (o ranking da Melhor
+    // hunt); para Captura, o que você nunca capturou; para Defensivo, o da hunt boa com mais risco de poção.
+    async function pvePrey() {
+      const { map } = await catalogoNota();
+      let mp = null; try { mp = await import('/shared/prey.mjs'); } catch {}
+      const rk = await huntRank({ todas: true }).catch(() => null);
+      const prey = jogo.eu.prey && Array.isArray(jogo.eu.prey.cartelas) ? jogo.eu.prey : null;
+      const liberadas = Number(jogo.eu.preyCartela2) > 0 ? 2 : 1;
+      const L = Number(jogo.eu.level) || 0;
+      const porSlug = new Map(((rk && rk.todas) || []).map((h) => [h.slug, h]));
+      const risco = new Map(((rk && rk.top) || []).map((h) => [h.slug, Number(h.riscoPct) || 0]));
+      const melhorXp = rk && rk.top && rk.top[0] ? Number(rk.top[0].xpH) || 0 : 0;
+      const valor = (b, e) => (mp && mp.valorDoPrey ? mp.valorDoPrey(b, e) : ({ dano: [10, 20, 30, 40, 50], defesa: [10, 20, 30, 40, 50], captura: [2, 4, 6, 8, 10], spawn: [1, 2, 3, 4, 5] }[b] || [])[e - 1] || 0);
+      const custo = (n) => (mp && mp.custoDaRoletada ? mp.custoDaRoletada(n) : 1e6 * 2 ** (Number(n) || 0));
+      const dex = jogo.eu.pokedex || {};
+      const capturado = (pid) => { const d = dex[String(pid)]; return !!(d && Number(d.c) > 0); };
+      const huntsDe = (pid) => (jogo.hunts || []).filter((h) => Array.isArray(h.especies) && L >= (Number(h.nivel) || 0) && String(h.area || '').toLowerCase() !== 'outland' && h.especies.some((e) => Number(e.pokeId) === Number(pid)))
+        .map((h) => { const r = porSlug.get(h.slug); return { slug: h.slug, nome: h.nome, nivel: Number(h.nivel) || 0, xpH: r ? Number(r.xpH) || 0 : 0, kph: r ? Number(r.kph) || 0 : 0, risco: risco.get(h.slug) || 0, especies: h.especies.length }; })
+        .sort((a, b) => b.xpH - a.xpH);
+      const cartelas = [];
+      for (let i = 0; i < liberadas; i++) {
+        const c = prey && prey.cartelas[i];
+        if (!c || !Array.isArray(c.lista) || !c.lista.length) { cartelas.push({ cartela: i, vazia: true }); continue; }
+        const bonus = c.bonus || null, est = Number(c.est) || 0, v = valor(bonus, est);
+        const opcoes = c.lista.map((pid) => {
+          const hs = huntsDe(pid); const h = hs[0] || null;
+          const pct = h && melhorXp ? h.xpH / melhorXp : 0;
+          let nota = 0, porque = '';
+          if (bonus === 'spawn' || bonus === 'dano') { nota = pct; porque = h ? `${h.nome} (Nv ${h.nivel}) rende ${Math.round(pct * 100)}% da sua melhor hunt` : 'não aparece numa hunt que você já libera'; }
+          else if (bonus === 'captura') { nota = h ? (capturado(pid) ? 0 : 1) + pct * 0.2 : 0; porque = !h ? 'não aparece numa hunt que você já libera' : capturado(pid) ? 'você já capturou' : `você nunca capturou: caça em ${h.nome} (Nv ${h.nivel})`; }
+          else if (bonus === 'defesa') { nota = pct * (1 + (h ? h.risco / 100 : 0)); porque = h ? `${h.nome}: risco de poção ${h.risco}%` : 'não aparece numa hunt que você já libera'; }
+          // Spawn: +N dele em cada onda. Numa hunt onde o tempo é a caminhada (o normal), N a mais por onda ≈ N/bando a mais de abates.
+          const ganho = bonus === 'spawn' && h ? Math.min(100, Math.round((v / Math.max(3, h.especies > 3 ? 5 : 4)) * 100)) : bonus === 'dano' && h ? Math.round(v * 0.3) : null;
+          return { pokeId: pid, nome: (map.get(Number(pid)) || {}).name || `#${pid}`, hunt: h ? { nome: h.nome, nivel: h.nivel, xpH: h.xpH } : null, pct: Math.round(pct * 100), nota, porque, ganho, capturado: capturado(pid) };
+        });
+        const ord = opcoes.slice().sort((a, b) => b.nota - a.nota);
+        const rec = ord[0] && ord[0].nota > 0 ? ord[0] : null;
+        // Roletar de novo? Só quando o bônus/estrela é fraco e o preço é pequeno perto das suas coins.
+        const gold = Number(jogo.eu.gold) || 0, n = Array.isArray(c.n) ? c.n : [0, 0, 0];
+        const dicas = [];
+        if (bonus && est <= 2 && gold > custo(n[2]) * 50) dicas.push(`⭐ Estrelas ${est}/5: roletar as estrelas custa ${custo(n[2]).toLocaleString('pt-BR')} coins (dobra a cada vez). Vale tentar 1 vez.`);
+        if (bonus === 'defesa' || (bonus === 'captura' && opcoes.every((o) => o.capturado))) dicas.push(`🎲 ${bonus === 'defesa' ? 'Defensivo quase não muda o XP' : 'Capture Boost em quem você já tem rende pouco'}: roletar o bônus custa ${custo(n[1]).toLocaleString('pt-BR')} coins (Spawn e Dano são os que mais aumentam o XP).`);
+        if (rec && !rec.hunt && (bonus === 'spawn' || bonus === 'dano')) dicas.push('🗺️ Nenhum dos 9 está numa hunt boa para você: roletar a lista dos 9 pode trazer o da sua hunt.');
+        cartelas.push({ cartela: i, bonus, est, valor: v, escolhido: c.pk != null ? Number(c.pk) : null, escolhidoNome: c.pk != null ? ((map.get(Number(c.pk)) || {}).name || `#${c.pk}`) : null, opcoes: ord, recomendado: rec, dicas, custos: n.map(custo) });
+      }
+      return { pronto: true, temPrey: !!prey, liberadas, melhor: rk && rk.top && rk.top[0] ? { nome: rk.top[0].nome, xpH: rk.top[0].xpH } : null, cartelas };
+    }
+    // ---- 📖 BESTIÁRIO: dano extra contra cada tipagem pelos seus abates (25 mil, 150 mil e 500 mil por espécie) ----
+    async function pveBestiario() {
+      const { map } = await catalogoNota();
+      let mb = null; try { mb = await import('/shared/bestiario.mjs'); } catch {}
+      if (!mb || !jogo.hunts) return { pronto: false };
+      const especiePorId = (id) => map.get(Number(id)) || null;
+      const lista = mb.especiesDoBestiario(jogo.hunts, especiePorId);
+      const dex = jogo.eu.pokedex || {};
+      const kDe = (chave) => Number((dex[String(chave)] || {}).k) || 0;
+      const bp = mb.bonusPorTipo(lista, kDe);
+      const L = Number(jogo.eu.level) || 0;
+      const tipos = Object.entries(bp).map(([tipo, v]) => {
+        const es = lista.filter((e) => e.tipos.includes(tipo));
+        return { tipo, bp: v, pct: v / 100, especies: es.length, comBonus: es.filter((e) => mb.bpDaEspecie(kDe(e.chave)) > 0).length };
+      }).sort((a, b) => b.bp - a.bp);
+      // Os degraus mais perto (hunts que você já libera): quantos abates faltam e quanto rende.
+      const huntDe = (pid) => (jogo.hunts || []).filter((h) => Array.isArray(h.especies) && L >= (Number(h.nivel) || 0) && String(h.area || '').toLowerCase() !== 'outland' && h.especies.some((e) => Number(e.pokeId) === Number(pid))).sort((a, b) => (Number(b.nivel) || 0) - (Number(a.nivel) || 0))[0] || null;
+      const perto = [];
+      for (const e of lista) {
+        if (e.nivel > L) continue;
+        const k = kDe(e.chave), prox = mb.proximoDegrauDoBestiario(k);
+        if (!prox) continue;
+        const h = huntDe(e.pokeId);
+        if (!h) continue;
+        perto.push({ nome: (map.get(Number(e.pokeId)) || {}).name || `#${e.pokeId}`, tipos: e.tipos, abates: k, alvo: prox.abates, falta: prox.abates - k, ganho: (prox.bp - mb.bpDaEspecie(k)) / 100, hunt: { nome: h.nome, nivel: Number(h.nivel) || 0 } });
+      }
+      perto.sort((a, b) => a.falta - b.falta);
+      // Na hunt que você farma agora: quanto o Bestiário já dá contra os tipos dela.
+      const atual = (jogo.hunts || []).find((h) => h.slug === (jogo.eu.huntSlug || (jogo.eu.hunt && jogo.eu.hunt.slug)));
+      const tiposAqui = atual && Array.isArray(atual.especies) ? [...new Set(atual.especies.flatMap((e) => { const s = map.get(Number(e.pokeId)); return s ? [s.type1, s.type2].filter((t) => t && t !== 'NONE').map((t) => String(t).toUpperCase()) : []; }))] : [];
+      return { pronto: true, temDex: Object.keys(dex).length > 0, tipos, perto: perto.slice(0, 15), aqui: atual ? { nome: atual.nome, tipos: tiposAqui.map((t) => ({ tipo: t, pct: (bp[t] || 0) / 100 })) } : null };
+    }
     async function pveCasas(arg) {
       const o = arg && typeof arg === 'object' ? arg : {};
       const lista = jogo.eu.casa && Array.isArray(jogo.eu.casa.lista) ? jogo.eu.casa.lista : null;
@@ -1888,7 +1976,7 @@ contextBridge.executeInMainWorld({
         canais() { return JSON.parse(JSON.stringify(canais)); },
         // Aba PvE do app (só leitura).
         pve(o, arg) {
-          const f = o === 'nivel' ? async () => ({ L: Number(jogo.eu.level) || 0 }) : o === 'proximas' ? pveProximas : o === 'evolucoes' ? () => pveEvolucoes(arg) : o === 'meus' ? pveMeus : o === 'buscar' ? () => pveBuscar(arg) : o === 'casas' ? () => pveCasas(arg) : o === 'shiny' ? () => pveShiny(arg) : o === 'boss' ? () => pveBoss(arg) : o === 'outland' ? () => pveOutland(arg) : o === 'mercado' ? () => (arg && typeof arg === 'object' ? pveMercado(arg.moeda, arg.dias, arg.valor) : pveMercado(arg)) : null;
+          const f = o === 'nivel' ? async () => ({ L: Number(jogo.eu.level) || 0 }) : o === 'proximas' ? pveProximas : o === 'evolucoes' ? () => pveEvolucoes(arg) : o === 'meus' ? pveMeus : o === 'buscar' ? () => pveBuscar(arg) : o === 'casas' ? () => pveCasas(arg) : o === 'shiny' ? () => pveShiny(arg) : o === 'boss' ? () => pveBoss(arg) : o === 'outland' ? () => pveOutland(arg) : o === 'prey' ? pvePrey : o === 'bestiario' ? pveBestiario : o === 'mercado' ? () => (arg && typeof arg === 'object' ? pveMercado(arg.moeda, arg.dias, arg.valor) : pveMercado(arg)) : null;
           return f ? f().catch((e) => ({ erro: String(e && e.message || e) })) : null;
         },
         // Comércio: nota, stats e espécie da ficha de um anúncio (mesma conta da ficha do jogo).

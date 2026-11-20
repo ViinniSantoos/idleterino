@@ -1135,8 +1135,50 @@ function porQueEssaPosicao(casas, team, sel, media, papeis, casasPapel) {
 let pvpTracker = null, pvpTrackerPedido = false;
 let pvpPosModo = (() => { try { return localStorage.getItem('pvpPosModo') || 'top'; } catch { return 'top'; } })();
 const pvpOtimoCache = new Map();
+// 🏟️ REGRAS DE TORNEIO (Torneio da Comunidade do jogo 1.457, 20/11/2026): o streamer escolhe as regras (shiny, Mega,
+// Outland liberados/proibidos/exigidos, tipagens, potência e nível). Com elas ligadas, o Planejador e o "⭐ Melhor
+// time do meta" só usam quem passa nelas.
+const PVP_REGRAS_PADRAO = { on: false, shiny: 'livre', mega: 'livre', outland: 'livre', nivelMax: 0, potMin: 0, potMax: 0, tipos: '' };
+let pvpRegras = (() => { try { return { ...PVP_REGRAS_PADRAO, ...(JSON.parse(localStorage.getItem('pvpRegras') || 'null') || {}) }; } catch { return { ...PVP_REGRAS_PADRAO }; } })();
+const pvpRegrasGravar = () => { try { localStorage.setItem('pvpRegras', JSON.stringify(pvpRegras)); } catch {} };
+function pvpPassaRegras(m) {
+  const r = pvpRegras;
+  if (!r.on) return true;
+  const pk = m.pk || {};
+  const tem = { shiny: !!pk.shiny, mega: /^Mega /i.test(m.nome || ''), outland: Number(m.speciesId) >= 2001 && Number(m.speciesId) < 3000 };
+  for (const k of ['shiny', 'mega', 'outland']) { if (r[k] === 'proibido' && tem[k]) return false; if (r[k] === 'exigido' && !tem[k]) return false; }
+  if (r.nivelMax > 0 && Number(m.level) > r.nivelMax) return false;
+  const pot = Number(pk.potencia) || 1;
+  if (r.potMin > 0 && pot < r.potMin) return false;
+  if (r.potMax > 0 && pot > r.potMax) return false;
+  const tipos = String(r.tipos || '').split(/[,\s]+/).map((x) => x.trim().toUpperCase()).filter(Boolean);
+  if (tipos.length && !(m.tipos || []).some((t) => tipos.includes(String(t).toUpperCase()))) return false;
+  return true;
+}
+function pvpRegrasCard() {
+  const r = pvpRegras;
+  const c = el('details', 'card'); c.open = !!r.on;
+  const sm = el('summary'); sm.append(el('b', null, `🏟️ Regras de torneio${r.on ? ' · LIGADAS' : ''}`), el('span', 'sub', ' — monte o time para um Torneio da Comunidade (o jogo mostra as regras no card do torneio)'));
+  c.append(sm);
+  const muda = (k, v) => { pvpRegras = { ...pvpRegras, [k]: v }; pvpRegrasGravar(); pvpPlan = null; renderPvp(true); };
+  const g = el('div', 'actions'); g.style.cssText = 'flex-wrap:wrap;justify-content:flex-start;gap:10px;margin:8px 0';
+  const lig = el('label', 'tr-chk'); const cb = el('input'); cb.type = 'checkbox'; cb.checked = !!r.on; cb.onchange = () => muda('on', cb.checked); lig.append(cb, el('span', null, 'Usar as regras'));
+  g.append(lig);
+  for (const [k, rot] of [['shiny', 'Shiny'], ['mega', 'Mega'], ['outland', 'Outland']]) {
+    const s = el('select'); for (const [v, l] of [['livre', `${rot}: liberado`], ['proibido', `${rot}: proibido`], ['exigido', `${rot}: só ${rot.toLowerCase()}`]]) { const o = el('option', null, l); o.value = v; s.append(o); }
+    s.value = r[k]; s.onchange = () => muda(k, s.value); g.append(s);
+  }
+  const num = (k, ph, w) => { const i = el('input'); i.type = 'number'; i.min = '0'; i.placeholder = ph; i.style.width = w; if (r[k]) i.value = r[k]; i.onchange = () => muda(k, Number(i.value) || 0); return i; };
+  g.append(num('nivelMax', 'Nível máx.', '90px'), num('potMin', 'P mín.', '70px'), num('potMax', 'P máx.', '70px'));
+  const ti = el('input'); ti.type = 'text'; ti.placeholder = 'Tipagens (ex.: FOGO, ÁGUA) — vazio = todas'; ti.value = r.tipos || ''; ti.style.minWidth = '260px'; ti.onchange = () => muda('tipos', ti.value);
+  g.append(ti);
+  c.append(g, el('span', 'sub', 'Lendário, nota, qualidade e IV o jogo confere na hora de escolher a equipe (e diz o motivo de cada recusa).'));
+  return c;
+}
 function renderPvpPlan(root, c) {
-  const { meta, entries, tab, refLevel, mine, mineAll, arqs, live } = c;
+  const { meta, entries, tab, refLevel, mineAll, arqs, live } = c;
+  root.append(pvpRegrasCard());
+  const mine = pvpRegras.on ? c.mine.filter(pvpPassaRegras) : c.mine;
   const mt = live && live.meuTime;
   const doJogo = mt && Array.isArray(mt.ids) ? mt.ids.filter((id) => mine.some((m) => m.id === id)).slice(0, 5) : [];
   // Começou pela sugestão porque o time do jogo ainda não tinha chegado? Quando ele chegar (e você não mexeu), troca.
@@ -1208,7 +1250,7 @@ function renderPvpPlan(root, c) {
   q.oninput = () => { pvpBusca = q.value; const pos = q.selectionStart; renderPvp(true).then(() => { const n = $('#page-pvp .pp-left input'); if (n) { n.focus(); n.setSelectionRange(pos, pos); } }); };
   left.append(q);
   const list = el('div', 'pp-list');
-  for (const m of mineAll.filter((x) => !pvpPlan.includes(x.id) && (!pvpBusca || x.nome.toLowerCase().includes(pvpBusca.toLowerCase()))).slice(0, 80)) {
+  for (const m of mineAll.filter((x) => !pvpPlan.includes(x.id) && pvpPassaRegras(x) && (!pvpBusca || x.nome.toLowerCase().includes(pvpBusca.toLowerCase()))).slice(0, 80)) {
     const b = el('button', `pp-item${m.usavel ? '' : ' off'}`);
     b.append(el('b', null, m.nome), el('span', null, `Nv ${fmt(m.level)} · ${alcIcon(m.alcance)}${m.el ? ` · Z ${TIPO_PT[String(m.el).toUpperCase()] || m.el}` : ''}`));
     b.onclick = () => { if (pvpPlan.length >= 5) return toast('O time tem no máximo 5: clique num do "Seu time" para tirar antes.'); pvpPlanSugestao = false; pvpPlan.push(m.id); renderPvp(true); };
