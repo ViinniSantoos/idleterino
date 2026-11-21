@@ -1039,14 +1039,25 @@ function renderHomePoke() {
   const alerts = el('div', 'home-alerts');
   const ev = accs.map((a) => a.info && a.info.evento).find(Boolean);
   if (ev) { const c = el('div', 'alert ev'); c.append(el('b', null, ev.texto || 'Evento'), el('span', 'at', ev.tempo || '')); alerts.append(c); }
-  for (const a of accs) {
+  // Voto no IdleHub.io (o jogo trocou o TopIdle em 21/11/2026): o tempo vem do próprio jogo (Vote & Ganhe); sem ele, 24h
+  // desde a última vez que o app abriu o link. Voto antigo do TopIdle não conta mais.
+  const votoDe = (a) => {
+    const iv = a.info && a.info.voto;
+    if (iv && iv.ativo && iv.url) return { left: iv.at + iv.esperaMs - now, jogo: true };
     const v = a.vote;
-    if (!v) continue;
-    const left = v.at + s.voteMs - now;
+    if (v && v.url && /idlehub\.io/i.test(v.url)) return { left: v.at + s.voteMs - now, jogo: false };
+    return null;
+  };
+  let algumVoto = false;
+  for (const a of accs) {
+    const vv = votoDe(a);
+    if (!vv) continue;
+    algumVoto = true;
+    const left = vv.left;
     const c = el('div', `alert vote${left <= 0 ? ' ready' : ''}`);
-    c.append(el('span', 'ai', left <= 0 ? '✓' : '⏱'), el('b', null, nickOf(a)), el('span', 'at', left <= 0 ? 'pode votar no TopIdle' : `vota de novo em ${clock(left)}`));
+    c.append(el('span', 'ai', left <= 0 ? '✓' : '⏱'), el('b', null, nickOf(a)), el('span', 'at', left <= 0 ? 'pode votar no IdleHub' : `vota de novo em ${clock(left)}`));
     if (left <= 0) c.append(button('Votar', 'mini', async () => { S.poke = await call('poke:vote', a.id); renderHome(); }));
-    c.title = 'Contado desde a última vez que o voto foi aberto pelo app. O voto libera a cada 25h.';
+    c.title = vv.jogo ? 'Tempo que o próprio jogo informa (Vote & Ganhe). 1 diamante a cada 2 votos; 1 voto por dia por nick.' : 'Contado desde a última vez que o voto foi aberto pelo app (1 voto por dia).';
     alerts.append(c);
   }
   for (const a of accs) for (const [k, label] of [['twitch', 'Twitch'], ['kick', 'Kick']]) {
@@ -1055,8 +1066,8 @@ function renderHomePoke() {
       const c = el('div', `alert bonus ${k}`); c.append(el('span', 'ai', '⏳'), el('b', null, nickOf(a)), el('span', 'at', `Bônus ${label} acaba em ${clock(b.end - now)}`)); alerts.append(c);
     }
   }
-  if (!accs.some((a) => a.vote)) {
-    const c = el('div', 'alert hint'); c.append(el('span', 'ai', '⏱'), el('span', 'at', 'Vote no TopIdle pelo botão do jogo: o lembrete de 25h de cada conta aparece aqui.')); alerts.append(c);
+  if (!algumVoto) {
+    const c = el('div', 'alert hint'); c.append(el('span', 'ai', '⏱'), el('span', 'at', 'Vote no IdleHub pelo botão "Vote & Ganhe" do jogo: o lembrete de cada conta aparece aqui.')); alerts.append(c);
   }
 
   // ---- Farm ----

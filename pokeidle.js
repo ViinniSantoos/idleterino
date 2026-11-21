@@ -74,6 +74,7 @@ const READ_SCRIPT = `(() => {
     // O placar da sessão que o próprio jogo grava (o mesmo do painel do modo Economia).
     sess: (() => { try { const n = nickV && nickV !== '—' ? nickV : null; const o = n && JSON.parse(localStorage.getItem('sessao-hunt:' + n.toLowerCase()) || 'null');
       return o && o.ms > 0 ? { ms: o.ms, xpTreinador: +o.xpTreinador || 0, xpPokemon: +o.xpPokemon || 0, gold: +o.gold || 0, abates: +o.abates || 0, capturas: +o.capturas || 0, shVistos: +o.shiniesVistos || 0, shCapt: +o.shinies || 0, lucroH: txt('#sessao-lucro-h') } : null; } catch { return null; } })(),
+    voto: (() => { try { return window.__idleterinoMercado && window.__idleterinoMercado.voto ? window.__idleterinoMercado.voto() : null; } catch { return null; } })(),
     evento: (() => { const f = q('#evento-faixa'); return f && !f.classList.contains('hidden') ? { texto: txt('#evento-texto'), tempo: txt('#evento-tempo') } : null; })(),
     bonusXp: (() => { try { return window.__idleterinoMercado ? window.__idleterinoMercado.bonusXp() : null; } catch { return null; } })(),
     hunts: (() => { try { return window.__idleterinoMercado ? window.__idleterinoMercado.hunts() : null; } catch { return null; } })(),
@@ -594,12 +595,13 @@ module.exports = function createPokeIdle(ctx) {
     setTimeout(readAll, 3000);
   }
 
-  // Voto no TopIdle: o jogo abre o link de votar no navegador (main.js). Guardamos quando cada conta
-  // abriu o voto, para o Início avisar quando liberar de novo (25h).
-  const VOTE_MS = 25 * 60 * 60 * 1000;
+  // Voto no IdleHub.io (era o TopIdle até 21/11/2026): o jogo abre o link de votar no navegador (main.js). Guardamos quando
+  // cada conta abriu o voto; o tempo de verdade vem do próprio jogo (info.voto, rota /idlehub/me). Sem ele, conta 24h.
+  const VOTE_MS = 24 * 60 * 60 * 1000;
+  const ehLinkDeVoto = (h) => /(^|\.)idlehub\.io$/i.test(h);
   function noteOutside(partition, url) {
     let u; try { u = new URL(url); } catch { return; }
-    if (!/(^|\.)topidle\.com$/.test(u.hostname)) return;
+    if (!ehLinkDeVoto(u.hostname)) return;
     const a = config.accounts.find((x) => partitionOf(x.id) === partition);
     if (!a) return;
     config.votes = { ...(config.votes || {}), [a.id]: { at: Date.now(), url: u.href } };
@@ -708,8 +710,15 @@ module.exports = function createPokeIdle(ctx) {
   const toRect = (r) => ({ x: Math.round(r.x), y: Math.round(r.y), width: Math.max(1, Math.round(r.width)), height: Math.max(1, Math.round(r.height)) });
   ipcMain.handle('poke:market:refresh', () => { if (Date.now() - lastMarket > 60 * 1000) askMarket(); return snapshot(); });
   ipcMain.handle('poke:vote', (_e, id) => {
+    // O link que o jogo deu agora (IdleHub, com o nick da conta); senão o último aberto, se for do IdleHub (o do TopIdle antigo não vale mais).
+    const iv = (info.get(id) || {}).voto;
     const v = (config.votes || {})[id];
-    if (v && ctx.openOutside) { ctx.openOutside(v.url); config.votes[id] = { ...v, at: Date.now() }; saveConfig(); }
+    let url = iv && iv.url ? iv.url : v && v.url ? v.url : null;
+    try { if (!url || new URL(url).protocol !== 'https:' || !ehLinkDeVoto(new URL(url).hostname)) url = null; } catch { url = null; }
+    if (url && ctx.openOutside) { ctx.openOutside(url); config.votes = { ...(config.votes || {}), [id]: { at: Date.now(), url } }; saveConfig(); }
+    // Depois de votar, o jogo atualiza o tempo: pergunta de novo em seguida.
+    const vw = views.get(id);
+    if (vw) setTimeout(() => { try { vw.webContents.executeJavaScript('window.__idleterinoMercado && window.__idleterinoMercado.voto(true)').catch(() => {}); } catch {} }, 60000);
     return snapshot();
   });
   ipcMain.handle('poke:optimize', (_e, id) => { reopen(id, 'manual'); return snapshot(); });

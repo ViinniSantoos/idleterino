@@ -61,10 +61,10 @@ window.HELP = [
     'Clique no nome em cima de uma coluna para controlar aquela ALT pela barra (modo, zoom, congelar…).',
     'Dica: o modo ULTRA e o zoom menor (− na barra) deixam cada coluna mais leve e com mais coisa à vista. "▢ Ver ALTs uma por vez" volta ao normal.',
   ]],
-  ['PokeIdle', 'Cliquei em "Votar no TopIdle" (ou num link de fora). Onde abre?', [
-    'Links de outros sites que o jogo abre (TopIdle, Discord, ChatGPT…) abrem no seu navegador padrão (Chrome, Edge…), fora do app.',
-    'No TopIdle, clique em Votar agora e espere a conferência. O nome do personagem já vai no link, então o diamante cai na conta certa.',
-    'O voto libera de novo depois de 25h.',
+  ['PokeIdle', 'Cliquei em "Votar no IdleHub.io" (ou num link de fora). Onde abre?', [
+    'Links de outros sites que o jogo abre (IdleHub, Discord, ChatGPT…) abrem no seu navegador padrão (Chrome, Edge…), fora do app.',
+    'No IdleHub.io, entre com uma conta Google (só para provar que é uma pessoa: não precisa ser a do jogo), confira o nick e confirme o voto. O nick já vai preenchido, então o diamante cai na conta certa: 1 diamante a cada 2 votos.',
+    'Vale 1 voto por dia por nick. O Início mostra quanto falta, com o tempo que o próprio jogo informa.',
   ]],
   ['PokeIdle', 'O mercado/RMT abre apertado e a barra de busca some. Como resolver?', [
     'O jogo muda de layout conforme o espaço. Com mais espaço ele mostra a barra de busca e mais coisas.',
@@ -115,7 +115,7 @@ window.HELP = [
     'Versão portátil e .deb (Linux): a faixa avisa e o botão "Baixar no site" abre a página de download.',
   ]],
   ['Início', 'O que aparece no Início?', [
-    'Lembretes: evento do jogo, voto no TopIdle liberado (a cada 25h, por conta) e bônus da Twitch/Kick acabando.',
+    'Lembretes: evento do jogo, voto no IdleHub liberado (1 por dia, por conta) e bônus da Twitch/Kick acabando.',
     'Farm: a conta principal num cartão e as ALTs somadas, com XP, ouro e abates por hora (o mesmo placar "Estatísticas da sessão" do jogo).',
     'Mercado: seus anúncios e suas vendas de todas as contas, e as maiores vendas do servidor (Tabela de preços), em coins ou gemas. Atualiza sozinho a cada 10 min.',
     'O app só consulta o mercado, pela conexão que a conta já tem aberta. Nunca compra, vende ou edita nada.',

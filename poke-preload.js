@@ -1960,6 +1960,25 @@ contextBridge.executeInMainWorld({
     }, 2000);
 
     const PEDIDOS = { 'market.meus': 1, 'market.historico': 1, 'market.historicoGlobal': 1 };
+    // 🗳️ VOTO NO IDLEHUB (21/11/2026: o jogo trocou o TopIdle pelo IdleHub.io). O Início pergunta ao próprio jogo, pela mesma
+    // rota que a janela "Vote & Ganhe" usa (/idlehub/me, só leitura), quanto falta para o próximo voto e qual é o link.
+    // No máximo 1 pergunta a cada 10 min (e logo depois de abrir o link de votar).
+    const voto = { d: null, em: 0, pedindo: false };
+    async function lerVoto() {
+      if (voto.pedindo) return;
+      let tok = null; try { tok = (JSON.parse(localStorage.getItem('sessao') || 'null') || {}).token; } catch {}
+      if (!tok) return;
+      voto.pedindo = true;
+      try {
+        const r = await fetch('/idlehub/me', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: tok }) });
+        const d = r.ok ? await r.json() : null;
+        if (d && typeof d === 'object') {
+          let url = null; try { const u = new URL(String(d.url || '')); if (u.protocol === 'https:' && /(^|\.)idlehub\.io$/i.test(u.hostname)) url = u.href; } catch {}
+          voto.d = { ativo: !!d.ativo, esperaMs: Math.max(0, Number(d.esperaMs) || 0), url, at: Date.now() };
+        }
+      } catch {} finally { voto.em = Date.now(); voto.pedindo = false; }
+    }
+    window.addEventListener('focus', () => { if (Date.now() - voto.em > 60000) lerVoto(); });
     Object.defineProperty(window, '__idleterinoMercado', {
       value: Object.freeze({
         pedir(t, pagina) {
@@ -1970,6 +1989,7 @@ contextBridge.executeInMainWorld({
           return true;
         },
         ler() { return JSON.parse(JSON.stringify(keep)); },
+        voto(agora) { if (agora ? Date.now() - voto.em > 15000 : Date.now() - voto.em > 10 * 60000) lerVoto(); return voto.d ? { ...voto.d } : null; },
         // Radar de atualizações do jogo (versão, texto do "!" e os números que o app usa).
         radar() { return radar().catch(() => null); },
         tierDados(ids, meta) { return tierDados(ids, meta).then((r) => JSON.parse(JSON.stringify(r))).catch((e) => ({ erro: String(e && e.message || e) })); },
