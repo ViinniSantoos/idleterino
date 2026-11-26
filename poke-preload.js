@@ -399,6 +399,60 @@ contextBridge.executeInMainWorld({
       }
       return { ...c, ram: pveRam };
     }
+    // ---- 📊 SCORE FIEL AO JOGO (25/11/2026) ----
+    // Os mesmos números da ficha do jogo (ginasios.mjs): PvP = poderNoGinasio, PvE = poderNoNivel — e a comparação contra
+    // quem importa de verdade, não contra "todas as espécies":
+    //  · PvP: o pokémon (com o IV, a qualidade, a potência, o refino, o TM e o shiny DELE) na MELHOR forma que alcança
+    //    (evolução ou Mega), no level do meio do top 50 do PvP, contra o poder no PvP de CADA pokémon que o top 50 usa de
+    //    verdade (no level deles) → "mais forte que X% dos pokémon do top 50".
+    //  · PvE: o poder no PvE na melhor forma, no level do SEU pokémon em campo, ÷ o poder do seu pokémon em campo →
+    //    "farma N× o seu" (no mesmo level: a diferença é só espécie, IV, qualidade, potência e shiny).
+    const formasDoScore = (esp, map, ram) => {
+      const formas = [esp]; const vistos = new Set([esp.pokeId]);
+      const anda = (e2, prof) => { if (prof > 4) return; let ds = []; try { ds = ram.destinosDeEvolucao(e2, (id) => map.get(id)); } catch {} for (const d of ds || []) { const s = d && d.especie; if (!s || vistos.has(s.pokeId)) continue; vistos.add(s.pokeId); formas.push(s); anda(s, prof + 1); } };
+      anda(esp, 0);
+      for (const c of formas.slice()) for (const m of map.values()) if (m && m.name && !vistos.has(m.pokeId) && (m.name === `Mega ${c.name}` || m.name.startsWith(`Mega ${c.name} `))) { vistos.add(m.pokeId); formas.push(m); }
+      return formas;
+    };
+    const pkDoScore = (f, speciesId, level) => ({ id: 1, speciesId, ivs: f.ivs, quality: Number(f.quality ?? f.qualidade) || 1, qualidade: Number(f.quality ?? f.qualidade) || 1, potencia: Number(f.potencia) || 1,
+      shiny: !!f.shiny, refino: f.refino || null, tmElemental: f.tmElemental || f.el || null, tmFisico: !!f.tmFisico, level });
+    let reguaPvp = { chave: null, valores: [], nivel: 0 };
+    async function scoreFicha(f, ctx) {
+      if (!f || f.speciesId == null || !f.ivs) return null;
+      const { map, gi, ram } = await catalogoPve();
+      const esp = map.get(Number(f.speciesId));
+      if (!esp) return null;
+      const meta = (ctx && Array.isArray(ctx.meta) ? ctx.meta : []).filter((k) => k && k.speciesId != null && k.ivs && Number(k.level) > 0);
+      const formas = formasDoScore(esp, map, ram);
+      const out = { pvp: null, pve: null };
+      // PvP contra o top 50 de verdade (a régua só é refeita quando a leitura do top 50 muda).
+      if (meta.length >= 10) {
+        const chave = `${meta.length}|${meta[0].speciesId}|${meta[meta.length - 1].speciesId}|${meta[0].level}`;
+        if (reguaPvp.chave !== chave) {
+          const valores = [];
+          for (const k of meta) { const e = map.get(Number(k.speciesId)); if (!e) continue; try { const v = Number(gi.poderNoGinasio(pkDoScore(k, e.pokeId, Number(k.level)), e)); if (v > 0) valores.push(v); } catch {} }
+          valores.sort((a, b) => a - b);
+          const lv = meta.map((k) => Number(k.level)).sort((a, b) => a - b);
+          reguaPvp = { chave, valores, nivel: lv[Math.floor(lv.length / 2)] };
+        }
+        let melhor = null;
+        for (const fo of formas) { try { const v = Number(gi.poderNoGinasio(pkDoScore(f, fo.pokeId, reguaPvp.nivel), fo)); if (v > 0 && (!melhor || v > melhor.v)) melhor = { v, forma: fo.name }; } catch {} }
+        if (melhor && reguaPvp.valores.length) {
+          const arr = reguaPvp.valores; let lo = 0, hi = arr.length; while (lo < hi) { const m = (lo + hi) >> 1; if (arr[m] < melhor.v) lo = m + 1; else hi = m; }
+          out.pvp = { pct: Math.round((lo / arr.length) * 100), forma: melhor.forma, nivel: reguaPvp.nivel, n: arr.length };
+        }
+      }
+      // PvE contra o seu pokémon em campo, no level dele.
+      const ref = ctx && ctx.ref;
+      const espRef = ref && map.get(Number(ref.speciesId));
+      if (ref && espRef && ref.ivs && Number(ref.level) > 0) {
+        let base = 0; try { base = Number(gi.poderNoNivel(pkDoScore(ref, espRef.pokeId, Number(ref.level)), espRef, Number(ref.level))); } catch {}
+        let melhor = null;
+        for (const fo of formas) { try { const v = Number(gi.poderNoNivel(pkDoScore(f, fo.pokeId, Number(ref.level)), fo, Number(ref.level))); if (v > 0 && (!melhor || v > melhor.v)) melhor = { v, forma: fo.name }; } catch {} }
+        if (melhor && base > 0) out.pve = { x: Math.round((melhor.v / base) * 100) / 100, forma: melhor.forma, ref: espRef.name, nivel: Number(ref.level) };
+      }
+      return out.pvp || out.pve ? out : null;
+    }
     const fxTipo = (atk, defs) => defs.reduce((m, d) => m * ((jogo.tabelaTipos && jogo.tabelaTipos[atk] && jogo.tabelaTipos[atk][d] != null) ? jogo.tabelaTipos[atk][d] : 1), 1);
     const naHuntX = (x) => { const a = jogo.amp || 1.5; return x > 1 ? 1 + (x - 1) * a : x < 1 ? x / a : 1; };
     const melhorX = (atks, defs) => Math.max(0, ...atks.map((t) => naHuntX(fxTipo(t, defs))));
@@ -2014,7 +2068,7 @@ contextBridge.executeInMainWorld({
           extras.instalados.add(nome);
           const I = {
             get sock() { return sock; }, get ultimaLista() { return ultimaLista; }, get itensResp() { return itensResp; }, enviarNosso: (txt) => enviarDoApp(txt),
-            jogo, keep, nossos, espera, catalogoNota, huntsDoHorizonte, nivelDepoisDe, xpHoraDaConta, coberturaHunts, tiposDe, fichaNota,
+            jogo, keep, nossos, espera, catalogoNota, huntsDoHorizonte, nivelDepoisDe, xpHoraDaConta, coberturaHunts, tiposDe, fichaNota, scoreFicha,
             get meuTimePvp() { return pvp.meuTime ? JSON.parse(JSON.stringify(pvp.meuTime)) : null; },
             filtro: (f) => extras.filtros.push(f), ouvir: (f) => extras.ouvintes.push(f), expor: (o) => Object.assign(extras.api, o),
           };

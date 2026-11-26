@@ -5,6 +5,9 @@ const fmt = (n) => Number(n || 0).toLocaleString('pt-BR');
 const clock = (ms) => { const m = Math.max(0, Math.ceil(ms / 60000)); return m >= 60 ? `${Math.floor(m / 60)}h${String(m % 60).padStart(2, '0')}` : `${m} min`; };
 const timeStr = (d) => new Date(d).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 const call = (ch, ...a) => window.idle.invoke(ch, ...a);
+// 🖥️ A tela desenhou de verdade (dois quadros de desenho): sem isso em 30 s, o app entende "tela preta" e reabre no
+// modo seguro de vídeo (25/11/2026).
+requestAnimationFrame(() => requestAnimationFrame(() => { call('app:pintou').catch(() => {}); }));
 const button = (text, cls, onclick) => { const b = el('button', cls, text); b.onclick = onclick; return b; };
 
 // O que muda de uma plataforma para a outra.
@@ -525,6 +528,19 @@ async function renderSettings() {
   box.append(rowOpt('Twitch', 'Lives, pontos, baú e chat da Twitch.', sw(a.platforms.twitch, (v) => setPlatform('twitch', v))));
   box.append(rowOpt('Kick', 'Lives, pontos e chat da Kick.', sw(a.platforms.kick, (v) => setPlatform('kick', v))));
   box.append(rowOpt(a.platform === 'linux' ? 'Iniciar com o sistema' : 'Iniciar com o Windows', 'Abre direto na bandeja, perto do relógio.', sw(a.openAtLogin, async (v) => { S.app = await call('app:autostart', v); renderSettings(); })));
+  // 🖥️ Aceleração de vídeo (25/11/2026: tela preta). O app desliga sozinho se a tela não desenhar; aqui dá para religar.
+  {
+    const vd = await call('app:video').catch(() => null);
+    if (my !== settingsPintura) return;
+    if (vd) {
+      const ctl = el('div', 'actions'); ctl.style.cssText = 'gap:8px;flex-wrap:wrap';
+      ctl.append(vd.seguro ? button('Religar a aceleração', null, () => call('app:video', { religar: true })) : button('Desligar a aceleração', null, () => call('app:video', { desligar: true })),
+        button('Abrir o registro', null, () => call('app:video', { log: true })));
+      box.append(rowOpt('Aceleração de vídeo', vd.seguro
+        ? `DESLIGADA (modo seguro)${vd.motivo ? `: ${vd.motivo}` : ''}. O app desenha pelo processador — um pouco mais pesado, mas não fica com a tela preta. Religar reabre o app.`
+        : 'Ligada. Se o app abrir com a tela preta, ele desliga sozinho e reabre. O registro guarda o que aconteceu (mande para o suporte).', ctl));
+    }
+  }
   box.append(rowOpt('Versão', `Idleterino ${a.version}`, button('Sair do app', null, () => call('app:quit'))));
   const cel = el('div', 'card');
   cel.append(el('h3', null, '📱 Idleterino no celular'), el('p', 'sub', 'Leve as suas contas do PokeIdle para o Idleterino Android com um QR Code: o celular abre já logado, sem senha.'), button('Levar contas para o celular', 'primary', () => abrirLevarCelular()));
