@@ -508,7 +508,7 @@ module.exports = function createPokeIdle(ctx) {
       for (const e of entries) usados[e.nome || e.speciesId] = (usados[e.nome || e.speciesId] || 0) + 1;
       const nomes = [...new Set([...candidatos.filter((x) => !x.lend).slice(0, 20).map((x) => x.nome), ...Object.entries(usados).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([n]) => n)])].filter((n) => typeof n === 'string');
       const precos = await v.webContents.executeJavaScript(`window.__idleterinoMercado.precos(${JSON.stringify(nomes)})`).catch(() => null);
-      pvpMeta = { at: Date.now(), linhas, perfis: d.perfis, info: d.info, tabelaTipos: d.tabelaTipos, arqs, porNick, ref, candidatos, precos: precos && !precos.erro ? precos : {} };
+      pvpMeta = { at: Date.now(), linhas, perfis: d.perfis, info: d.info, tabelaTipos: d.tabelaTipos, passivas: d.passivas || null, arqs, porNick, ref, candidatos, precos: precos && !precos.erro ? precos : {} };
       fs.writeFileSync(pvpPath(), JSON.stringify(pvpMeta));
       // tendência
       const hist = readJson(histPath(), []);
@@ -572,7 +572,7 @@ module.exports = function createPokeIdle(ctx) {
       if (pvpRunning && mv && !mv.webContents.isDestroyed()) prog = await mv.webContents.executeJavaScript('window.__idleterinoMercado.pvpEstado()').catch(() => null);
     }
     if (v && !v.webContents.isDestroyed()) await guardarPartidas(id, v).catch(() => {});
-    return { meta: pvpMeta, hist: readJson(histPath(), []), me: (readJson(mePath(), {})[id] || []), partidas: (readJson(partidasPath(), {}) || {})[id] || [], watch: config.pvpWatch || [], watchHist: config.pvpWatchHist || {}, running: pvpRunning, prog, accountId: id, live: live && !live.erro ? { meus: live.meus, info: live.info, euPvp: live.euPvp, nick: live.nick, nivel: live.nivel, tabelaTipos: live.tabelaTipos, meuTime: live.meuTime || null } : null };
+    return { meta: pvpMeta, hist: readJson(histPath(), []), me: (readJson(mePath(), {})[id] || []), partidas: (readJson(partidasPath(), {}) || {})[id] || [], watch: config.pvpWatch || [], watchHist: config.pvpWatchHist || {}, running: pvpRunning, prog, accountId: id, live: live && !live.erro ? { meus: live.meus, info: live.info, euPvp: live.euPvp, nick: live.nick, nivel: live.nivel, tabelaTipos: live.tabelaTipos, meuTime: live.meuTime || null, passivas: live.passivas || null } : null };
   }
 
   // Mercado no Início: as mesmas consultas dos botões do mercado do jogo, pela conexão da própria

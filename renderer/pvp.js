@@ -49,6 +49,80 @@ const pct = (x) => `${Math.round((x || 0) * 100)}%`;
 const shortName = (n) => String(n || '').replace(/^Mega /, 'M. ');
 const zChip = (z) => { const s = el('span', 'zchip', `Z ${TIPO_PT[String(z).toUpperCase()] || z}`); s.title = 'Z-Move: dá um tipo de ataque a mais'; return s; };
 
+// ---------- ⚡ PASSIVAS DO PVP (26/11/2026) ----------
+// A tabela oficial do jogo (shared/pvp-passivas.mjs, lida pelo núcleo): 18 passivas, uma por tipo, fixas por espécie.
+// Só têm passiva os de BST até 500, forma final, sem Mega e não lendários. Valem no PvP do tabuleiro (Ranqueado, torneios
+// e Ginásio) a partir de 29/11 00:00; no Amistoso e no Treino já valem. O duelo 1×1 do jogo NÃO conta a passiva: quem
+// conta é a simulação do Planejador (estimativa).
+let pvpPas = null; // { desde, bstMax, poder, passivas: {id: {...}}, porId: {speciesId: id}, semPassiva }
+let pvpComPassivas = (() => { try { return localStorage.getItem('pvpComPassivas') !== '0'; } catch { return true; } })();
+const pasDe = (m) => { if (!pvpPas || !m || m.speciesId == null) return null; const k = pvpPas.porId[Number(m.speciesId)]; return k ? pvpPas.passivas[k] || null : null; };
+const bstDe = (m) => (m && m.stats ? statSum(m.stats) : null);
+const recebeAliado = (m) => { const b = bstDe(m); return b != null && b <= ((pvpPas && pvpPas.bstMax) || 500); };
+const pasPct = (v) => String(Math.round(Math.abs(Number(v) || 0) * 1000) / 10).replace('.', ',');
+const pasSeg = (ms) => String(Math.round((Number(ms) || 0) / 100) / 10).replace('.', ',');
+function textoPassiva(p) {
+  if (!p) return '';
+  const bst = (pvpPas && pvpPas.bstMax) || 500, poder = (pvpPas && pvpPas.poder) || 600;
+  const quando = p.gatilho === 'inicio' ? 'No começo da luta' : p.gatilho === 'ciclo' ? 'No começo e a cada ciclo (usar todos os golpes)' : 'Cura';
+  const t = {
+    rocky_helmet: () => `devolve ${pasPct(p.devolve)}% do dano de cada golpe a quem bate nele, a luta toda.`,
+    rain_dance: () => `+${pasPct(p.dano)}% de dano e recarga ${pasPct(p.recarga)}% mais rápida para ele e os aliados de BST até ${bst}. Duas Rain Dance não somam.`,
+    swarm: () => `+${pasPct(p.dano)}% de dano e +${pasPct(p.porInseto)}% por outro Inseto no time, até +${pasPct(p.teto)}%.`,
+    intimidate: () => `os inimigos causam ${pasPct(p.dano)}% menos dano. Só vale se ele for o único Dragão do time (Mega conta).`,
+    iron_defense: () => `+${pasPct(p.defesa)}% de DEF e SP.DEF, a luta toda.`,
+    burn: () => `o alvo perde ${pasPct(p.porSeg)}% do HP por segundo durante ${pasSeg(p.durMs)} s (${pasPct(p.porSeg * p.durMs / 1000)}% no total).`,
+    poison: () => `o alvo perde ${pasPct(p.porSeg)}% do HP por segundo durante ${pasSeg(p.durMs)} s (${pasPct(p.porSeg * p.durMs / 1000)}% no total).`,
+    freeze: () => `por ${pasSeg(p.durMs)} s o alvo não ataca nem anda e toma +${pasPct(p.danoRecebido)}% de dano.`,
+    paralyze: () => `atrasa as recargas do alvo em ${pasSeg(p.atrasoMs)} s; depois, por ${pasSeg(p.durMs)} s, recarga ${pasPct(p.recarga)}% mais lenta e ${pasPct(p.falha)}% de chance de cada ataque falhar.`,
+    leech_seed: () => `drena ${pasPct(p.porSeg)}% do HP do alvo por segundo durante ${pasSeg(p.durMs)} s e cura quem plantou, até ${pasPct(p.curaMax)}% do HP dele.`,
+    dig: () => `desvia do próximo golpe de até ${poder} de poder, sem dano (o Z-Move não é desviado).`,
+    confusion: () => `o próximo golpe do alvo (até ${poder} de poder) acerta o aliado mais perto dele.`,
+    fear: () => `por ${pasSeg(p.durMs)} s o alvo recua sem atacar e as recargas dele param.`,
+    rock_smash: () => `o alvo perde ${pasPct(p.defesa)}% da DEF e da SP.DEF por ${pasSeg(p.durMs)} s, e o time inteiro aproveita.`,
+    whirlwind: () => `empurra o alvo para o fundo do lado dele e tira ${pasPct(p.dano)}% do HP dele.`,
+    assurance: () => `tira ${pasPct(p.dano)}% do HP do alvo mais ${pasPct(p.faltando)}% do HP que falta a ele.`,
+    charm: () => `puxa o inimigo mais longe para a frente e tira ${pasPct(p.dano)}% do HP dele.`,
+    recover: () => `quando ele ou um aliado de BST até ${bst} cai a ${pasPct(p.gatilhoHp)}% do HP, cura ${pasPct(p.cura)}% do HP do mais ferido. Só volta depois de um ciclo.`,
+  }[p.id];
+  return t ? `${quando}: ${t()}` : quando;
+}
+function pasChip(p) {
+  const s = el('span', 'tchip', `${p.icone || '⚡'} ${p.nome}`);
+  s.style.setProperty('--tc', TIPO_COR[p.tipo] || '#777');
+  s.title = `Passiva do PvP · ${p.nome} (${TIPO_PT[p.tipo] || p.tipo})\n${textoPassiva(p)}`;
+  return s;
+}
+const passivasValendo = () => !!pvpPas && Date.now() >= (pvpPas.desde || 0);
+const dataPassivas = () => { const d = new Date((pvpPas && pvpPas.desde) || 0); return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`; };
+// O que as passivas fazem NESTE time: as que ligam, as que não ligam e quem não recebe a ajuda dos aliados.
+function avisosPassivas(team) {
+  const out = [];
+  if (!pvpPas || !team.length) return out;
+  const com = team.map((m) => ({ m, p: pasDe(m) })).filter((x) => x.p);
+  if (!com.length) { out.push({ txt: `Ninguém deste time tem passiva. Só têm os de BST até ${pvpPas.bstMax}, na forma final, sem Mega e não lendários.`, k: '' }); return out; }
+  const ids = (id) => com.filter((x) => x.p.id === id);
+  for (const x of com) out.push({ txt: `${x.p.icone} ${shortName(x.m.nome)}: ${x.p.nome} — ${textoPassiva(x.p)}`, k: 'ok', pas: x.p });
+  if (ids('rain_dance').length >= 2) out.push({ txt: `🌧️ ${ids('rain_dance').length} Rain Dance no time: elas não somam, só uma conta.`, k: 'warn' });
+  const dragoes = team.filter((m) => (m.tipos || []).includes('DRAGON'));
+  for (const x of ids('intimidate')) if (dragoes.length > 1) out.push({ txt: `🐉 Intimidate de ${shortName(x.m.nome)} NÃO liga: tem outro Dragão no time (${dragoes.filter((d) => d !== x.m).map((d) => shortName(d.nome)).join(', ')}).`, k: 'bad' });
+  if (ids('swarm').length) { const ins = team.filter((m) => (m.tipos || []).includes('BUG')).length; const p = ids('swarm')[0].p; out.push({ txt: `🐝 Swarm com ${ins} Inseto${ins === 1 ? '' : 's'} no time: +${pasPct(Math.min(p.teto, p.dano + p.porInseto * Math.max(0, ins - 1)))}% de dano.`, k: '' }); }
+  if (ids('rain_dance').length || ids('recover').length) {
+    const fora = team.filter((m) => !recebeAliado(m));
+    const quais = [ids('rain_dance').length ? 'Rain Dance' : null, ids('recover').length ? 'Recover' : null].filter(Boolean).join(' e ');
+    if (fora.length) out.push({ txt: `${quais} não ajuda${quais.includes(' e ') ? 'm' : ''}: ${fora.map((m) => shortName(m.nome)).join(', ')} (BST acima de ${pvpPas.bstMax}).`, k: 'warn' });
+  }
+  return out;
+}
+function passivasCard(team, titulo) {
+  const box = el('div', 'pp-tips');
+  if (!pvpPas) return box;
+  box.append(el('div', 'ext-sec', titulo || '⚡ Passivas do time'));
+  if (!passivasValendo()) box.append(el('div', 'tip warn', `Valem no Ranqueado, nos torneios e no Ginásio a partir de ${dataPassivas()} às 00:00 (no Amistoso e no Treino já valem).${(pvpPas.semPassiva || []).length ? ' O Mundial de 30/11 fica no formato antigo, sem passiva.' : ''}`));
+  for (const a of avisosPassivas(team)) { const d = el('div', `tip ${a.k || ''}`, a.txt); box.append(d); }
+  return box;
+}
+
 function pvpMetaEntries(meta) {
   const out = [];
   if (!meta) return out;
@@ -258,18 +332,77 @@ function casasPorPapel(team, papeis) {
 // conta antiga (só "quem enfrenta quem") não via. A luta de verdade é do servidor; isto é estimativa.
 // Passo: 260 ms por casa (o padrão do replay do jogo, replay.mjs: ms ?? 260). Num passo da conta anda quantas couberem.
 const TB_PASSO_S = 0.26, TB_DT = 0.5, TB_MAX_S = 90;
+// PASSIVAS NA LUTA (26/11/2026): com os números oficiais do jogo. O "ciclo" (usar todos os golpes do moveset) depende
+// das recargas de cada golpe (10 a 60 s no jogo): aqui é uma estimativa fixa. Empurrar/puxar casas (Whirlwind, Charm) não
+// mexe na posição da conta, só o dano. Desviar (Dig) e confundir (Confusion) = o próximo golpe ≈ 2 s de dano.
+const TB_CICLO_S = 30, TB_GOLPE_S = 2;
 function simBatalha(mc, team, ec, enemy, T, detalhe) {
   const nI = team.length, nJ = enemy.length;
-  const mk = (lado, i, casa, alc) => { const k = TB_CASAS[casa] || TB_CASAS[0]; const p = lado === 0 ? { x: k.cx, y: k.cy } : { x: 29 - k.cx, y: 25 - k.cy }; return { lado, i, x: p.x, y: p.y, alc: Math.max(1, Math.min(4, Math.round(alc || 1))), vida: 1, alvo: -1, anda: 0, morreu: null, entrou: null, dano: 0, apanhouDe: new Set(), bateuEm: new Set(), livre: 0 }; };
-  const A = team.map((m, i) => mk(0, i, mc[i], m.alcance)), B = enemy.map((e, j) => mk(1, j, ec[j], e.alcance));
+  const comPas = pvpComPassivas && !!pvpPas;
+  const mk = (lado, i, casa, alc, m) => { const k = TB_CASAS[casa] || TB_CASAS[0]; const p = lado === 0 ? { x: k.cx, y: k.cy } : { x: 29 - k.cx, y: 25 - k.cy }; return { lado, i, x: p.x, y: p.y, alc: Math.max(1, Math.min(4, Math.round(alc || 1))), vida: 1, alvo: -1, anda: 0, morreu: null, entrou: null, dano: 0, apanhouDe: new Set(), bateuEm: new Set(), livre: 0,
+    pas: comPas ? pasDe(m) : null, recebe: recebeAliado(m), hp: (m && m.stats && m.stats.hp) || 80, fAtk: 1, fDef: 1, paradoAte: 0, frzAte: 0, parAte: 0, rsAte: 0, dots: [], esquiva: null, confusa: null, ciclo: 0, curaPronta: 0, curou: 0 }; };
+  const A = team.map((m, i) => mk(0, i, mc[i], m.alcance, m)), B = enemy.map((e, j) => mk(1, j, ec[j], e.alcance, e));
   const taxa = (u, alvo) => { const t = u.lado === 0 ? T[u.i] && T[u.i][alvo.i] && T[u.i][alvo.i][0] : T[alvo.i] && T[alvo.i][u.i] && T[alvo.i][u.i][1]; return t > 0 && t < 999 ? 1 / t : 1 / 60; };
   const dist = (a, b) => Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
+  // Começo da luta: as passivas "de início" valem a luta toda.
+  const intimida = [false, false];
+  if (comPas) {
+    for (const [L, membros, us] of [[0, team, A], [1, enemy, B]]) {
+      const rain = us.find((u) => u.pas && u.pas.id === 'rain_dance');
+      const insetos = membros.filter((m) => (m.tipos || []).includes('BUG')).length;
+      const dragoes = membros.filter((m) => (m.tipos || []).includes('DRAGON')).length;
+      for (const u of us) {
+        if (rain && u.recebe) u.fAtk *= (1 + rain.pas.dano) / (1 + rain.pas.recarga); // recarga −10% = golpes mais seguidos
+        if (u.pas && u.pas.id === 'swarm') u.fAtk *= 1 + Math.min(u.pas.teto, u.pas.dano + u.pas.porInseto * Math.max(0, insetos - 1));
+        if (u.pas && u.pas.id === 'iron_defense') u.fDef /= 1 + u.pas.defesa;
+        if (u.pas && u.pas.id === 'intimidate' && dragoes <= 1) intimida[L] = true;
+      }
+    }
+  }
+  const tira = (alvo, d, fonte) => { if (alvo.vida <= 0 || d <= 0) return; const t = Math.min(alvo.vida, d); alvo.vida -= d; if (fonte) fonte.dano += t; if (alvo.vida <= 0 && alvo.morreu == null) alvo.morreu = tempo; };
+  const maisPerto = (u, lista) => { let b = null; for (const e of lista) if (e !== u && e.vida > 0 && (!b || dist(u, e) < dist(u, b))) b = e; return b; };
+  // As passivas "de ciclo": no começo no inimigo mais perto, depois em quem ele está atacando.
+  const dispara = (u, alvo) => {
+    const p = u.pas; if (!p || !alvo || alvo.vida <= 0) return;
+    const fim = tempo + (p.durMs || 0) / 1000;
+    if (p.id === 'burn' || p.id === 'poison') alvo.dots.push({ porSeg: p.porSeg, ate: fim, fonte: u });
+    else if (p.id === 'leech_seed') alvo.dots.push({ porSeg: p.porSeg, ate: fim, fonte: u, cura: p.curaMax });
+    else if (p.id === 'freeze') { alvo.paradoAte = Math.max(alvo.paradoAte, fim); alvo.frzAte = Math.max(alvo.frzAte, fim); }
+    else if (p.id === 'fear') alvo.paradoAte = Math.max(alvo.paradoAte, fim);
+    else if (p.id === 'paralyze') { alvo.paradoAte = Math.max(alvo.paradoAte, tempo + (p.atrasoMs || 0) / 1000); alvo.parAte = Math.max(alvo.parAte, tempo + ((p.atrasoMs || 0) + (p.durMs || 0)) / 1000); }
+    else if (p.id === 'rock_smash') alvo.rsAte = Math.max(alvo.rsAte, fim);
+    else if (p.id === 'whirlwind') tira(alvo, p.dano, u);
+    else if (p.id === 'assurance') tira(alvo, p.dano + p.faltando * (1 - Math.max(0, alvo.vida)), u);
+    else if (p.id === 'charm') { const ini = (u.lado === 0 ? B : A).filter((e) => e.vida > 0); let longe = null; for (const e of ini) if (!longe || dist(u, e) > dist(u, longe)) longe = e; tira(longe, p.dano, u); }
+    else if (p.id === 'dig') u.esquiva = { ate: null };
+    else if (p.id === 'confusion') alvo.confusa = { ate: null, fonte: u };
+  };
   let tempo = 0;
   for (; tempo < TB_MAX_S; tempo += TB_DT) {
     const vivosA = A.filter((u) => u.vida > 0), vivosB = B.filter((u) => u.vida > 0);
     if (!vivosA.length || !vivosB.length) break;
+    if (comPas) {
+      for (const u of [...vivosA, ...vivosB]) {
+        if (u.pas && u.pas.gatilho === 'ciclo' && tempo >= u.ciclo) {
+          const ini = u.lado === 0 ? B : A;
+          const alvo = tempo === 0 ? maisPerto(u, ini) : (u.alvo >= 0 && ini[u.alvo] && ini[u.alvo].vida > 0 ? ini[u.alvo] : null);
+          if (alvo) { dispara(u, alvo); u.ciclo = tempo + TB_CICLO_S; }
+        }
+        // Veneno, queimadura e semente: % do HP máximo por segundo.
+        for (const d of u.dots) if (d.ate > tempo) { const q = d.porSeg * TB_DT; tira(u, q, d.fonte); if (d.cura != null && d.fonte.vida > 0) { const c = Math.min(q, d.cura - (d.curado || 0)); if (c > 0) { d.fonte.vida = Math.min(1, d.fonte.vida + c); d.curado = (d.curado || 0) + c; } } }
+      }
+      // Recover: quando alguém do time (BST até 500) cai à metade, cura 20% do mais ferido; volta depois de um ciclo.
+      for (const us of [A, B]) for (const u of us) {
+        if (!u.pas || u.pas.id !== 'recover' || u.vida <= 0 || tempo < u.curaPronta) continue;
+        const feridos = us.filter((x) => x.vida > 0 && x.recebe && x.vida <= u.pas.gatilhoHp);
+        if (!feridos.length) continue;
+        const alvo = feridos.sort((a, b) => a.vida - b.vida)[0];
+        alvo.vida = Math.min(1, alvo.vida + u.pas.cura); u.curou += u.pas.cura; u.curaPronta = tempo + TB_CICLO_S;
+      }
+    }
     const golpes = [];
     for (const u of [...vivosA, ...vivosB]) {
+      if (u.vida <= 0) continue;
       const inimigos = u.lado === 0 ? B : A;
       let alvo = u.alvo >= 0 ? inimigos[u.alvo] : null;
       if (!alvo || alvo.vida <= 0) {
@@ -278,6 +411,7 @@ function simBatalha(mc, team, ec, enemy, T, detalhe) {
         alvo = melhor; u.alvo = alvo ? alvo.i : -1;
       }
       if (!alvo) continue;
+      if (u.paradoAte > tempo) continue; // congelado, com medo ou com a recarga atrasada
       if (dist(u, alvo) > u.alc) {
         u.anda += TB_DT;
         while (u.anda >= TB_PASSO_S && dist(u, alvo) > u.alc) { u.anda -= TB_PASSO_S; u.x += Math.sign(alvo.x - u.x); u.y += Math.sign(alvo.y - u.y); }
@@ -285,12 +419,26 @@ function simBatalha(mc, team, ec, enemy, T, detalhe) {
         u.anda = 0;
       }
       if (u.entrou == null) u.entrou = tempo;
-      golpes.push([u, alvo, taxa(u, alvo) * TB_DT]);
+      let d = taxa(u, alvo) * TB_DT;
+      if (comPas) {
+        d *= u.fAtk * alvo.fDef;
+        if (u.parAte > tempo) d *= 0.75 / 1.3; // paralisia: recarga 30% mais lenta e 25% de falha
+        if (intimida[alvo.lado]) d *= 0.8;
+        if (alvo.frzAte > tempo) d *= 1.2;
+        if (alvo.rsAte > tempo) d /= 0.8;
+        // Confuso: o próximo golpe vai num aliado dele (perto) e conta para quem confundiu.
+        if (u.confusa) { if (u.confusa.ate == null) u.confusa.ate = tempo + TB_GOLPE_S; if (tempo < u.confusa.ate) { const al = maisPerto(u, u.lado === 0 ? A : B) || u; tira(al, d, u.confusa.fonte); continue; } u.confusa = null; }
+        // Dig: desvia do próximo golpe que ele receber.
+        if (alvo.esquiva) { if (alvo.esquiva.ate == null) alvo.esquiva.ate = tempo + TB_GOLPE_S; if (tempo < alvo.esquiva.ate) { alvo.apanhouDe.add(u.i); continue; } alvo.esquiva = null; }
+      }
+      golpes.push([u, alvo, d]);
     }
     for (const [u, alvo, d] of golpes) {
-      const tirado = Math.min(alvo.vida, d);
+      const tirado = Math.min(Math.max(0, alvo.vida), d);
       alvo.vida -= d; u.dano += tirado; alvo.apanhouDe.add(u.i); u.bateuEm.add(alvo.i);
       if (alvo.vida <= 0 && alvo.morreu == null) alvo.morreu = tempo;
+      // Rocky Helmet: devolve 20% do dano (em HP de verdade: a vida de cada um é uma fração do HP dele).
+      if (comPas && alvo.pas && alvo.pas.id === 'rocky_helmet' && u.vida > 0) tira(u, tirado * alvo.pas.devolve * Math.max(0.3, Math.min(3, alvo.hp / u.hp)), alvo);
     }
     // "Livre" = batendo sem ninguém batendo nele (o tank segura, o atirador bate de graça).
     const batidos = new Set(golpes.filter(([u]) => u.lado === 1).map(([, a]) => a.i));
@@ -388,6 +536,8 @@ function pvpMemberCard(c, s, extra) {
   const tags = el('div', 'pm-tags');
   for (const t of c.tipos || []) tags.append(tipoChip(t));
   if (c.el) tags.append(zChip(c.el));
+  const pas = pasDe(c);
+  if (pas) tags.append(pasChip(pas));
   card.append(top, tags);
   if (s) {
     const why = el('div', 'pm-why');
@@ -451,6 +601,7 @@ async function renderPvp(keepScroll) {
   pvpData = await call('poke:pvp:get', pvpAcc);
   if (page !== 'pvp') return;
   const { meta, live, running, prog } = pvpData;
+  pvpPas = (live && live.passivas) || (meta && meta.passivas) || pvpPas;
   if (meta && live && live.info) meta.info = { ...(meta.info || {}), ...live.info };
   const tab = (live && live.tabelaTipos) || (meta && meta.tabelaTipos) || {};
   root.replaceChildren();
@@ -926,6 +1077,7 @@ function renderPvpTime(root, c) {
   const sh = el('div', 'pvp-sh'); sh.append(el('div', 'ext-sec', 'Com o que você tem'));
   if (sug.length) sh.append(button('Usar no planejador', 'mini', () => { pvpPlan = sug.map((x) => x.c.id); try { localStorage.setItem(`pvpPlan:${pvpAcc}`, JSON.stringify(pvpPlan)); } catch {} pvpTab = 'plan'; renderPvp(); }));
   sc.append(sh);
+  if (pvpPas && team.length) sc.append(passivasCard(team, '⚡ Passivas do seu time'));
   if (!mine.length) sc.append(el('div', 'mempty', 'Não consegui ler os pokémon desta conta ainda. Abra a conta no PokeIdle e volte aqui.'));
   else { const row = el('div', 'pvp-team'); for (const x of sug) row.append(pvpMemberCard(x.c, x.s)); sc.append(row); if (mine.length < 5) sc.append(el('div', 'mempty', `Esta conta tem só ${mine.length} espécie${mine.length === 1 ? '' : 's'}: o time completo tem 5.`)); }
   root.append(sc);
@@ -1224,7 +1376,15 @@ function renderPvpPlan(root, c) {
     renderPvp(true);
   });
   melhor.title = 'Os 5 da sua conta que mais rendem contra o top 50 do Ranqueado, já na posição que mais vence. Só entra quem a conta pode usar (nível até o do treinador + 5).';
-  right.append(melhor, el('span', 'sub', 'Contra:'), vsSel);
+  right.append(melhor);
+  if (pvpPas) {
+    const lb = el('label', 'sub'); const ck = el('input'); ck.type = 'checkbox'; ck.checked = pvpComPassivas;
+    ck.onchange = () => { pvpComPassivas = ck.checked; try { localStorage.setItem('pvpComPassivas', ck.checked ? '1' : '0'); } catch {} renderPvp(true); };
+    lb.append(ck, ' ⚡ Contar as passivas');
+    lb.title = `Liga as passivas do PvP na simulação (números oficiais do jogo). Valem no Ranqueado, torneios e Ginásio a partir de ${dataPassivas()} 00:00; no Amistoso e no Treino já valem. O Mundial de 30/11 fica sem.`;
+    right.append(lb);
+  }
+  right.append(el('span', 'sub', 'Contra:'), vsSel);
   ph.append(right);
   pc.append(ph);
   if (!doJogo.length) pc.append(el('div', 'tip', 'O seu time do PvP ainda não chegou do jogo: abra a aba PvP no jogo uma vez (ou espere uns segundos). Enquanto isso, o planejador começa com uma sugestão.'));
@@ -1238,13 +1398,16 @@ function renderPvpPlan(root, c) {
     const b = el('button', 'pp-item on');
     const pp = papeis[team.indexOf(m)];
     b.title = `Tirar do planejador (no jogo nada muda)\n${pp.ic} ${pp.nome}: ${pp.faz}. Lugar: ${pp.onde}.\n${pp.porque.join(' · ')}`;
-    b.append(el('b', null, `✕ ${m.nome}`), el('span', 'pp-papel', `${pp.ic} ${pp.nome}`), el('span', null, `Nv ${fmt(m.level)} · ${alcIcon(m.alcance)}${m.el ? ` · Z ${TIPO_PT[String(m.el).toUpperCase()] || m.el}` : ''}${doJogo.includes(m.id) ? ' · no time do jogo' : ' · trocado aqui'}`));
+    const pasM = pasDe(m);
+    b.append(el('b', null, `✕ ${m.nome}`), el('span', 'pp-papel', `${pp.ic} ${pp.nome}${pasM ? ` · ${pasM.icone} ${pasM.nome}` : ''}`), el('span', null, `Nv ${fmt(m.level)} · ${alcIcon(m.alcance)}${m.el ? ` · Z ${TIPO_PT[String(m.el).toUpperCase()] || m.el}` : ''}${doJogo.includes(m.id) ? ' · no time do jogo' : ' · trocado aqui'}`));
+    if (pasM) b.title += `\n${pasM.icone} ${pasM.nome}: ${textoPassiva(pasM)}`;
     b.onclick = () => { pvpPlanSugestao = false; pvpPlan = pvpPlan.filter((x) => x !== m.id); renderPvp(true); };
     meu.append(b);
   }
   if (!team.length) meu.append(el('span', 'sub', 'Escolha até 5 na lista abaixo.'));
   if (doJogo.length && !ehDoJogo) meu.append(button('↺ Voltar ao time do jogo', 'mini', () => { pvpPlan = doJogo.slice(); renderPvp(true); }));
   left.append(meu);
+  if (pvpPas && team.length) left.append(passivasCard(team));
   // --- a lista: clique para pôr
   const q = el('input'); q.type = 'text'; q.placeholder = 'Buscar seu pokémon para pôr…'; q.value = pvpBusca;
   q.oninput = () => { pvpBusca = q.value; const pos = q.selectionStart; renderPvp(true).then(() => { const n = $('#page-pvp .pp-left input'); if (n) { n.focus(); n.setSelectionRange(pos, pos); } }); };
@@ -1252,7 +1415,9 @@ function renderPvpPlan(root, c) {
   const list = el('div', 'pp-list');
   for (const m of mineAll.filter((x) => !pvpPlan.includes(x.id) && pvpPassaRegras(x) && (!pvpBusca || x.nome.toLowerCase().includes(pvpBusca.toLowerCase()))).slice(0, 80)) {
     const b = el('button', `pp-item${m.usavel ? '' : ' off'}`);
-    b.append(el('b', null, m.nome), el('span', null, `Nv ${fmt(m.level)} · ${alcIcon(m.alcance)}${m.el ? ` · Z ${TIPO_PT[String(m.el).toUpperCase()] || m.el}` : ''}`));
+    const pasL = pasDe(m);
+    b.append(el('b', null, m.nome), el('span', null, `Nv ${fmt(m.level)} · ${alcIcon(m.alcance)}${m.el ? ` · Z ${TIPO_PT[String(m.el).toUpperCase()] || m.el}` : ''}${pasL ? ` · ${pasL.icone} ${pasL.nome}` : ''}`));
+    if (pasL) b.title = `${pasL.icone} ${pasL.nome}: ${textoPassiva(pasL)}`;
     b.onclick = () => { if (pvpPlan.length >= 5) return toast('O time tem no máximo 5: clique num do "Seu time" para tirar antes.'); pvpPlanSugestao = false; pvpPlan.push(m.id); renderPvp(true); };
     list.append(b);
   }
@@ -1314,7 +1479,7 @@ function renderPvpPlan(root, c) {
         res.replaceChildren(el('b', null, `Calculando contra os times do top (${alvos.length}/${top.length})…`));
       }
       if (!alvos.length) { res.replaceChildren(el('b', null, 'Não deu para simular agora (a conta precisa estar aberta no app).')); return; }
-      const ch = `${pvpAcc}|${team.map((m) => m.id).join(',')}|${meta.at}`;
+      const ch = `${pvpAcc}|${team.map((m) => m.id).join(',')}|${meta.at}|${pvpComPassivas && pvpPas ? 'pas' : ''}`;
       let ot = pvpOtimoCache.get(ch);
       if (!ot) {
         const daSel = alvos.find((x) => x.a.id === pvpArqSel);
@@ -1333,7 +1498,7 @@ function renderPvpPlan(root, c) {
         ...(vsSelV != null ? [el('b', `big ${cls(vsSelV)}`, `${pct(vsSelV)} de chance de vencer este time`)] : []),
         el('span', null, `Contra o top (média de ${alvos.length} times, pesados por quantos usam): ${pct(media(casasModo))} nesta posição.`),
         el('span', null, `Posição do jogo: ${pct(media(casasJogo))} · melhor contra o top: ${pct(ot.top.v)}${ot.top.v - media(casasJogo) >= 0.01 ? ` (+${Math.round((ot.top.v - media(casasJogo)) * 100)} pontos mudando as casas)` : ' (a do jogo já está boa)'}.`),
-        el('span', 'sub', 'Estimativa com o duelo 1×1 do jogo e o tabuleiro real: cada um vai no adversário mais perto, e quem bate sem apanhar de volta (principalmente de longe) leva vantagem. AoE não conta no PvP.'));
+        el('span', 'sub', `Estimativa com o duelo 1×1 do jogo e o tabuleiro real: cada um vai no adversário mais perto, e quem bate sem apanhar de volta (principalmente de longe) leva vantagem. AoE não conta no PvP.${pvpPas ? (pvpComPassivas ? ` ⚡ Com as passivas dos dois lados (ciclo estimado em ${TB_CICLO_S} s).` : ' ⚡ Sem as passivas (desligadas).') : ''}`));
       // Contra cada time do top, na posição mostrada.
       tipsBox.replaceChildren();
       tipsBox.append(el('div', 'ext-sec', 'Contra cada time do top'));

@@ -416,6 +416,31 @@ contextBridge.executeInMainWorld({
     };
     const pkDoScore = (f, speciesId, level) => ({ id: 1, speciesId, ivs: f.ivs, quality: Number(f.quality ?? f.qualidade) || 1, qualidade: Number(f.quality ?? f.qualidade) || 1, potencia: Number(f.potencia) || 1,
       shiny: !!f.shiny, refino: f.refino || null, tmElemental: f.tmElemental || f.el || null, tmFisico: !!f.tmFisico, level });
+    // ---- PASSIVAS DO PVP (26/11/2026) ----
+    // A tabela oficial do jogo (/shared/pvp-passivas.mjs): qual espécie tem qual passiva e os números de cada uma.
+    // Valem no PvP do tabuleiro (Ranqueado, torneios, Ginásio) a partir de PASSIVAS_DESDE_MS; Amistoso e Treino já.
+    let modPasP = null;
+    const modPas = () => modPasP || (modPasP = import('/shared/pvp-passivas.mjs').catch(() => { modPasP = null; return null; }));
+    let tabPasP = null;
+    function tabelaPassivas() {
+      if (!tabPasP) {
+        tabPasP = (async () => {
+          const m = await modPas();
+          if (!m || !m.PASSIVAS || !m.PASSIVA_POR_ESPECIE) return null;
+          const passivas = {};
+          for (const [id, p] of Object.entries(m.PASSIVAS)) passivas[id] = { ...p };
+          return { desde: Number(m.PASSIVAS_DESDE_MS) || 0, bstMax: Number(m.BST_MAX_PASSIVA) || 500, poder: Number(m.PODER_600) || 600,
+            semPassiva: Array.isArray(m.CAMPEONATOS_SEM_PASSIVA) ? [...m.CAMPEONATOS_SEM_PASSIVA] : [],
+            passivas, porId: Object.fromEntries(m.PASSIVA_POR_ESPECIE) };
+        })().catch(() => { tabPasP = null; return null; });
+      }
+      return tabPasP;
+    }
+    async function passivaDe(speciesId) {
+      const t = await tabelaPassivas();
+      const k = t && t.porId[Number(speciesId)];
+      return k ? t.passivas[k] : null;
+    }
     let reguaPvp = { chave: null, valores: [], nivel: 0 };
     async function scoreFicha(f, ctx) {
       if (!f || f.speciesId == null || !f.ivs) return null;
@@ -442,6 +467,15 @@ contextBridge.executeInMainWorld({
           out.pvp = { pct: Math.round((lo / arr.length) * 100), forma: melhor.forma, nivel: reguaPvp.nivel, n: arr.length };
         }
       }
+      // A passiva do PvP (a da forma final que tem, se alguma tem): o poder do jogo não conta ela, então vai ao lado.
+      try {
+        const t = await tabelaPassivas();
+        if (t) {
+          let pas = null;
+          for (const fo of formas) { const k = t.porId[Number(fo.pokeId)]; if (k) { pas = { id: k, nome: t.passivas[k].nome, icone: t.passivas[k].icone, forma: fo.name }; } }
+          if (pas) { if (out.pvp) out.pvp.passiva = pas; else out.passiva = pas; }
+        }
+      } catch {}
       // PvE contra o seu pokémon em campo, no level dele.
       const ref = ctx && ctx.ref;
       const espRef = ref && map.get(Number(ref.speciesId));
@@ -451,7 +485,7 @@ contextBridge.executeInMainWorld({
         for (const fo of formas) { try { const v = Number(gi.poderNoNivel(pkDoScore(f, fo.pokeId, Number(ref.level)), fo, Number(ref.level))); if (v > 0 && (!melhor || v > melhor.v)) melhor = { v, forma: fo.name }; } catch {} }
         if (melhor && base > 0) out.pve = { x: Math.round((melhor.v / base) * 100) / 100, forma: melhor.forma, ref: espRef.name, nivel: Number(ref.level) };
       }
-      return out.pvp || out.pve ? out : null;
+      return out.pvp || out.pve || out.passiva ? out : null;
     }
     const fxTipo = (atk, defs) => defs.reduce((m, d) => m * ((jogo.tabelaTipos && jogo.tabelaTipos[atk] && jogo.tabelaTipos[atk][d] != null) ? jogo.tabelaTipos[atk][d] : 1), 1);
     const naHuntX = (x) => { const a = jogo.amp || 1.5; return x > 1 ? 1 + (x - 1) * a : x < 1 ? x / a : 1; };
@@ -1847,7 +1881,8 @@ contextBridge.executeInMainWorld({
         pvp.pediuInfo = Date.now();
         try { sock.send(JSON.stringify({ t: 'pvp.info', semLadder: 1 })); } catch {}
       }
-      return { meuTime: pvp.meuTime || null, euPvp: jogo.eu.pvp ? JSON.parse(JSON.stringify(jogo.eu.pvp)) : null, nivel: Number(jogo.eu.level) || 0, at: pvp.at, coletando: pvp.coletando, feitos: pvp.feitos, total: pvp.total, erro: pvp.erro, linhas, perfis: pvp.perfis, info, meus, tabelaTipos: jogo.tabelaTipos, eu, nick: jogo.eu.nick || null, euKeys: jogo.keys.slice(0, 80) };
+      let passivas = null; try { passivas = await tabelaPassivas(); } catch {}
+      return { passivas, meuTime: pvp.meuTime || null, euPvp: jogo.eu.pvp ? JSON.parse(JSON.stringify(jogo.eu.pvp)) : null, nivel: Number(jogo.eu.level) || 0, at: pvp.at, coletando: pvp.coletando, feitos: pvp.feitos, total: pvp.total, erro: pvp.erro, linhas, perfis: pvp.perfis, info, meus, tabelaTipos: jogo.tabelaTipos, eu, nick: jogo.eu.nick || null, euKeys: jogo.keys.slice(0, 80) };
     }
 
     // ---- duelo 1×1 com as contas do jogo ----
@@ -2068,7 +2103,7 @@ contextBridge.executeInMainWorld({
           extras.instalados.add(nome);
           const I = {
             get sock() { return sock; }, get ultimaLista() { return ultimaLista; }, get itensResp() { return itensResp; }, enviarNosso: (txt) => enviarDoApp(txt),
-            jogo, keep, nossos, espera, catalogoNota, huntsDoHorizonte, nivelDepoisDe, xpHoraDaConta, coberturaHunts, tiposDe, fichaNota, scoreFicha,
+            jogo, keep, nossos, espera, catalogoNota, huntsDoHorizonte, nivelDepoisDe, xpHoraDaConta, coberturaHunts, tiposDe, fichaNota, scoreFicha, tabelaPassivas, passivaDe,
             get meuTimePvp() { return pvp.meuTime ? JSON.parse(JSON.stringify(pvp.meuTime)) : null; },
             filtro: (f) => extras.filtros.push(f), ouvir: (f) => extras.ouvintes.push(f), expor: (o) => Object.assign(extras.api, o),
           };
