@@ -1060,10 +1060,10 @@ function openPokeDrawer() {
   o.value = String(s.optimizeEvery || 0);
   o.onchange = async () => { S.poke = await call('poke:optimizeEvery', Number(o.value)); };
   const pn = el('select');
-  for (const [v, l] of [['duas', 'As duas'], ['faixa', 'Faixa em cima de cada conta'], ['estoque', 'Estoque dentro do jogo (Economia)'], ['nenhum', 'Nenhum']]) { const op = el('option', null, l); op.value = v; pn.append(op); }
+  for (const [v, l] of [['duas', 'As duas'], ['faixa', 'Só a faixa'], ['estoque', 'Só o estoque'], ['nenhum', 'Nenhum']]) { const op = el('option', null, l); op.value = v; pn.append(op); }
   pn.value = s.painel || 'duas';
   pn.onchange = async () => { S.poke = await call('poke:painel', pn.value); };
-  card.append(rowOpt('Painel do Idleterino', 'Faixa: em cima de cada conta, fora do jogo — coins, gemas, pokébolas, poções, capturas, Prey do dia e a melhor captura da sessão (com as contas juntas, uma linha soma todas). Estoque: no GASTOS do modo Economia do jogo, quanto ainda tem na mochila de cada item gasto, com aviso quando está acabando. O painel do ULTRA continua igual.', pn));
+  card.append(rowOpt('Painel do Idleterino', 'Faixa: um resumo em cima de cada conta, fora do jogo. Estoque: quanto ainda tem na mochila, no GASTOS do modo Economia.', pn));
   card.append(rowOpt('Otimizar sozinho', 'Com horas aberta, a página do jogo vai acumulando memória e CPU (mesmo no modo Economia). O app fecha e abre cada conta num processo novo de tempos em tempos, uma por vez. Não perde o login nem a contagem da sessão. Acontece sempre no tempo escolhido.', o, true));
   $('#drawer').hidden = false;
 }
