@@ -542,6 +542,28 @@ async function renderSettings() {
     }
   }
   box.append(rowOpt('Versão', `Idleterino ${a.version}`, button('Sair do app', null, () => call('app:quit'))));
+  // ⏱️ DESEMPENHO (27/11/2026): quanto cada conta, cada live e o vídeo gastam AGORA — para achar o que pesa.
+  const dsp = el('div', 'card');
+  const dspOut = el('div');
+  const medir = async () => {
+    dspOut.replaceChildren(el('p', 'sub', 'Medindo por 10 segundos…'));
+    await call('app:desempenho').catch(() => null); // 1ª leitura zera a conta da CPU
+    await new Promise((r) => setTimeout(r, 10000));
+    const r = await call('app:desempenho').catch(() => null);
+    if (!r || r.erro) { dspOut.replaceChildren(el('p', 'sub', `Não deu para medir${r && r.erro ? `: ${r.erro}` : ''}.`)); return; }
+    const G = { pokeidle: '🎮 Contas do PokeIdle', twitch: '🟣 Lives da Twitch', kick: '🟢 Lives da Kick', video: '🖥️ Vídeo (GPU)', app: '🏠 App (tela e núcleo)', outro: '⚙️ Outros' };
+    const gb = (mb) => (mb >= 1024 ? `${(mb / 1024).toFixed(1).replace('.', ',')} GB` : `${mb} MB`);
+    const cpuPct = (c) => `${(c / r.nucleos).toFixed(1).replace('.', ',')}%`;
+    const tb = el('div', 'dsp-grid');
+    tb.append(el('b', null, 'Total'), el('b', null, gb(r.total.mb)), el('b', null, `${cpuPct(r.total.cpu)} da CPU`));
+    for (const [k, g] of Object.entries(r.grupos).sort((x, y) => y[1].mb - x[1].mb)) tb.append(el('span', null, `${G[k] || k} (${g.n})`), el('span', null, gb(g.mb)), el('span', null, cpuPct(g.cpu)));
+    const det = el('details'); det.append(el('summary', 'sub', 'Ver cada processo'));
+    const tb2 = el('div', 'dsp-grid'); for (const x of r.lista) tb2.append(el('span', 'sub', x.nome), el('span', 'sub', gb(x.mb)), el('span', 'sub', cpuPct(x.cpu)));
+    det.append(tb2);
+    dspOut.replaceChildren(tb, det, el('p', 'sub', `PC com ${r.ramGb.toString().replace('.', ',')} GB de memória e ${r.nucleos} núcleos. Mande um print disto para o suporte se o app estiver pesado.`));
+  };
+  dsp.append(el('h3', null, '⏱️ Desempenho'), el('p', 'sub', 'Quanto cada conta do PokeIdle, cada live e o vídeo estão gastando agora (memória e processador).'), button('Medir agora', 'primary', medir), dspOut);
+  box.append(dsp);
   const cel = el('div', 'card');
   cel.append(el('h3', null, '📱 Idleterino no celular'), el('p', 'sub', 'Leve as suas contas do PokeIdle para o Idleterino Android com um QR Code: o celular abre já logado, sem senha.'), button('Levar contas para o celular', 'primary', () => abrirLevarCelular()));
   box.append(cel);

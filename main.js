@@ -1,7 +1,7 @@
 // Idleterino — a casca do app: janela, bandeja, atualização, iniciar com o sistema e o registro de
 // quais sites cada sessão pode abrir. Twitch e Kick moram em platforms/ (cada um com seu login,
 // sua configuração e seus canais de IPC "twitch:..." e "kick:..."). O PokeIdle mora em pokeidle.js.
-const { app, BrowserWindow, ipcMain, session, shell, Tray, Menu, Notification, nativeImage, powerMonitor, dialog, clipboard } = require('electron');
+const { app, BrowserWindow, ipcMain, session, shell, Tray, Menu, Notification, nativeImage, powerMonitor, dialog, clipboard, webContents } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const fs = require('fs');
@@ -323,6 +323,32 @@ ipcMain.handle('app:video', (_e, o) => {
 });
 ipcMain.handle('app:introDone', () => { config.lastSeenVersion = app.getVersion(); firstRun = false; saveConfig(); return appState(); });
 ipcMain.handle('app:quit', quitApp);
+// ⏱️ DESEMPENHO (27/11/2026): quanto cada parte do app gasta agora — cada conta do PokeIdle, cada live da Twitch e da
+// Kick, a tela do app, o processo de vídeo (GPU) e o resto. Só lê (app.getAppMetrics); a CPU é desde a última leitura.
+ipcMain.handle('app:desempenho', () => {
+  try {
+    const met = app.getAppMetrics();
+    const porPid = new Map(met.map((m) => [m.pid, m]));
+    const rot = new Map();
+    try { for (const p of (poke.processos ? poke.processos() : [])) rot.set(p.pid, { grupo: 'pokeidle', nome: `PokeIdle · ${p.nome}${p.modo ? ` (${p.modo})` : ''}` }); } catch {}
+    for (const wc of webContents.getAllWebContents()) {
+      let pid = 0; try { pid = wc.getOSProcessId(); } catch {}
+      if (!pid || rot.has(pid)) continue;
+      const url = String(wc.getURL() || ''); let host = ''; try { host = new URL(url).hostname; } catch {}
+      if (mainWin && !mainWin.isDestroyed() && wc === mainWin.webContents) rot.set(pid, { grupo: 'app', nome: 'Tela do Idleterino' });
+      else if (/twitch\.tv$/.test(host)) rot.set(pid, { grupo: 'twitch', nome: `Twitch · ${url.split('/')[3] || 'página'}` });
+      else if (/kick\.com$/.test(host)) rot.set(pid, { grupo: 'kick', nome: `Kick · ${url.split('/')[3] || 'página'}` });
+      else rot.set(pid, { grupo: 'outro', nome: host || wc.getTitle() || 'página' });
+    }
+    const lista = met.map((m) => {
+      const r = rot.get(m.pid) || (m.type === 'GPU' ? { grupo: 'video', nome: 'Vídeo (GPU)' } : m.type === 'Browser' ? { grupo: 'app', nome: 'Núcleo do app' } : { grupo: 'outro', nome: m.serviceName || m.type });
+      return { ...r, pid: m.pid, mb: Math.round((m.memory.workingSetSize || 0) / 1024), cpu: Math.round((m.cpu.percentCPUUsage || 0) * 10) / 10 };
+    }).sort((a, b) => b.mb - a.mb);
+    const grupos = {};
+    for (const x of lista) { const g = grupos[x.grupo] || (grupos[x.grupo] = { mb: 0, cpu: 0, n: 0 }); g.mb += x.mb; g.cpu += x.cpu; g.n++; }
+    return { lista, grupos, total: { mb: lista.reduce((s, x) => s + x.mb, 0), cpu: Math.round(lista.reduce((s, x) => s + x.cpu, 0) * 10) / 10 }, nucleos: require('os').cpus().length, ramGb: Math.round((require('os').totalmem() / 1073741824) * 10) / 10 };
+  } catch (e) { return { erro: String(e && e.message || e) }; }
+});
 // 📸 Imagem que a tela do app desenhou (o cartão do posicionamento do Planejador) → área de transferência, para colar
 // no Discord. Só PNG em data URL, até 12 MB.
 ipcMain.handle('app:copiarImagem', (_e, url) => {

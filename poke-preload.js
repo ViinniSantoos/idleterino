@@ -422,11 +422,18 @@ contextBridge.executeInMainWorld({
     // ---- PASSIVAS DO PVP (26/11/2026) ----
     // A tabela oficial do jogo (/shared/pvp-passivas.mjs): qual espécie tem qual passiva e os números de cada uma.
     // Valem no PvP do tabuleiro (Ranqueado, torneios, Ginásio) a partir de PASSIVAS_DESDE_MS; Amistoso e Treino já.
-    let modPasP = null;
-    const modPas = () => modPasP || (modPasP = import('/shared/pvp-passivas.mjs').catch(() => { modPasP = null; return null; }));
-    let tabPasP = null;
+    // O jogo muda as passivas sem avisar o app (v1.495.1: Leavanny, Crustle, Carracosta, Stunfisk, Aegislash…): a tabela é
+    // relida do jogo a cada 30 min (o "?v=" pega a versão nova do módulo, sem precisar reabrir o app).
+    const PAS_TTL = 30 * 60 * 1000;
+    let modPasP = null, modPasEm = 0;
+    const modPas = () => {
+      if (!modPasP || Date.now() - modPasEm > PAS_TTL) { modPasEm = Date.now(); modPasP = import(`/shared/pvp-passivas.mjs?v=${Math.floor(Date.now() / PAS_TTL)}`).catch(() => { modPasP = null; return null; }); }
+      return modPasP;
+    };
+    let tabPasP = null, tabPasEm = 0;
     function tabelaPassivas() {
-      if (!tabPasP) {
+      if (!tabPasP || Date.now() - tabPasEm > PAS_TTL) {
+        tabPasEm = Date.now();
         tabPasP = (async () => {
           const m = await modPas();
           if (!m || !m.PASSIVAS || !m.PASSIVA_POR_ESPECIE) return null;
@@ -2142,7 +2149,7 @@ contextBridge.executeInMainWorld({
       const ultra = document.documentElement.classList.contains('modo-ultra');
       const economia = document.documentElement.classList.contains('modo-economia');
       let f = document.getElementById('idleterino-ultra');
-      const t = ultra || economia ? treinador() : null;
+      const t = ultra ? treinador() : null; // só no ULTRA (no Economia o painel ficava por cima das coisas do jogo)
       if (!t) { if (f) f.remove(); return; }
       const caixa = ultra ? (document.querySelector('#ultra .ultra-caixa') || document.querySelector('.ultra-caixa')) : null;
       if (f && f.dataset.onde !== (caixa ? 'caixa' : 'topo')) { f.remove(); f = null; }
@@ -2151,7 +2158,8 @@ contextBridge.executeInMainWorld({
         f = document.createElement('div'); f.id = 'idleterino-ultra'; f.dataset.onde = caixa ? 'caixa' : 'topo';
         f.style.cssText = 'pointer-events:none;margin:6px 0 8px;padding:10px 12px;border-radius:14px;background:rgba(12,13,20,.92);border:1px solid rgba(255,255,255,.14);color:#eef0f7;font:13px/1.35 "Segoe UI",system-ui,sans-serif;text-align:left;box-shadow:0 10px 30px rgba(0,0,0,.45)';
         if (!caixa) f.style.cssText += ';position:fixed;left:50%;top:8px;transform:translateX(-50%);z-index:2147483646;width:min(640px,96vw)';
-        if (caixa) { const titulo = caixa.firstElementChild; if (titulo) titulo.after(f); else caixa.prepend(f); }
+        // A caixa do ULTRA do jogo é estreita (os nomes cortavam): o app a deixa mais larga enquanto o painel está nela.
+        if (caixa) { const titulo = caixa.firstElementChild; if (titulo) titulo.after(f); else caixa.prepend(f); caixa.style.maxWidth = 'min(620px, 96vw)'; caixa.style.width = 'min(620px, 96vw)'; }
         else (document.body || document.documentElement).append(f);
       }
       let rec = false; try { rec = localStorage.getItem('idt-painel-rec') === '1'; } catch {}
@@ -2166,20 +2174,20 @@ contextBridge.executeInMainWorld({
       const pocoes = itens ? Object.entries(jogo.eu.items || {}).map(([id, q]) => ({ id: Number(id), q: qtdDe(q), it: itens.get(Number(id)) })).filter((p) => p.it && p.it.category === 'heal' && p.q > 0) : [];
       let ses = null; try { ses = JSON.parse(localStorage.getItem('sessao-hunt:' + String(t.nick).toLowerCase()) || 'null'); } catch {}
       const porH = (x) => (ses && ses.ms > 60000 ? Math.round((Number(x) || 0) * 3600000 / ses.ms) : null);
-      const caixaR = (rot, val, sub, cor) => `<div style="background:#161926;border:1px solid rgba(255,255,255,.07);border-radius:10px;padding:6px 9px;min-width:0"><div style="font-size:10px;font-weight:800;color:#8a90a6">${rot}</div><div style="font-size:16px;font-weight:800;white-space:nowrap;${cor ? `color:${cor}` : ''}">${val}</div><div style="font-size:10.5px;color:#8a90a6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${sub || '&nbsp;'}</div></div>`;
+      const caixaR = (rot, val, sub, cor) => `<div style="background:#161926;border:1px solid rgba(255,255,255,.07);border-radius:10px;padding:6px 9px;min-width:0"><div style="font-size:10px;font-weight:800;color:#8a90a6">${rot}</div><div style="font-size:16px;font-weight:800;white-space:nowrap;${cor ? `color:${cor}` : ''}">${val}</div><div style="font-size:10.5px;color:#8a90a6;line-height:1.25">${sub || '&nbsp;'}</div></div>`;
       const img = (u, px, cor) => `<span style="position:relative;display:inline-block;flex:none;width:${px}px;height:${px}px;border-radius:50%;background:radial-gradient(circle at 50% 78%,${cor || 'rgba(169,112,255,.55)'},#161926 80%);border:2px solid rgba(255,255,255,.1)">${u ? `<img src="${u}" style="position:absolute;left:50%;bottom:-2px;transform:translateX(-50%);width:${px + 4}px;height:${px + 4}px;image-rendering:pixelated">` : ''}</span>`;
       let h = `<div style="display:flex;align-items:baseline;gap:8px"><b style="font-size:15px">${ecoEsc(t.nick)} · Nv ${ecoN(t.level)}</b><span style="margin-left:auto;font-size:11.5px;color:#8a90a6">${pz && pz.hunt ? `${ecoEsc(pz.hunt.nome)} (Nv ${ecoN(pz.hunt.nivel)})` : ''}</span><span data-rec style="pointer-events:auto;cursor:pointer;padding:0 6px;color:#8a90a6;font-weight:800" title="Recolher / abrir o painel do Idleterino">${rec ? '▾' : '—'}</span></div>`;
       h += `<div style="height:6px;border-radius:6px;background:rgba(255,255,255,.1);overflow:hidden;margin:6px 0 2px"><i style="display:block;height:100%;width:${pct}%;background:linear-gradient(90deg,#ff4d6d,#a970ff,#53fc18)"></i></div><div style="font-size:11.5px;color:#a7adc2">${ecoN(t.dentro)} / ${ecoN(t.faixa)} xp (${pct.toFixed(1).replace('.', ',')}%)${ses && porH(ses.xpTreinador) ? ` · +${ecoCurto(porH(ses.xpTreinador))} xp/h` : ''}</div>`;
       if (!rec) {
         const nb = bolas.reduce((s, b) => s + b.q, 0), np = pocoes.reduce((s, p) => s + p.q, 0);
-        h += `<div style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px;margin:10px 0 4px">`
+        h += `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(104px,1fr));gap:6px;margin:10px 0 4px">`
           + caixaR('<i style="display:inline-block;width:10px;height:10px;border-radius:50%;vertical-align:-1px;background:radial-gradient(circle at 35% 35%,#fff2b0,#f2b72a 55%,#b9821a)"></i> COINS', ecoCurto(t.gold), ses && porH(ses.gold) ? `+${ecoCurto(porH(ses.gold))}/h` : '', '#ffcf4a')
           + caixaR('💎 GEMAS', ecoN(jogo.eu.orbs), 'no inventário', '#ff5fb0')
           + caixaR('⚪ POKÉBOLAS', ecoN(nb), bolas.slice(0, 2).map((b) => `${nomeBola(b.id)} ${ecoN(b.q)}`).join(' · '))
           + caixaR('🧪 POÇÕES', ecoN(np), pocoes.slice(0, 2).map((p) => `${nomeIt(p.id)} ${ecoN(p.q)}`).join(' · '))
           + caixaR('🎯 CAPTURAS', ses ? ecoN(ses.capturas) : '—', ses && porH(ses.capturas) != null ? `${ecoN(porH(ses.capturas))}/h na sessão` : 'na sessão', '#45e39b') + '</div>';
         if (pz && pz.besti.length) {
-          h += `<div style="font-size:10.5px;font-weight:800;color:#8a90a6;margin:8px 0 4px">📖 BESTIÁRIO DESTA HUNT</div><div style="display:grid;grid-template-columns:repeat(${Math.min(3, pz.besti.length)},minmax(0,1fr));gap:6px">`;
+          h += `<div style="font-size:10.5px;font-weight:800;color:#8a90a6;margin:8px 0 4px">📖 BESTIÁRIO DESTA HUNT</div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:6px">`;
           for (const b of pz.besti) {
             const p2 = b.alvo ? Math.min(100, (b.k / b.alvo) * 100) : 100;
             h += `<div style="display:flex;gap:7px;align-items:center;background:#161926;border-radius:10px;padding:4px 7px;min-width:0">${img(b.img, 30)}<div style="min-width:0;flex:1"><b style="font-size:12px">${ecoEsc(b.nome)}</b><div style="font-size:10.5px;color:#8a90a6">${b.alvo ? `${ecoN(b.k)} / ${ecoN(b.alvo)} abates` : `${ecoN(b.k)} · ✅ máximo`}</div><div style="height:4px;border-radius:4px;background:#272c40;overflow:hidden;margin-top:2px"><i style="display:block;height:100%;width:${p2}%;background:${b.alvo ? '#5fb4ff' : '#45e39b'}"></i></div></div></div>`;
@@ -2187,9 +2195,9 @@ contextBridge.executeInMainWorld({
           h += '</div>';
         }
         if (pz && pz.preys.length) {
-          h += `<div style="font-size:10.5px;font-weight:800;color:#8a90a6;margin:8px 0 4px">🧿 PREY DO DIA</div><div style="display:flex;gap:6px">`;
+          h += `<div style="font-size:10.5px;font-weight:800;color:#8a90a6;margin:8px 0 4px">🧿 PREY DO DIA</div><div style="display:flex;flex-wrap:wrap;gap:6px">`;
           for (const p of pz.preys) {
-            h += `<div style="flex:1;display:flex;gap:8px;align-items:center;border-radius:10px;padding:4px 9px;background:#161926;border:1px solid ${p.naHunt ? 'rgba(169,112,255,.4)' : 'rgba(255,199,90,.45)'}">${img(p.img, 32)}<div style="min-width:0"><b style="font-size:12.5px">${ecoEsc(p.nome)}</b><div style="font-size:10.5px;color:#8a90a6">${ecoEsc(p.bonus)} ${p.est}</div></div><div style="margin-left:auto;text-align:right">${p.naHunt ? `<b style="font-size:16px;color:#45e39b">${ecoN(p.hoje)}</b><div style="font-size:10px;color:#8a90a6">abatidos hoje</div>` : `<b style="font-size:11px;color:#ffc75a">⚠ não aparece<br>nesta hunt</b>`}</div></div>`;
+            h += `<div style="flex:1 1 180px;display:flex;gap:8px;align-items:center;border-radius:10px;padding:4px 9px;background:#161926;border:1px solid ${p.naHunt ? 'rgba(169,112,255,.4)' : 'rgba(255,199,90,.45)'}">${img(p.img, 32)}<div style="min-width:0"><b style="font-size:12.5px">${ecoEsc(p.nome)}</b><div style="font-size:10.5px;color:#8a90a6">${ecoEsc(p.bonus)} ${p.est}</div></div><div style="margin-left:auto;text-align:right">${p.naHunt ? `<b style="font-size:16px;color:#45e39b">${ecoN(p.hoje)}</b><div style="font-size:10px;color:#8a90a6">abatidos hoje</div>` : `<b style="font-size:11px;color:#ffc75a">⚠ não aparece<br>nesta hunt</b>`}</div></div>`;
           }
           h += '</div>';
         }

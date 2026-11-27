@@ -1031,3 +1031,8 @@ input, select { background: var(--s3); border: 1px solid var(--line-2); border-r
 .rz-item.comRet > .retrato { grid-row: 1 / span 4; }
 .rz-item.comRet > *:not(.retrato) { grid-column: 2; }
 .tr-p2-cab { display: flex; align-items: center; gap: 12px; }
+
+/* ⏱️ Desempenho (Ajustes) */
+.dsp-grid { display: grid; grid-template-columns: 1fr auto auto; gap: 4px 18px; margin: 12px 0 6px; font-variant-numeric: tabular-nums; }
+.dsp-grid > :nth-child(3n+2), .dsp-grid > :nth-child(3n) { text-align: right; }
+

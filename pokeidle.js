@@ -828,6 +828,92 @@ module.exports = function createPokeIdle(ctx) {
     } catch { return c || null; }
   }
 
+  // ---------- 📊 COMPS DO TOP (27/11/2026, o jeito dos sites de TFT: MetaTFT / TFT Academy) ----------
+  // Partidas REAIS do top 50 (Tracker público do jogo: ladder + partidas de cada um). Cada time vira uma "comp" (times que
+  // dividem 3+ pokémon); para cada comp: jogos, vitórias, taxa de vitória (corrigida pela amostra), quantos jogadores usam,
+  // PR médio, tendência (últimas 48 h × antes), o pokémon que carrega (mais dano) e quem sobrevive. CONFRONTOS: quando os
+  // dois lados da partida são do top 50, a mesma partida aparece na lista dos dois (mesmo "em") — dá a comp contra comp sem
+  // nenhuma consulta a mais. Leitura gentil: 51 consultas, uma a cada 0,5 s, no máximo 1× a cada 6 h (ou no botão).
+  const compsPath = () => path.join(app.getPath('userData'), 'pvp-comps.json');
+  let compsCache = null, compsLendo = null;
+  ipcMain.handle('poke:pvp:comps', (_e, forcar) => compsLer(!!forcar));
+  async function compsLer(forcar) {
+    if (!compsCache) compsCache = readJson(compsPath(), null);
+    if (compsCache && !forcar && Date.now() - compsCache.em < 6 * 3600 * 1000) return compsCache;
+    if (compsLendo) return compsLendo;
+    compsLendo = (async () => {
+      const api = async (rota, q) => { const u = new URL(`https://pokeidle.io/tracker/api/${rota}`); for (const [k, v] of Object.entries(q || {})) u.searchParams.set(k, String(v)); const r = await fetch(u, { headers: { accept: 'application/json' } }); if (!r.ok) throw new Error(`tracker ${rota} ${r.status}`); return r.json(); };
+      const espera = (ms) => new Promise((res) => setTimeout(res, ms));
+      const lad = await api('ladder', { pagina: 1, limite: 50 });
+      const top = (lad.linhas || []).slice(0, 50).map((l, i) => ({ nick: l.nick, pr: Number(l.pontos ?? l.pr) || 0, pos: Number(l.pos ?? l.posicao) || i + 1 }));
+      const jogos = []; // { nick, em, venci, pr, pks:[{id,nome,nivel,dano,abates,caiu}], op }
+      for (const t of top) {
+        try {
+          const j = await api('partidas', { nick: t.nick });
+          for (const p of (j.partidas || []).slice(0, 25)) {
+            const pks = ((p.eu && p.eu.pks) || []).map((k) => ({ id: Number(k.id), nome: k.nome, nivel: Number(k.nivel) || 0, dano: Number(k.dano) || 0, abates: Number(k.abates) || 0, caiu: !!k.caiu }));
+            if (pks.length < 3) continue;
+            jogos.push({ nick: t.nick, em: p.em, venci: !!p.venci, pr: Number(p.antes) || t.pr, pks, op: p.oponente && p.oponente.nick ? String(p.oponente.nick) : null, dur: Number(p.duracaoMs) || 0 });
+          }
+        } catch {}
+        await espera(500);
+      }
+      // Agrupar em comps: núcleo = os 3 que mais aparecem juntos; time entra na comp com quem divide 3+ pokémon.
+      const comps = [];
+      const ids = (g) => g.pks.map((k) => k.id);
+      for (const g of jogos.slice().sort((a, b) => String(a.em).localeCompare(String(b.em)))) {
+        const s = new Set(ids(g));
+        let c = comps.find((x) => x.core.filter((id) => s.has(id)).length >= 3);
+        if (!c) { c = { core: ids(g).slice(0, 5), conta: new Map(), jogos: [] }; comps.push(c); }
+        c.jogos.push(g); for (const id of s) c.conta.set(id, (c.conta.get(id) || 0) + 1);
+        c.core = [...c.conta.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([id]) => id);
+      }
+      const nomeDe = new Map(); for (const g of jogos) for (const k of g.pks) nomeDe.set(k.id, k.nome);
+      const agora = Date.now(), H48 = 48 * 3600 * 1000;
+      const wilson = (v, n) => { if (!n) return 0; const z = 1.28, ph = v / n; return (ph + z * z / (2 * n) - z * Math.sqrt((ph * (1 - ph) + z * z / (4 * n)) / n)) / (1 + z * z / n); };
+      const compDe = new Map(); // jogo -> comp
+      const out = comps.filter((c) => c.jogos.length >= 3).map((c, i) => {
+        const n = c.jogos.length, v = c.jogos.filter((g) => g.venci).length;
+        const rec = c.jogos.filter((g) => agora - Date.parse(g.em) < H48), ant = c.jogos.filter((g) => agora - Date.parse(g.em) >= H48);
+        const wrR = rec.length ? rec.filter((g) => g.venci).length / rec.length : null, wrA = ant.length ? ant.filter((g) => g.venci).length / ant.length : null;
+        // Quem carrega: a média da fatia do dano do time e o quanto termina de pé, por pokémon do núcleo.
+        const mvp = c.core.map((id) => { let fat = 0, pe = 0, k = 0, ab = 0; for (const g of c.jogos) { const x = g.pks.find((p) => p.id === id); if (!x) continue; const tot = g.pks.reduce((s, p) => s + p.dano, 0) || 1; fat += x.dano / tot; pe += x.caiu ? 0 : 1; ab += x.abates; k++; } return { id, nome: nomeDe.get(id) || `#${id}`, uso: c.conta.get(id), dano: k ? Math.round((fat / k) * 100) : 0, pe: k ? Math.round((pe / k) * 100) : 0, abates: k ? Math.round((ab / k) * 10) / 10 : 0 }; });
+        const obj = { id: i + 1, core: c.core, nomes: c.core.map((id) => nomeDe.get(id) || `#${id}`), jogos: n, vitorias: v, wr: Math.round((v / n) * 1000) / 10, wrAjust: Math.round(wilson(v, n) * 1000) / 10,
+          jogadores: [...new Set(c.jogos.map((g) => g.nick))], pr: Math.round(c.jogos.reduce((s, g) => s + g.pr, 0) / n), nivel: Math.round(c.jogos.reduce((s, g) => s + g.pks.reduce((a, p) => a + p.nivel, 0) / g.pks.length, 0) / n),
+          tendencia: { usoRec: rec.length, usoAnt: ant.length, wrRec: wrR == null ? null : Math.round(wrR * 100), wrAnt: wrA == null ? null : Math.round(wrA * 100) },
+          mvp: mvp.sort((a, b) => b.dano - a.dano), duracao: Math.round(c.jogos.reduce((s, g) => s + g.dur, 0) / n / 1000) };
+        for (const g of c.jogos) compDe.set(g, obj.id);
+        return obj;
+      });
+      // Confrontos: a mesma partida na lista dos dois lados (mesmo "em" e os nicks cruzados).
+      const porEm = new Map(); for (const g of jogos) { const k = `${g.em}`; (porEm.get(k) || porEm.set(k, []).get(k)).push(g); }
+      const mt = new Map(); // "a|b" -> { v, n }
+      for (const lista of porEm.values()) {
+        for (const g of lista) {
+          const o = lista.find((x) => x !== g && x.nick.toLowerCase() === String(g.op || '').toLowerCase());
+          const a = compDe.get(g), b = o && compDe.get(o);
+          if (!a || !b || a === b) continue;
+          const k = `${a}|${b}`; const m = mt.get(k) || { v: 0, n: 0 }; m.n++; if (g.venci) m.v++; mt.set(k, m);
+        }
+      }
+      for (const c of out) {
+        const vs = [];
+        for (const [k, m] of mt) { const [a, b] = k.split('|').map(Number); if (a === c.id && m.n >= 2) vs.push({ contra: b, n: m.n, wr: Math.round((m.v / m.n) * 100) }); }
+        c.confrontos = vs.sort((x, y) => y.n - x.n);
+      }
+      // Tier pela vitória corrigida pela amostra (S = os ~15% melhores com 8+ jogos).
+      const ord = out.filter((c) => c.jogos >= 8).sort((a, b) => b.wrAjust - a.wrAjust);
+      ord.forEach((c, i) => { const q = i / Math.max(1, ord.length); c.tier = q < 0.15 ? 'S' : q < 0.4 ? 'A' : q < 0.7 ? 'B' : 'C'; });
+      for (const c of out) if (!c.tier) c.tier = 'N'; // poucos jogos
+      out.sort((a, b) => ('SABCN'.indexOf(a.tier) - 'SABCN'.indexOf(b.tier)) || b.wrAjust - a.wrAjust);
+      const res = { em: Date.now(), temporada: lad.temporada || null, jogadores: top.length, partidas: jogos.length, confrontos: [...mt.values()].reduce((s, m) => s + m.n, 0), comps: out.slice(0, 40) };
+      compsCache = res;
+      try { fs.writeFileSync(compsPath(), JSON.stringify(res)); } catch {}
+      return res;
+    })().catch((e) => ({ erro: String(e && e.message || e), ...(compsCache || {}) })).finally(() => { setTimeout(() => { compsLendo = null; }, 0); });
+    return compsLendo;
+  }
+
   // ---------- Tier list do Idleterino (PvP e PvE) ----------
   // Três fontes, cada uma com o seu peso, e a nota final vira S/A/B/C/D:
   //  · NOSSOS dados: o duelo do jogo contra os times do top 50 (candidatos do meta), o Tracker oficial (winrate real
@@ -1130,6 +1216,8 @@ module.exports = function createPokeIdle(ctx) {
       const i = info.get(acc.id) || {};
       return r.ok ? { ok: true, nick: i.nick && i.nick !== '—' ? i.nick : acc.name } : { erro: 'O jogo ainda está carregando. Clique no link de novo em instantes.' };
     },
+    // ⏱️ Desempenho (Ajustes): o processo de cada conta do PokeIdle, com o nome e o modo.
+    processos: () => [...views].map(([id, v]) => { try { const a = account(id) || {}; const i = info.get(id) || {}; return { pid: v.webContents.getOSProcessId(), nome: i.nick && i.nick !== '—' ? i.nick : a.name, modo: a.mode || null }; } catch { return null; } }).filter(Boolean),
     setOptimizeEvery: (min) => { config.optimizeEvery = [0, 30, 60, 120, 300].includes(Number(min)) ? Number(min) : 0; saveConfig(); send('status', snapshot()); },
   };
   return api;
