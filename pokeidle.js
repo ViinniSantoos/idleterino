@@ -214,7 +214,7 @@ module.exports = function createPokeIdle(ctx) {
     v.setBackgroundColor('#090a0f');
     followUA(v.webContents);
     v.webContents.setAudioMuted(!!a.muted);
-    v.webContents.on('did-finish-load', () => { applyZoom(a.id); applyMode(a.id); setTimeout(() => readOne(a.id), 4000); });
+    v.webContents.on('did-finish-load', () => { applyZoom(a.id); applyMode(a.id); setTimeout(() => readOne(a.id), 4000); setTimeout(() => mandarPainelCfg(a.id), 2000); });
     // Ctrl + rodinha do mouse dentro do jogo também muda o zoom (e fica salvo na conta).
     v.webContents.on('zoom-changed', (_e, dir) => { setZoom(a.id, (account(a.id) || {}).zoom + (dir === 'in' ? 0.1 : -0.1)); send('status', snapshot()); });
     // Caiu ou não carregou: tenta de novo sozinho (a conta precisa ficar conectada).
@@ -640,7 +640,7 @@ module.exports = function createPokeIdle(ctx) {
       max: MAX_ACCOUNTS, selected: config.selected,
       mainId: account(config.mainId) ? config.mainId : (config.accounts[0] ? config.accounts[0].id : null), autoBackgroundUltra: config.autoBackgroundUltra, autoFreezeMin: config.autoFreezeMin,
       pokeCount: config.accounts.filter((a) => isPokeIdle(urlOf(a))).length, maxWindows: MAX_WINDOWS, defaultUrl: GAME,
-      optimizeEvery: config.optimizeEvery || 0,
+      optimizeEvery: config.optimizeEvery || 0, painel: painelDe(), resumos: Object.fromEntries(resumos),
       voteMs: VOTE_MS, marketAt: lastMarket, hunts: huntLevels, pvpAt: pvpMeta ? pvpMeta.at : 0, pvpRunning,
       accounts: config.accounts.map((a) => ({ ...a, horas: ctx.horasOf ? ctx.horasOf(a.id) : null, memMB: memOf(a.id), optLog: optLog.get(a.id) || [], optNext: config.optimizeEvery ? Math.max(openedAt.get(a.id) || 0, lastReopen.get(a.id) || 0) + config.optimizeEvery * 60000 : null, vote: (config.votes || {})[a.id] || null, url: urlOf(a), isPoke: isPokeIdle(urlOf(a)), host: hostOf(urlOf(a)), effectiveMode: effectiveMode(a), zoom: a.zoom || 1, info: info.get(a.id) || null, frozen: frozen.has(a.id), frozenImg: frozen.get(a.id) || null })),
     };
@@ -1079,6 +1079,42 @@ module.exports = function createPokeIdle(ctx) {
     pvpCollect(true).catch(() => {});
     return { ok: true, running: true };
   });
+  // ---------- 📋 PAINEL DO IDLETERINO FORA DO ULTRA (27/11/2026) ----------
+  // A escolha: 'duas' (padrão), 'faixa' (em cima de cada conta, na tela do app), 'estoque' (no GASTOS do Economia do
+  // jogo) ou 'nenhum'. A faixa lê um resumo pequeno de cada conta a cada 8 s, só com a tela do PokeIdle aberta.
+  const RESUMO_MS = 8 * 1000;
+  const PAINEIS = ['duas', 'faixa', 'estoque', 'nenhum'];
+  const painelDe = () => (PAINEIS.includes(config.painel) ? config.painel : 'duas');
+  const comFaixa = () => ['duas', 'faixa'].includes(painelDe());
+  const comEstoque = () => ['duas', 'estoque'].includes(painelDe());
+  const resumos = new Map(); // id -> resumo da conta
+  function mandarPainelCfg(id) {
+    const v = views.get(id);
+    if (!v || v.webContents.isDestroyed()) return;
+    v.webContents.executeJavaScript(`window.__idleterinoMercado && window.__idleterinoMercado.painelCfg ? window.__idleterinoMercado.painelCfg(${JSON.stringify({ estoque: comEstoque() })}) : null`).catch(() => {});
+  }
+  let lendoResumos = false;
+  async function lerResumos() {
+    if (!visible || !comFaixa() || lendoResumos) return;
+    lendoResumos = true;
+    try {
+      const out = {};
+      for (const [id, v] of views) {
+        const a = account(id);
+        if (!a || !isPokeIdle(urlOf(a)) || v.webContents.isDestroyed() || v.webContents.isLoading()) continue;
+        const r = await v.webContents.executeJavaScript('window.__idleterinoMercado && window.__idleterinoMercado.resumo ? window.__idleterinoMercado.resumo() : null').catch(() => null);
+        if (r) { resumos.set(id, { ...r, at: Date.now() }); out[id] = resumos.get(id); }
+      }
+      if (Object.keys(out).length) send('resumo', out);
+    } finally { lendoResumos = false; }
+  }
+  ipcMain.handle('poke:painel', (_e, p) => {
+    if (PAINEIS.includes(p)) { config.painel = p; saveConfig(); }
+    for (const id of views.keys()) mandarPainelCfg(id);
+    if (comFaixa()) setTimeout(() => lerResumos().catch(() => {}), 300);
+    return snapshot();
+  });
+
   ipcMain.handle('poke:view', (_e, isVisible, rect, tileRects) => {
     const before = config.accounts.map((a) => isShown(a.id)).join();
     visible = !!isVisible;
@@ -1089,6 +1125,8 @@ module.exports = function createPokeIdle(ctx) {
       for (const [id, r] of Object.entries(tileRects)) if (account(id) && r && r.width > 0 && r.height > 0) tiles[id] = toRect(r);
     }
     layout();
+    // Abriu a tela do PokeIdle: a faixa ganha números logo (sem esperar os 8 s).
+    if (visible && comFaixa() && (!resumos.size || [...resumos.values()].some((r) => Date.now() - r.at > RESUMO_MS))) setTimeout(() => lerResumos().catch(() => {}), 200);
     // Quem entrou ou saiu da tela troca de modo (se "ULTRA automático no fundo" estiver ligado).
     if (config.autoBackgroundUltra && before !== config.accounts.map((a) => isShown(a.id)).join()) for (const a of config.accounts) applyMode(a.id);
     return true;
@@ -1154,6 +1192,7 @@ module.exports = function createPokeIdle(ctx) {
     for (const a of config.accounts) createView(a);
     timers.push(setInterval(readAll, READ_MS));
     timers.push(setInterval(autoOptimize, 60 * 1000));
+    timers.push(setInterval(() => lerResumos().catch(() => {}), RESUMO_MS));
     iniciado = true;
     ligarTick();
     setTimeout(askMarket, 60 * 1000);

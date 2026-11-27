@@ -1055,3 +1055,43 @@ input, select { background: var(--s3); border: 1px solid var(--line-2); border-r
 .comp-mvp { display: flex; align-items: center; gap: 10px; padding: 4px 0; }
 .comp-mvp b { min-width: 130px; }
 @media (max-width: 1150px) { .comp-lin { grid-template-columns: 56px 1fr; } .comp-nums, .comp-bt { grid-column: 1 / -1; } .comp-bt { flex-direction: row; } }
+
+/* 📋 Faixa do Idleterino em cima de cada conta (27/11/2026) — pequena e só leitura */
+.faixa-idt { flex: none; padding: 5px 7px 6px; background: #0f1119; border-bottom: 1px solid var(--line); font-size: 12px; color: var(--text, #eef0f7); }
+.fx-l { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.fx-it { display: inline-flex; align-items: center; gap: 4px; background: #161926; border-radius: 7px; padding: 2px 7px; white-space: nowrap; }
+.fx-it b { font-size: 12.5px; }
+.fx-it em, .fx-n em, .fx-v em, .soma-idt em { font-style: normal; font-size: 10.5px; color: var(--muted, #8a90a6); }
+.fx-it.gold b, .soma-idt b.gold { color: #ffcf4a; } .fx-it.gem b, .soma-idt b.gem { color: #ff5fb0; } .fx-it.cap b, .soma-idt b.cap { color: #45e39b; }
+.fx-it.baixo { background: #3d2c12; box-shadow: inset 0 0 0 1px #c9893a; } .fx-it.baixo b { color: #ffc75a; }
+.fx-it.zero { background: #3a1820; box-shadow: inset 0 0 0 1px #d0465c; } .fx-it.zero b { color: #ff7a8a; }
+.fx-ico { width: 15px; height: 15px; image-rendering: pixelated; object-fit: contain; }
+.fx-e { font-size: 12px; line-height: 1; }
+.fx-coin { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: radial-gradient(circle at 35% 35%, #fff2b0, #f2b72a 55%, #b9821a); }
+.fx-mais { margin-left: auto; background: none; border: 0; color: var(--muted, #8a90a6); font-weight: 800; cursor: pointer; padding: 0 4px; font-size: 12px; }
+.fx-mais:hover { color: #fff; }
+.fx-l2 { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.fx-card { flex: 1 1 170px; min-width: 0; display: flex; align-items: center; gap: 6px; background: #161926; border: 1px solid rgba(169,112,255,.35); border-radius: 8px; padding: 2px 7px 2px 3px; }
+.fx-card.fora { border-color: rgba(255,199,90,.5); }
+.fx-card.melhor { border-color: rgba(255,207,74,.5); background: linear-gradient(90deg, #2a2210, #161926 70%); }
+.fx-n { display: flex; flex-direction: column; min-width: 0; line-height: 1.15; }
+.fx-n b { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fx-n b i { font-style: normal; font-weight: 400; font-size: 10.5px; color: var(--muted, #8a90a6); }
+.fx-n em.ou { color: #ffcf4a; font-weight: 800; font-size: 9px; letter-spacing: .03em; }
+.fx-v { margin-left: auto; text-align: right; line-height: 1.1; white-space: nowrap; }
+.fx-v b { font-size: 13.5px; } .fx-v em { margin-left: 3px; } .fx-v b.ok { color: #45e39b; } .fx-v b.am { color: #ffc75a; font-size: 11px; } b.ou { color: #ffcf4a; }
+.fx-ret { position: relative; flex: none; display: inline-block; border-radius: 50%; background: radial-gradient(circle at 50% 78%, rgba(169,112,255,.5), #161926 80%); }
+.fx-card.melhor .fx-ret { background: radial-gradient(circle at 50% 78%, rgba(255,207,74,.55), #161926 80%); }
+.fx-ret img { position: absolute; left: 50%; bottom: -2px; transform: translateX(-50%); image-rendering: pixelated; }
+.fx-av { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.fx-av span { font-size: 10.5px; font-weight: 700; color: #ffc75a; background: #2e2410; border-radius: 6px; padding: 1px 6px; }
+.fx-det { margin-top: 5px; display: grid; gap: 3px; }
+.fx-t { font-size: 10px; font-weight: 800; color: var(--muted, #8a90a6); letter-spacing: .03em; }
+.fx-b { display: flex; align-items: center; gap: 6px; background: #161926; border-radius: 7px; padding: 2px 7px 2px 3px; }
+.fx-bar { flex: 0 0 34%; height: 4px; border-radius: 4px; background: #272c40; overflow: hidden; } .fx-bar i { display: block; height: 100%; background: #5fb4ff; }
+.fx-vazio { color: var(--muted, #8a90a6); font-size: 11.5px; padding: 2px; }
+.soma-idt { flex: none; display: flex; flex-wrap: wrap; gap: 4px 16px; align-items: center; margin: 6px 6px 0; padding: 6px 12px; background: linear-gradient(90deg, #171a28, #141623); border: 1px solid rgba(169,112,255,.35); border-radius: 10px; font-size: 12px; }
+.soma-idt[hidden] { display: none; }
+.soma-idt .t { font-size: 10px; font-weight: 800; color: #a970ff; letter-spacing: .04em; }
+.soma-idt .n { display: inline-flex; align-items: center; gap: 5px; } .soma-idt .n b { font-size: 14px; }
+.soma-idt .fx-alerta { margin-left: auto; color: #ffc75a; font-weight: 700; font-size: 11.5px; white-space: nowrap; }

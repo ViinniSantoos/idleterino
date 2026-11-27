@@ -688,6 +688,86 @@ function focoBar(s) {
   f.append(tc, sair);
   return f;
 }
+// ---- 📋 FAIXA DO IDLETERINO EM CIMA DE CADA CONTA (27/11/2026, pedido do Fujin) ----
+// Fora do jogo (na tela do app), pequena: coins, gemas, bolas e poções (com o ícone do jogo), capturas, Prey do dia,
+// a melhor captura da sessão e os avisos. O ▾ abre o Bestiário da hunt. Com as contas juntas, uma linha soma todas.
+const comFaixaApp = () => S.poke && ['duas', 'faixa'].includes(S.poke.painel || 'duas');
+let faixaAberta = (() => { try { return new Set(JSON.parse(localStorage.getItem('faixaAberta') || '[]')); } catch { return new Set(); } })();
+const fxEsc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const fxN = (x) => Number(x || 0).toLocaleString('pt-BR');
+const fxCurto = (n) => { const v = Number(n) || 0, a = Math.abs(v); return a >= 1e9 ? `${(v / 1e9).toFixed(2).replace('.', ',')} bi` : a >= 1e6 ? `${(v / 1e6).toFixed(1).replace('.', ',')} mi` : a >= 1e4 ? `${Math.round(v / 1e3)} mil` : fxN(v); };
+const fxImg = (u) => (typeof u === 'string' && u.startsWith('data:image/') ? u : '');
+const fxIco = (u, cls = 'fx-ico') => (fxImg(u) ? `<img class="${cls}" src="${fxImg(u)}" alt="">` : '');
+const fxRet = (u, px) => `<span class="fx-ret" style="width:${px}px;height:${px}px">${fxImg(u) ? `<img src="${fxImg(u)}" style="width:${px + 4}px;height:${px + 4}px" alt="">` : ''}</span>`;
+const FX_COIN = '<i class="fx-coin"></i>';
+const fxHa = (t) => { const m = Math.max(0, Math.round((Date.now() - t) / 60000)); return m < 1 ? 'agora' : m < 60 ? `há ${m} min` : `há ${Math.floor(m / 60)}h${String(m % 60).padStart(2, '0')}`; };
+function faixaHtml(id) {
+  const r = S.poke && S.poke.resumos && S.poke.resumos[id];
+  if (!r) return '<div class="fx-vazio">Entre no jogo nesta conta para ver o resumo aqui.</div>';
+  const aberta = faixaAberta.has(id);
+  const it = (ico, val, sub, cls = '', tip = '') => `<span class="fx-it ${cls}"${tip ? ` title="${fxEsc(tip)}"` : ''}>${ico}<b>${val}</b>${sub ? `<em>${sub}</em>` : ''}</span>`;
+  let h = '<div class="fx-l">';
+  h += it(FX_COIN, fxCurto(r.gold), r.goldH ? `+${fxCurto(r.goldH)}/h` : '', 'gold', 'Coins (e quanto entra por hora nesta sessão)');
+  h += it('<span class="fx-e">💎</span>', fxN(r.orbs), '', 'gem', 'Gemas');
+  for (const b of r.bolas || []) h += it(fxIco(b.img) || '<span class="fx-e">⚪</span>', fxCurto(b.q), '', b.q <= 0 ? 'zero' : b.baixo ? 'baixo' : '', `${b.nome}: ${fxN(b.q)} na mochila${b.gasto ? ` · ${fxN(b.gasto)} gastas na sessão` : ''}`);
+  for (const p of r.pocoes || []) h += it(fxIco(p.img) || '<span class="fx-e">🧪</span>', fxCurto(p.q), '', p.q <= 0 ? 'zero' : p.baixo ? 'baixo' : '', `${p.nome}: ${fxN(p.q)} na mochila${p.gasto ? ` · ${fxN(p.gasto)} gastas na sessão` : ''}`);
+  if (r.cap != null) h += it('<span class="fx-e">🎯</span>', fxN(r.cap), r.capH != null ? `${fxN(r.capH)}/h` : '', 'cap', 'Capturas nesta sessão');
+  h += `<button class="fx-mais" data-fx-mais="${fxEsc(id)}" title="${aberta ? 'Fechar os detalhes' : 'Bestiário da hunt e detalhes'}">${aberta ? '▴' : '▾'}</button></div>`;
+  const linha2 = [];
+  for (const p of r.preys || []) linha2.push(`<div class="fx-card ${p.naHunt ? '' : 'fora'}" title="Prey do dia · ${fxEsc(p.bonus)} ${fxEsc(p.est)}">${fxRet(p.img, 22)}<span class="fx-n"><b>${fxEsc(p.nome)}</b><em>Prey · ${fxEsc(p.bonus)}</em></span><span class="fx-v">${p.naHunt ? `<b class="ok">${fxN(p.hoje)}</b><em>hoje</em>` : '<b class="am">⚠ fora da hunt</b>'}</span></div>`);
+  const m = r.melhor;
+  if (m) linha2.push(`<div class="fx-card melhor" title="Melhor pokémon capturado nesta sessão (nota da ficha do jogo)">${fxRet(m.img, 22)}<span class="fx-n"><em class="ou">🏆 MELHOR CAPTURA</em><b>${m.shiny ? '✨ ' : ''}${fxEsc(m.nome)} <i>Nv ${fxN(m.level)} · ${fxHa(m.em)}</i></b></span><span class="fx-v"><b class="ou">${Number(m.nota).toFixed(1).replace('.', ',')}</b><em>nota</em></span></div>`);
+  if (linha2.length) h += `<div class="fx-l2">${linha2.join('')}</div>`;
+  if ((r.avisos || []).length) h += `<div class="fx-av">${r.avisos.map((a) => `<span>⚠ ${fxEsc(a)}</span>`).join('')}</div>`;
+  if (aberta) {
+    h += `<div class="fx-det"><div class="fx-t">📖 BESTIÁRIO${r.hunt ? ` · ${fxEsc(r.hunt.nome)} (Nv ${fxN(r.hunt.nivel)})` : ''}</div>`;
+    if ((r.besti || []).length) for (const b of r.besti) { const p = b.alvo ? Math.min(100, (b.k / b.alvo) * 100) : 100; h += `<div class="fx-b">${fxRet(b.img, 20)}<span class="fx-n"><b>${fxEsc(b.nome)}</b><em>${b.alvo ? `${fxN(b.k)} / ${fxN(b.alvo)} abates` : `${fxN(b.k)} · ✅ máximo`}</em></span><i class="fx-bar"><i style="width:${p}%"></i></i></div>`; }
+    else h += '<div class="fx-vazio">Sem hunt agora.</div>';
+    h += '</div>';
+  }
+  return h;
+}
+function somaHtml(ids) {
+  const rs = ids.map((id) => S.poke.resumos && S.poke.resumos[id]).filter(Boolean);
+  if (rs.length < 2) return '';
+  const s = (k) => rs.reduce((t, r) => t + (Number(r[k]) || 0), 0);
+  const prey = rs.reduce((t, r) => t + (r.preys || []).filter((p) => p.naHunt).reduce((a, p) => a + (Number(p.hoje) || 0), 0), 0);
+  const av = rs.filter((r) => (r.avisos || []).length).length;
+  const best = rs.map((r) => r.melhor && { ...r.melhor, nick: r.nick }).filter(Boolean).sort((a, b) => b.nota - a.nota)[0];
+  return `<span class="t">TODAS AS CONTAS</span><span class="n">${FX_COIN}<b class="gold">${fxCurto(s('gold'))}</b><em>${s('goldH') ? `+${fxCurto(s('goldH'))}/h` : ''}</em></span>`
+    + `<span class="n"><span class="fx-e">💎</span><b class="gem">${fxN(s('orbs'))}</b><em>gemas</em></span>`
+    + `<span class="n"><span class="fx-e">🎯</span><b class="cap">${fxN(s('cap'))}</b><em>capturas${s('capH') ? ` · ${fxN(s('capH'))}/h` : ''}</em></span>`
+    + (prey ? `<span class="n"><span class="fx-e">🧿</span><b>${fxN(prey)}</b><em>Prey hoje</em></span>` : '')
+    + (best ? `<span class="n">${fxRet(best.img, 20)}<b class="ou">${Number(best.nota).toFixed(1).replace('.', ',')}</b><em>${fxEsc(best.nome)} · ${fxEsc(best.nick)}</em></span>` : '')
+    + (av ? `<span class="fx-alerta">⚠ ${av} conta${av > 1 ? 's precisam' : ' precisa'} de atenção</span>` : '');
+}
+function faixaEl(id) {
+  const f = el('div', 'faixa-idt'); f.dataset.faixa = id; f._h = faixaHtml(id); f.innerHTML = f._h;
+  return f;
+}
+// O resumo chegou (a cada ~8 s): troca só o conteúdo das faixas e da soma; se a altura mudou, o jogo é reposicionado.
+function atualizarFaixas() {
+  if (page !== 'poke') return;
+  let mudou = false;
+  for (const f of document.querySelectorAll('[data-faixa]')) {
+    const h = faixaHtml(f.dataset.faixa);
+    if (f._h === h) continue;
+    const antes = f.offsetHeight; f._h = h; f.innerHTML = h; if (f.offsetHeight !== antes) mudou = true;
+  }
+  const sm = document.querySelector('.soma-idt');
+  if (sm) { const h = somaHtml(JSON.parse(sm.dataset.ids || '[]')); const antes = sm.offsetHeight; if (sm._h !== h) { sm._h = h; sm.innerHTML = h; sm.hidden = !h; } if (sm.offsetHeight !== antes) mudou = true; }
+  if (mudou) requestAnimationFrame(() => pokeView($('#drawer').hidden && $('#modal').hidden));
+}
+document.addEventListener('click', (e) => {
+  const b = e.target.closest && e.target.closest('[data-fx-mais]');
+  if (!b) return;
+  const id = b.dataset.fxMais;
+  if (faixaAberta.has(id)) faixaAberta.delete(id); else faixaAberta.add(id);
+  try { localStorage.setItem('faixaAberta', JSON.stringify([...faixaAberta])); } catch {}
+  atualizarFaixas();
+  requestAnimationFrame(() => pokeView($('#drawer').hidden && $('#modal').hidden));
+});
+
 function renderPoke() {
   const root = $('#page-poke');
   const s = S.poke;
@@ -819,8 +899,15 @@ function renderPoke() {
         f.onclick = async () => { S.poke = await call('poke:unfreeze', x.id); renderPoke(); };
         bd.append(f);
       }
-      t.append(hd, bd);
+      t.append(hd);
+      if (comFaixaApp() && x.isPoke) t.append(faixaEl(x.id));
+      t.append(bd);
       stage.append(t);
+    }
+    if (comFaixaApp()) {
+      const sm = el('div', 'soma-idt'); const ids = juntas.filter((x) => x.isPoke).map((x) => x.id);
+      sm.dataset.ids = JSON.stringify(ids); sm._h = somaHtml(ids); sm.innerHTML = sm._h; sm.hidden = !sm._h;
+      wrap.append(sm);
     }
   } else if (a.frozen) {
     const f = el('div', 'frozen-shot');
@@ -829,7 +916,9 @@ function renderPoke() {
     f.onclick = async () => { S.poke = await call('poke:unfreeze', a.id); renderPoke(); };
     stage.append(f);
   }
-  wrap.append(bar, stage);
+  // Uma conta por vez: a faixa dela fica entre a barra e o jogo.
+  if (comFaixaApp() && a.isPoke && !stage.classList.contains('grid')) wrap.append(bar, faixaEl(a.id), stage);
+  else { const sm = wrap.querySelector('.soma-idt'); wrap.replaceChildren(bar, ...(sm ? [sm] : []), stage); }
   document.body.classList.toggle('foco', pokeFoco && page === 'poke');
   if (pokeFoco) {
     bar.remove();
@@ -970,6 +1059,11 @@ function openPokeDrawer() {
   for (const [v, l] of [[0, 'Desligado'], [30, 'A cada 30 min'], [60, 'A cada 1 h'], [120, 'A cada 2 h'], [300, 'A cada 5 h']]) { const op = el('option', null, l); op.value = v; o.append(op); }
   o.value = String(s.optimizeEvery || 0);
   o.onchange = async () => { S.poke = await call('poke:optimizeEvery', Number(o.value)); };
+  const pn = el('select');
+  for (const [v, l] of [['duas', 'As duas'], ['faixa', 'Faixa em cima de cada conta'], ['estoque', 'Estoque dentro do jogo (Economia)'], ['nenhum', 'Nenhum']]) { const op = el('option', null, l); op.value = v; pn.append(op); }
+  pn.value = s.painel || 'duas';
+  pn.onchange = async () => { S.poke = await call('poke:painel', pn.value); };
+  card.append(rowOpt('Painel do Idleterino', 'Faixa: em cima de cada conta, fora do jogo — coins, gemas, pokébolas, poções, capturas, Prey do dia e a melhor captura da sessão (com as contas juntas, uma linha soma todas). Estoque: no GASTOS do modo Economia do jogo, quanto ainda tem na mochila de cada item gasto, com aviso quando está acabando. O painel do ULTRA continua igual.', pn));
   card.append(rowOpt('Otimizar sozinho', 'Com horas aberta, a página do jogo vai acumulando memória e CPU (mesmo no modo Economia). O app fecha e abre cada conta num processo novo de tempos em tempos, uma por vez. Não perde o login nem a contagem da sessão. Acontece sempre no tempo escolhido.', o, true));
   $('#drawer').hidden = false;
 }
@@ -1440,6 +1534,7 @@ for (const ns of ['twitch', 'kick']) {
 }
 window.idle.on('twitch:toast', toast);
 window.idle.on('poke:status', (p) => { S.poke = p; refreshAll(); });
+window.idle.on('poke:resumo', (r) => { if (!S.poke) return; S.poke.resumos = { ...(S.poke.resumos || {}), ...r }; atualizarFaixas(); });
 window.idle.on('poke:abrir', (p) => { S.poke = p; go('poke'); });
 window.idle.on('poke:relayout', () => { if (page === 'poke') pokeView($('#drawer').hidden && $('#modal').hidden); });
 window.idle.on('app:state', (a) => { S.app = a; refreshAll(); });

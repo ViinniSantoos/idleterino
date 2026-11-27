@@ -2145,9 +2145,132 @@ contextBridge.executeInMainWorld({
       } catch {} finally { eco.calc = false; }
       return eco.pesado;
     }
+
+    // ---- 📋 PAINEL DO IDLETERINO FORA DO ULTRA (27/11/2026, pedido do Fujin: quem joga no Economia com as contas lado a lado) ----
+    // A pessoa escolhe nos Ajustes do PokeIdle: a faixa em cima de cada conta (na tela do APP, fora do jogo), o estoque
+    // dentro do GASTOS do modo Economia do jogo, as duas ou nenhuma. Tudo só leitura.
+    const painelCfg = { estoque: true };
+    // Ícones do próprio jogo (os mesmos caminhos dele), em PNG pequeno: a tela do app não carrega imagens do site.
+    const SPRITE_BOLA = { 1: '/assets/site/assets/ui/ball-poke.png', 2: '/assets/site/assets/ui/ball-great.png', 3: '/img/ball-super.png', 4: '/assets/site/assets/ui/ball-ultra.png', 5: '/img/ball-beast.png' };
+    const icoCache = new Map();
+    function icone(src, px = 18) {
+      if (!src) return Promise.resolve(null);
+      const k = `${src}|${px}`;
+      if (icoCache.has(k)) return icoCache.get(k);
+      const p = new Promise((res) => {
+        const im = new Image();
+        im.onload = () => { try { const c = document.createElement('canvas'); c.width = c.height = px; const g = c.getContext('2d'); g.imageSmoothingEnabled = false; const s = Math.min(px / im.naturalWidth, px / im.naturalHeight); const w = im.naturalWidth * s, h = im.naturalHeight * s; g.drawImage(im, (px - w) / 2, (px - h) / 2, w, h); res(c.toDataURL('image/png')); } catch { res(null); } };
+        im.onerror = () => res(null);
+        im.src = src;
+      });
+      icoCache.set(k, p);
+      return p;
+    }
+    const icoBola = (id) => icone(SPRITE_BOLA[id] || SPRITE_BOLA[1]);
+    // O mesmo caminho do jogo (shared/icone-item.mjs: caminhoIconeRel + srcIcone).
+    const icoItem = (id) => {
+      const x = eco.itens && eco.itens.get(Number(id)); const ic = x && x.icon ? String(x.icon) : '';
+      if (!ic) return Promise.resolve(null);
+      const rel = ic.startsWith('site/') ? ic : ic.startsWith('/') ? `site${ic}` : `site/assets/items/${ic}`;
+      return icone(`/assets/${rel}`);
+    };
+    const sesDe = (nick) => { try { return JSON.parse(localStorage.getItem('sessao-hunt:' + String(nick || '').toLowerCase()) || 'null'); } catch { return null; } };
+    // Gasto na sessão por hora → o estoque dá para menos de 1 h (ou acabou): aviso.
+    const acabando = (q, gasto, ms) => q <= 0 || (ms > 10 * 60000 && gasto > 0 && q < (gasto * 3600000) / ms);
+
+    // Estoque embaixo de cada item no GASTOS do modo Economia (o jogo só troca o número de dentro do botão; o app
+    // acrescenta um selinho com o que ainda tem na mochila, e põe de volta quando o jogo refaz os botões).
+    function pintarEstoqueGastos() {
+      const host = document.querySelector('.eco-gastos-chips');
+      if (!host) return;
+      if (!document.getElementById('idt-est-css')) {
+        const st = document.createElement('style'); st.id = 'idt-est-css';
+        st.textContent = '.eco-gasto.idt-ce{display:inline-grid!important;grid-template-columns:auto auto;align-items:center;column-gap:5px;row-gap:1px}'
+          + '.eco-gasto.idt-ce>:first-child{grid-row:1/3}.eco-gasto.idt-ce>b{grid-column:2;line-height:1.05}'
+          + '.idt-est{grid-column:2;justify-self:start;font:800 10px/1.2 "Segoe UI",system-ui,sans-serif;color:#5ee08f;background:#1d3a2a;border-radius:4px;padding:0 4px;white-space:nowrap}'
+          + '.idt-est.baixo{color:#ffc75a;background:#3d2c12}.idt-est.zero{color:#ff7a8a;background:#3a1820}'
+          + '.eco-gasto.idt-baixo{box-shadow:0 0 0 2px #c9893a inset}.eco-gasto.idt-zero{box-shadow:0 0 0 2px #d0465c inset}';
+        (document.head || document.documentElement).append(st);
+      }
+      const ses = sesDe(jogo.eu.nick) || {};
+      const ms = Number(ses.ms) || 0;
+      for (const bt of host.querySelectorAll('button.eco-gasto[data-chave]')) {
+        const ch = bt.dataset.chave || '';
+        const id = Number(ch.slice(1));
+        if (!id) continue;
+        const bola = ch[0] === 'b';
+        const q = qtdDe(((bola ? jogo.eu.balls : jogo.eu.items) || {})[id]);
+        const gasto = Number(String((bt.querySelector('b') || {}).textContent || '').replace(/\D+/g, '')) || 0;
+        const zero = q <= 0, baixo = !zero && acabando(q, gasto, ms);
+        let s = bt.querySelector('.idt-est');
+        if (!s) { s = document.createElement('span'); s.className = 'idt-est'; bt.append(s); bt.classList.add('idt-ce'); }
+        const txt = zero ? 'acabou' : `${baixo ? '⚠ ' : ''}${ecoN(q)}`;
+        if (s.textContent !== txt) s.textContent = txt;
+        s.classList.toggle('baixo', baixo); s.classList.toggle('zero', zero);
+        bt.classList.toggle('idt-baixo', baixo); bt.classList.toggle('idt-zero', zero);
+        s.title = `Na mochila: ${ecoN(q)}${ms > 60000 && gasto ? ` · gastando ~${ecoN(Math.round((gasto * 3600000) / ms))}/h nesta sessão` : ''} (Idleterino)`;
+      }
+    }
+    function limparEstoqueGastos() {
+      for (const s of document.querySelectorAll('.eco-gastos-chips .idt-est')) { const bt = s.parentElement; s.remove(); if (bt) bt.classList.remove('idt-ce', 'idt-baixo', 'idt-zero'); }
+    }
+
+    // Melhor captura da sessão: a lista de capturas que o próprio jogo guarda (capturas-hist:<nick>), só as feitas
+    // depois do começo da sessão, com a nota da ficha do jogo. Refeita só quando entra captura nova.
+    const melhorCache = { chave: null, v: null };
+    async function melhorCaptura(nick, ses) {
+      let lista = []; try { lista = JSON.parse(localStorage.getItem('capturas-hist:' + String(nick).toLowerCase()) || '[]'); } catch {}
+      if (!Array.isArray(lista)) lista = [];
+      const inicio = Date.now() - (Number(ses && ses.ms) || 0);
+      const daSessao = lista.filter((c) => c && Number(c.em) >= inicio - 5000 && c.speciesId != null);
+      const chave = `${daSessao.length}|${daSessao[0] ? daSessao[0].em : 0}`;
+      if (melhorCache.chave === chave) return melhorCache.v;
+      let best = null;
+      for (const c of daSessao.slice(0, 100)) {
+        const r = await fichaNota(c).catch(() => null);
+        if (r && r.nota != null && (!best || r.nota > best.nota)) best = { nota: r.nota, nome: c.nome || r.nome, sid: Number(c.speciesId), em: Number(c.em), level: Number(c.level) || 0, shiny: !!c.shiny };
+      }
+      if (best) best.img = await retrato(best.sid, 40);
+      melhorCache.chave = chave; melhorCache.v = best;
+      return best;
+    }
+
+    // O resumo que a faixa do app mostra (o app pede a cada ~8 s, só com a faixa ligada e a tela do PokeIdle aberta).
+    async function resumoConta() {
+      const t = treinador(); if (!t) return null;
+      const itens = eco.itens || await ecoItens();
+      const ses = sesDe(t.nick);
+      const ms = ses && ses.ms > 60000 ? Number(ses.ms) : 0;
+      const porH = (x) => (ms ? Math.round((Number(x) || 0) * 3600000 / ms) : null);
+      const gastoDe = (mapa, id) => qtdDe(((ses && ses[mapa]) || {})[id]);
+      const nomeBola = (id) => { const b = (jogo.bolas || []).find((x) => Number(x.id) === Number(id)); return b ? String(b.nome).replace(/ ?Ball$/i, '') : `#${id}`; };
+      const bolas = [];
+      for (const [id, q0] of Object.entries(jogo.eu.balls || {})) { const q = qtdDe(q0); if (q > 0 || gastoDe('bolas', id) > 0) bolas.push({ id: Number(id), q, nome: nomeBola(id), gasto: gastoDe('bolas', id) }); }
+      bolas.sort((a, b) => b.gasto - a.gasto || b.q - a.q);
+      const pocoes = [];
+      if (itens) for (const [id, q0] of Object.entries(jogo.eu.items || {})) { const it = itens.get(Number(id)); const q = qtdDe(q0); if (it && (it.category === 'heal' || it.category === 'revive') && (q > 0 || gastoDe(it.category === 'heal' ? 'pocoes' : 'revives', id) > 0)) pocoes.push({ id: Number(id), q, nome: String(it.name).replace(/ ?Potion$/i, ''), gasto: gastoDe(it.category === 'heal' ? 'pocoes' : 'revives', id), revive: it.category === 'revive' }); }
+      pocoes.sort((a, b) => (a.revive - b.revive) || b.gasto - a.gasto || b.q - a.q);
+      for (const b of bolas.slice(0, 3)) { b.img = await icoBola(b.id); b.baixo = acabando(b.q, b.gasto, ms); }
+      for (const p of pocoes.slice(0, 3)) { p.img = await icoItem(p.id); p.baixo = acabando(p.q, p.gasto, ms); }
+      const pz = await ecoPesado();
+      const melhor = ses ? await melhorCaptura(t.nick, ses).catch(() => null) : null;
+      const avisos = [];
+      for (const x of [...bolas, ...pocoes]) if (x.gasto > 0 && acabando(x.q, x.gasto, ms)) avisos.push(x.q <= 0 ? `${x.nome} acabou` : `${x.nome} acabando`);
+      for (const p of (pz && pz.preys) || []) if (!p.naHunt) avisos.push(`Prey ${p.nome} fora da hunt`);
+      return JSON.parse(JSON.stringify({
+        nick: t.nick, level: t.level, gold: t.gold, goldH: ses ? porH(ses.gold) : null, orbs: Number(jogo.eu.orbs) || 0,
+        cap: ses ? Number(ses.capturas) || 0 : null, capH: ses ? porH(ses.capturas) : null,
+        bolas: bolas.slice(0, 3), nBolas: bolas.reduce((s, b) => s + b.q, 0),
+        pocoes: pocoes.slice(0, 3), nPocoes: pocoes.filter((p) => !p.revive).reduce((s, p) => s + p.q, 0),
+        hunt: pz && pz.hunt, preys: (pz && pz.preys) || [], besti: (pz && pz.besti) || [], melhor, avisos: avisos.slice(0, 4),
+      }));
+    }
+
     setInterval(async () => {
       const ultra = document.documentElement.classList.contains('modo-ultra');
       const economia = document.documentElement.classList.contains('modo-economia');
+      if (economia && !ultra && painelCfg.estoque) { try { if (!eco.itens) ecoItens(); pintarEstoqueGastos(); } catch {} }
+      else if (!painelCfg.estoque) { try { limparEstoqueGastos(); } catch {} }
       let f = document.getElementById('idleterino-ultra');
       const t = ultra ? treinador() : null; // só no ULTRA (no Economia o painel ficava por cima das coisas do jogo)
       if (!t) { if (f) f.remove(); return; }
@@ -2252,6 +2375,9 @@ contextBridge.executeInMainWorld({
         },
         // Comércio: nota, stats e espécie da ficha de um anúncio (mesma conta da ficha do jogo).
         fichaNota(f) { return fichaNota(f).catch(() => null); },
+        // Painel do Idleterino fora do ULTRA: o resumo da faixa do app e a escolha do estoque dentro do jogo.
+        resumo() { return resumoConta().catch(() => null); },
+        painelCfg(c) { if (c && typeof c === 'object') painelCfg.estoque = c.estoque !== false; return { ...painelCfg }; },
         // Previsão de shiny: chance por encontro (do servidor) e o fim de cada bônus de shiny que vale agora.
         shinyInfo() {
           const fim = (k) => Number(canais[k] && canais[k].bonus && canais[k].bonus.shiny) || 0;
