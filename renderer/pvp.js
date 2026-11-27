@@ -723,7 +723,7 @@ async function renderPvp(keepScroll) {
   root.append(head);
 
   const tabs = el('div', 'pvp-tabs');
-  for (const [k, l] of [['meta', 'Meta'], ['tier', '🏆 Tier list'], ['time', 'Meu time'], ['plan', 'Planejador'], ['jogos', '🎬 Minhas partidas'], ['hist', 'Histórico']]) {
+  for (const [k, l] of [['meta', 'Meta'], ['comps', '📊 Comps do top'], ['tier', '🏆 Tier list'], ['time', 'Meu time'], ['plan', 'Planejador'], ['jogos', '🎬 Minhas partidas'], ['hist', 'Histórico']]) {
     tabs.append(button(l, pvpTab === k ? 'on' : '', () => { if (k === 'plan') pvpPlan = null; pvpTab = k; try { localStorage.setItem('pvpTab', k); } catch {} renderPvp(); }));
   }
   root.append(tabs);
@@ -732,6 +732,7 @@ async function renderPvp(keepScroll) {
   if (pvpTab === 'tier') { renderTierList(root, 'pvp'); root.scrollTop = scroll; return; }
   if (pvpTab === 'hist') { renderPvpHist(root); root.scrollTop = scroll; return; }
   if (pvpTab === 'jogos') { renderPvpPartidas(root, meta); root.scrollTop = scroll; return; }
+  if (pvpTab === 'comps') { renderPvpComps(root, meta); root.scrollTop = scroll; return; }
   if (!meta) {
     root.append(emptyBox(running ? 'Lendo o top 50…' : 'O meta ainda não foi lido', running ? 'Uma consulta a cada poucos segundos pela conta principal. Em uns 6 minutos aparece tudo aqui.' : 'Ele é lido sozinho 3 minutos depois de abrir o app (pela conta principal) e depois uma vez por dia. Ou clique em "Atualizar meta".'));
     return;
@@ -872,6 +873,108 @@ function renderTierList(root, modo0) {
 
 const arqName = (a, meta) => a.nome || a.core.slice(0, 3).map((id) => shortName((meta.info[id] || {}).nome || `#${id}`)).join(' + ');
 const arqTeam = (a, meta) => ((meta.perfis[a.rep] || {}).time || []).map((k) => { const inf = meta.info[k.speciesId] || {}; return { ...k, nome: k.nome || inf.nome, tipos: inf.tipos || [], alcance: inf.alcance || 1, stats: inf.stats, el: k.el || k.tmElemental, atk: [...new Set([...(inf.tipos || []), k.el || k.tmElemental].filter(Boolean))] }; });
+
+// ================= 📊 COMPS DO TOP (27/11/2026, o jeito dos sites de TFT) =================
+// As partidas REAIS do top 50 (Tracker público do jogo), agrupadas em comps: taxa de vitória corrigida pela amostra, uso,
+// PR médio, tendência das últimas 48 h, quem carrega e os confrontos comp contra comp. Time de um jogador só com vitória
+// alta = ⚡ anti-meta. "Planejar contra" leva a comp para o Planejador (com as casas reais, se você já enfrentou).
+let compsRes = null, compsLendo = false, compsFiltro = 'todas', compsAberta = null;
+async function compsLer(forcar) {
+  if (compsLendo) return;
+  compsLendo = true; if (page === 'pvp' && pvpTab === 'comps') renderPvp(true);
+  compsRes = await call('poke:pvp:comps', !!forcar).catch(() => compsRes);
+  compsLendo = false; if (page === 'pvp' && pvpTab === 'comps') renderPvp(true);
+}
+function compNome(c) { return c.nomes.slice(0, 3).map(shortName).join(' + '); }
+async function planejarContraComp(c, meta) {
+  const ids = c.core.slice(0, 5);
+  const info = await call('poke:pvp:info', pvpAcc, ids).catch(() => ({})) || {};
+  const enemy = ids.map((id, i) => { const inf = info[id] || (meta && meta.info || {})[id] || {}; const tipos = inf.tipos || []; return { speciesId: id, nome: inf.nome || c.nomes[i], tipos, atk: tipos, alcance: inf.alcance || 1, stats: inf.stats, level: c.nivel || 0 }; });
+  const real = casasReais(enemy, null);
+  const ec = real ? real.casas : casasDaEquipe(enemy.map(() => null), enemy.map((e) => e.alcance));
+  const nome = compNome(c);
+  pvpRival = { acc: pvpAcc, nick: nome, enemy, ec, temCasas: !!real, arq: { id: `rival:comp${c.id}`, rival: true, tier: '⚔️', n: 1, rep: nome, best: 'comp', core: [], nome: `${nome} (comp do top)` } };
+  pvpArqSel = `rival:comp${c.id}`; pvpPosModo = 'arq'; pvpTab = 'plan';
+  try { localStorage.setItem('pvpTab', 'plan'); localStorage.setItem('pvpPosModo', 'arq'); } catch {}
+  toast(`⚔️ ${nome} no Planejador: veja a sua melhor posição contra ela.`);
+  renderPvp();
+}
+function renderPvpComps(root, meta) {
+  const r = compsRes;
+  if (!r && !compsLendo) { setTimeout(() => compsLer(false), 0); }
+  const cab = el('div', 'card');
+  const h = el('div', 'pvp-sh');
+  h.append(el('div', 'ext-sec', '📊 Comps do top — partidas reais do top 50'));
+  const acoes = el('div', 'actions'); acoes.style.margin = '0';
+  acoes.append(el('span', 'sub', r && r.em ? `${fmt(r.partidas)} partidas de ${r.jogadores} jogadores · ${ago2(r.em)}` : ''), button(compsLendo ? 'Lendo o Tracker…' : '↻ Atualizar', 'mini', () => compsLer(true)));
+  h.append(acoes); cab.append(h);
+  cab.append(el('div', 'sub', 'Como nos sites de TFT: cada comp com a taxa de vitória (corrigida pela quantidade de jogos), quantos do top usam, o PR médio, a tendência das últimas 48 h, quem carrega e contra quem ela ganha ou perde — tudo das partidas de verdade do Tracker oficial.'));
+  const fil = el('div', 'pvp-tabs'); fil.style.marginTop = '10px';
+  for (const [k, l] of [['todas', 'Todas'], ['S', 'Tier S'], ['A', 'Tier A'], ['B', 'Tier B'], ['C', 'Tier C'], ['X', '⚡ Anti-meta']]) fil.append(button(l, compsFiltro === k ? 'on' : '', () => { compsFiltro = k; renderPvp(true); }));
+  cab.append(fil);
+  root.append(cab);
+  if (!r) { root.append(emptyBox('Lendo as partidas do top 50…', 'Uma consulta a cada meio segundo ao Tracker público do jogo (uns 30 s). Depois fica guardado por 6 h.')); return; }
+  if (r.erro && !r.comps) { root.append(emptyBox('Comps do top', `Não deu para ler o Tracker agora (${r.erro}).`)); return; }
+  const porId = new Map((r.comps || []).map((c) => [c.id, c]));
+  const COR = { S: '--tier-s', A: '--tier-a', B: '--tier-b', C: '--tier-c', X: '--brand-2', N: '--tier-d' };
+  const lista = (r.comps || []).filter((c) => (compsFiltro === 'todas' ? c.tier !== 'N' : c.tier === compsFiltro));
+  if (!lista.length) { root.append(emptyBox('Comps do top', 'Nenhuma comp neste filtro agora.')); return; }
+  for (const c of lista) {
+    const card = el('div', `card comp-card${compsAberta === c.id ? ' aberta' : ''}`);
+    const lin = el('div', 'comp-lin');
+    const tier = el('div', 'comp-tier', c.tier === 'X' ? '⚡' : c.tier); tier.style.background = `var(${COR[c.tier] || '--tier-d'})`;
+    tier.title = c.tier === 'X' ? 'Anti-meta: time de um jogador só, com vitória alta' : `Tier ${c.tier} pela vitória corrigida pela amostra`;
+    const time = el('div', 'comp-time');
+    c.core.slice(0, 5).forEach((id, i) => { const d = el('div', 'comp-pk'); d.append(retratoEl(id, 46, ((meta && meta.info && meta.info[id]) || {}).tipos ? meta.info[id].tipos[0] : null, c.nomes[i]), el('span', null, shortName(c.nomes[i]))); time.append(d); });
+    const wrCor = c.wr >= 55 ? 'ok' : c.wr >= 48 ? '' : 'bad';
+    const t = c.tendencia || {};
+    const seta = t.usoRec > t.usoAnt * 0.4 + 1 ? '▲' : t.usoRec === 0 && t.usoAnt > 0 ? '▼' : '';
+    const nums = el('div', 'comp-nums');
+    const num = (v, rot, cls) => { const d = el('div', 'comp-num'); d.append(el('b', cls || '', v), el('span', null, rot)); return d; };
+    nums.append(num(`${String(c.wr).replace('.', ',')}%`, 'vitória', wrCor), num(fmt(c.jogos), 'jogos'), num(String(c.jogadores.length), c.jogadores.length === 1 ? 'jogador' : 'jogadores'), num(fmt(c.pr), 'PR médio'), num(`${seta || '—'}${t.wrRec != null ? ` ${t.wrRec}%` : ''}`, '48 h', seta === '▲' ? 'ok' : seta === '▼' ? 'bad' : ''));
+    const bt = el('div', 'comp-bt');
+    bt.append(button('⚔️ Planejar contra', 'mini', () => planejarContraComp(c, meta)), button(compsAberta === c.id ? '⤡ Recolher' : '⤢ Detalhes', 'mini', () => { compsAberta = compsAberta === c.id ? null : c.id; renderPvp(true); }));
+    lin.append(tier, time, nums, bt);
+    card.append(lin);
+    if (compsAberta === c.id) {
+      const det = el('div', 'comp-det');
+      const mv = el('div'); mv.append(el('div', 'ext-sec', 'Quem carrega (média das partidas)'));
+      for (const m of c.mvp) { const ln = el('div', 'comp-mvp'); ln.append(retratoEl(m.id, 34, null, m.nome), el('b', null, m.nome), el('span', 'sub', `${m.dano}% do dano · termina de pé em ${m.pe}% · ${String(m.abates).replace('.', ',')} abates`)); mv.append(ln); }
+      const cf = el('div'); cf.append(el('div', 'ext-sec', 'Confrontos (partidas reais entre comps do top)'));
+      if (!c.confrontos.length) cf.append(el('div', 'sub', 'Poucas partidas contra outras comps do top ainda.'));
+      for (const x of c.confrontos.slice(0, 8)) { const o = porId.get(x.contra); if (!o) continue; const ln = el('div', `tip ${x.wr >= 55 ? 'ok' : x.wr <= 45 ? 'bad' : ''}`); ln.append(`${x.wr >= 55 ? '✅ ganha de' : x.wr <= 45 ? '⛔ perde para' : '↔ empata com'} ${compNome(o)}: ${x.wr}% em ${x.n} partidas`); cf.append(ln); }
+      const jg = el('div', 'sub', `Jogam com ela: ${c.jogadores.slice(0, 10).join(', ')}${c.jogadores.length > 10 ? '…' : ''} · nível médio ${fmt(c.nivel)} · partida dura ~${c.duracao} s`);
+      det.append(mv, cf); card.append(det, jg);
+    }
+    root.append(card);
+  }
+  root.append(el('p', 'small', 'Fonte: o Tracker público do PokeIdle (as últimas partidas de cada jogador do top 50 do Ranqueado). Vitória corrigida = a taxa de vitória puxada para baixo quando a comp tem poucos jogos (como nos sites de TFT). Confrontos só quando os dois lados são do top 50.'));
+}
+
+// 📍 FORMAÇÕES REAIS (27/11/2026): as casas que os adversários usaram de verdade nas SUAS partidas ranqueadas (o replay do
+// jogo traz a posição inicial dos dois lados; o app guarda as últimas de cada conta). Acha pelo nick ou pelo time parecido
+// (3+ pokémon iguais) e devolve as casas na ordem do time pedido.
+function casasReais(enemy, nick) {
+  const fs = (pvpData && pvpData.formacoes) || [];
+  if (!fs.length || !enemy.length) return null;
+  const nomes = enemy.map((e) => String(e.nome || '').toLowerCase());
+  const nk = String(nick || '').toLowerCase();
+  let melhor = null, mp = 0;
+  for (const f of fs) {
+    const fn = f.pks.map((k) => String(k.nome || '').toLowerCase());
+    const iguais = nomes.filter((n) => fn.includes(n)).length;
+    const pts = iguais + (nk && String(f.nick || '').toLowerCase() === nk ? 3 : 0);
+    if (iguais >= 3 && pts > mp) { mp = pts; melhor = f; }
+  }
+  if (!melhor) return null;
+  const vistas = fs.filter((f) => f.pks.map((k) => String(k.nome || '').toLowerCase()).filter((n) => nomes.includes(n)).length >= 3).length;
+  const usadas = new Set();
+  const casas = enemy.map((e) => { const k = melhor.pks.find((p) => String(p.nome || '').toLowerCase() === String(e.nome || '').toLowerCase() && p.casa != null && !usadas.has(p.casa)); if (k) { usadas.add(k.casa); return k.casa; } return null; });
+  const faltam = casas.filter((x) => x == null).length;
+  if (faltam > 2) return null;
+  const pad = casasDaEquipe(casas, enemy.map((e) => e.alcance || 1));
+  return { casas: pad, de: melhor.nick, vistas };
+}
 
 // ================= 🎬 MINHAS PARTIDAS (o replay que o jogo manda em cada partida ranqueada, resumido pelo núcleo) =================
 const segsP = (ms) => (ms == null ? '—' : `${String(Math.round(ms / 100) / 10).replace('.', ',')} s`);
@@ -1467,7 +1570,8 @@ function renderPvpPlan(root, c) {
   const modoTop = pvpPosModo === 'top';
   if (pvpArqSel == null || !arqsP.some((a) => a.id === pvpArqSel)) pvpArqSel = top[0] ? top[0].id : (arqsP[0] ? arqsP[0].id : null);
   const arq = arqsP.find((a) => a.id === pvpArqSel);
-  const timeDe = (a) => { if (a.rival) return { enemy: rival.enemy, ec: rival.ec }; const enemy = arqTeam(a, meta).slice(0, 5); return { enemy, ec: casasDaEquipe(enemy.map((k) => k.casa), enemy.map((k) => k.alcance)) }; };
+  // 📍 Casas reais do adversário (das suas partidas), quando já enfrentou esse jogador ou um time parecido.
+  const timeDe = (a) => { if (a.rival) return { enemy: rival.enemy, ec: rival.ec, real: rival.real || null }; const enemy = arqTeam(a, meta).slice(0, 5); const real = casasReais(enemy, a.rep); return { enemy, ec: real ? real.casas : casasDaEquipe(enemy.map((k) => k.casa), enemy.map((k) => k.alcance)), real }; };
   const sel = arq ? timeDe(arq) : { enemy: [], ec: [] };
   sel.enemy.forEach((e) => { e.papel = papelDe(e, pvpTracker); });
 
@@ -1494,8 +1598,9 @@ function renderPvpPlan(root, c) {
       const el2 = k.el || k.tmElemental || null;
       return { ...k, speciesId: Number(k.speciesId), nome: k.nome || inf.nome || `#${k.speciesId}`, tipos: inf.tipos || [], alcance: inf.alcance || 1, stats: inf.stats, el: el2, atk: [...new Set([...(inf.tipos || []), el2].filter(Boolean))] };
     });
-    const temCasas = enemy.some((k) => k.casa != null);
-    pvpRival = { acc: pvpAcc, nick: r.nick, enemy, ec: casasDaEquipe(enemy.map((k) => k.casa), enemy.map((k) => k.alcance)), temCasas,
+    const realX = casasReais(enemy, r.nick);
+    const temCasas = enemy.some((k) => k.casa != null) || !!realX;
+    pvpRival = { acc: pvpAcc, nick: r.nick, enemy, real: realX, ec: realX ? realX.casas : casasDaEquipe(enemy.map((k) => k.casa), enemy.map((k) => k.alcance)), temCasas,
       arq: { id: `rival:${r.nick}`, rival: true, tier: '⚔️', n: 1, rep: r.nick, best: 'x1', core: [], nome: `${r.nick} (x1)` } };
     pvpArqSel = `rival:${r.nick}`; pvpPosModo = 'arq';
     toast(`⚔️ Time de ${r.nick} carregado como adversário: o Planejador mostra a sua melhor posição contra ele.`);
@@ -1636,7 +1741,8 @@ function renderPvpPlan(root, c) {
     ondeBox.replaceChildren(...team.map((m, i) => el('div', 'tip', `${shortName(m.nome)} → ${nomeCasa(casasMinhas[i])}`)));
   };
   desenhar(casasJogo);
-  mid.append(modos, el('div', 'pp-front', modoTop ? `⭐ Balanço do top 50: a posição que mais vence na média de todos os times do top (cada um pesa por quantos usam)` : arq ? (arq.rival ? `⚔️ Adversário: o time de ${arq.rep} (x1)` : `Adversário: time de ${arq.rep} (#${arq.best}), ${arqName(arq, meta)}`) : 'Sem arquétipo'), boardBox,
+  if (!modoTop && sel.real) mid.append(el('div', 'tip ok', `📍 Casas REAIS do adversário: como ${sel.real.de} montou numa partida sua (${sel.real.vistas} partida${sel.real.vistas === 1 ? '' : 's'} com esse time).`));
+  mid.append(modos, el('div', 'pp-front', modoTop ?`⭐ Balanço do top 50: a posição que mais vence na média de todos os times do top (cada um pesa por quantos usam)` : arq ? (arq.rival ? `⚔️ Adversário: o time de ${arq.rep} (x1)` : `Adversário: time de ${arq.rep} (#${arq.best}), ${arqName(arq, meta)}`) : 'Sem arquétipo'), boardBox,
     el('div', 'pp-front', outro ? `${outro.nick} embaixo. Para usar: "Editar tabuleiro" no PvP do jogo e pôr cada um na casa indicada.` : 'Você embaixo. Para usar: "Editar tabuleiro" no PvP do jogo e ponha cada um na casa indicada.'), ondeBox,
     copiar);
   // 📋 Texto e 📸 print do tabuleiro (com o título e a lista das casas) — prontos para colar no Discord.

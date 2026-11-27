@@ -1,8 +1,8 @@
 {
   "name": "idleterino",
   "productName": "Idleterino",
-  "version": "0.3.52",
-  "description": "PokeIdle, Twitch e Kick num sÃ³ app: bÃ´nus, pontos, lives e contas do jogo, leve e organizado.",
+  "version": "0.3.53",
+  "description": "PokeIdle, Twitch e Kick num sÃƒÂ³ app: bÃƒÂ´nus, pontos, lives e contas do jogo, leve e organizado.",
   "author": "VinniiSaantos",
   "license": "MIT",
   "homepage": "https://viinnisantoos.github.io/idleterino/",
@@ -99,7 +99,7 @@
       "icon": "build/icon.png",
       "category": "Network",
       "executableName": "idleterino",
-      "synopsis": "PokeIdle, Twitch e Kick num sÃ³ app",
+      "synopsis": "PokeIdle, Twitch e Kick num sÃƒÂ³ app",
       "maintainer": "VinniiSaantos <122901997+ViinniSantoos@users.noreply.github.com>",
       "syncDesktopName": true
     },

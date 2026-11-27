@@ -560,6 +560,13 @@ module.exports = function createPokeIdle(ctx) {
     }
     saveConfig();
   }
+  // 📍 As formações que os adversários usaram de verdade nas partidas de TODAS as suas contas (o replay traz as casas).
+  function formacoesReais() {
+    const todas = readJson(partidasPath(), {}) || {};
+    const out = [];
+    for (const lista of Object.values(todas)) for (const p of lista || []) { const e = p && p.ele; if (e && Array.isArray(e.pks) && e.pks.some((k) => k.casa != null)) out.push({ nick: e.nick, em: p.em, venci: !!p.venci, pks: e.pks.map((k) => ({ nome: k.nome, casa: k.casa })) }); }
+    return out.sort((a, b) => (b.em || 0) - (a.em || 0)).slice(0, 300);
+  }
   // Dados ao vivo da conta (os pokémon dela, o PvP dela) + o meta salvo.
   async function pvpGet(accId) {
     const id = account(accId) ? accId : mainAccId();
@@ -572,7 +579,7 @@ module.exports = function createPokeIdle(ctx) {
       if (pvpRunning && mv && !mv.webContents.isDestroyed()) prog = await mv.webContents.executeJavaScript('window.__idleterinoMercado.pvpEstado()').catch(() => null);
     }
     if (v && !v.webContents.isDestroyed()) await guardarPartidas(id, v).catch(() => {});
-    return { meta: pvpMeta, hist: readJson(histPath(), []), me: (readJson(mePath(), {})[id] || []), partidas: (readJson(partidasPath(), {}) || {})[id] || [], watch: config.pvpWatch || [], watchHist: config.pvpWatchHist || {}, running: pvpRunning, prog, accountId: id, live: live && !live.erro ? { meus: live.meus, info: live.info, euPvp: live.euPvp, nick: live.nick, nivel: live.nivel, tabelaTipos: live.tabelaTipos, meuTime: live.meuTime || null, passivas: live.passivas || null } : null };
+    return { meta: pvpMeta, hist: readJson(histPath(), []), me: (readJson(mePath(), {})[id] || []), partidas: (readJson(partidasPath(), {}) || {})[id] || [], formacoes: formacoesReais(), watch: config.pvpWatch || [], watchHist: config.pvpWatchHist || {}, running: pvpRunning, prog, accountId: id, live: live && !live.erro ? { meus: live.meus, info: live.info, euPvp: live.euPvp, nick: live.nick, nivel: live.nivel, tabelaTipos: live.tabelaTipos, meuTime: live.meuTime || null, passivas: live.passivas || null } : null };
   }
 
   // Mercado no Início: as mesmas consultas dos botões do mercado do jogo, pela conexão da própria
@@ -752,6 +759,15 @@ module.exports = function createPokeIdle(ctx) {
     }
     return {};
   });
+  // 📊 Tipos, alcance e status de espécies (para o Planejador montar o time de uma comp do Tracker).
+  ipcMain.handle('poke:pvp:info', async (_e, accId, ids) => {
+    const id = account(accId) ? accId : mainAccId();
+    const v = id && views.get(id);
+    const lista = (Array.isArray(ids) ? ids : []).map(Number).filter((n) => Number.isInteger(n) && n > 0).slice(0, 10);
+    if (!v || v.webContents.isDestroyed() || !lista.length) return {};
+    const r = await v.webContents.executeJavaScript(`window.__idleterinoMercado ? window.__idleterinoMercado.pvpLer(${JSON.stringify(lista)}) : null`).catch(() => null);
+    return (r && r.info) || {};
+  });
   // 👥 Time de outro jogador (perfil público, pela conta escolhida).
   ipcMain.handle('poke:pvp:perfil', async (_e, accId, nick) => {
     const id = account(accId) ? accId : mainAccId();
@@ -901,11 +917,13 @@ module.exports = function createPokeIdle(ctx) {
         for (const [k, m] of mt) { const [a, b] = k.split('|').map(Number); if (a === c.id && m.n >= 2) vs.push({ contra: b, n: m.n, wr: Math.round((m.v / m.n) * 100) }); }
         c.confrontos = vs.sort((x, y) => y.n - x.n);
       }
-      // Tier pela vitória corrigida pela amostra (S = os ~15% melhores com 8+ jogos).
-      const ord = out.filter((c) => c.jogos >= 8).sort((a, b) => b.wrAjust - a.wrAjust);
+      // Tier como nos sites de TFT: só comp de verdade (2+ jogadores do top usando e 15+ jogos) entra na tier list, pela
+      // vitória corrigida pela amostra (S = os ~15% melhores). Time de UM jogador só com vitória alta vira "⚡ anti-meta"
+      // (o caso do Soshimaru): aparece à parte, porque ninguém mais joga assim.
+      const ord = out.filter((c) => c.jogadores.length >= 2 && c.jogos >= 15).sort((a, b) => b.wrAjust - a.wrAjust);
       ord.forEach((c, i) => { const q = i / Math.max(1, ord.length); c.tier = q < 0.15 ? 'S' : q < 0.4 ? 'A' : q < 0.7 ? 'B' : 'C'; });
-      for (const c of out) if (!c.tier) c.tier = 'N'; // poucos jogos
-      out.sort((a, b) => ('SABCN'.indexOf(a.tier) - 'SABCN'.indexOf(b.tier)) || b.wrAjust - a.wrAjust);
+      for (const c of out) if (!c.tier) c.tier = c.jogadores.length === 1 && c.jogos >= 10 && c.wr >= 55 ? 'X' : 'N';
+      out.sort((a, b) => ('SABCXN'.indexOf(a.tier) - 'SABCXN'.indexOf(b.tier)) || b.wrAjust - a.wrAjust);
       const res = { em: Date.now(), temporada: lad.temporada || null, jogadores: top.length, partidas: jogos.length, confrontos: [...mt.values()].reduce((s, m) => s + m.n, 0), comps: out.slice(0, 40) };
       compsCache = res;
       try { fs.writeFileSync(compsPath(), JSON.stringify(res)); } catch {}
