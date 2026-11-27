@@ -323,6 +323,17 @@ ipcMain.handle('app:video', (_e, o) => {
 });
 ipcMain.handle('app:introDone', () => { config.lastSeenVersion = app.getVersion(); firstRun = false; saveConfig(); return appState(); });
 ipcMain.handle('app:quit', quitApp);
+// 📸 Imagem que a tela do app desenhou (o cartão do posicionamento do Planejador) → área de transferência, para colar
+// no Discord. Só PNG em data URL, até 12 MB.
+ipcMain.handle('app:copiarImagem', (_e, url) => {
+  try {
+    if (typeof url !== 'string' || !url.startsWith('data:image/png;base64,') || url.length > 12 * 1024 * 1024) return { ok: false };
+    const img = nativeImage.createFromDataURL(url);
+    if (img.isEmpty()) return { ok: false };
+    clipboard.writeImage(img);
+    return { ok: true };
+  } catch { return { ok: false }; }
+});
 // 📸 Copiar um pedaço da tela do app (ex.: o tabuleiro do Planejador) para colar no Discord. Só a janela do próprio app.
 ipcMain.handle('app:copiarPrint', async (e, r) => {
   try {

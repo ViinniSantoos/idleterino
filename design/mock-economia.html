@@ -1,0 +1,59 @@
+<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Painel do modo Economia (proposta)</title>
+<link rel="stylesheet" href="../renderer/tokens.css"><script src="sprites.js"></script><script src="spr.js"></script>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#0b0c12;color:var(--text);font:14px/1.4 var(--font);padding:26px 34px}
+h1{font-size:18px;margin:0 0 4px}.sub{color:var(--muted);font-size:12.5px}
+.tela{margin-top:16px;border-radius:16px;border:1px solid var(--line-2);background:repeating-linear-gradient(135deg,#0f1118 0 14px,#11131b 14px 28px);height:620px;position:relative;overflow:hidden}
+.jogo{position:absolute;left:50%;top:30px;transform:translateX(-50%);color:#5d6378;font-size:12px}
+.painel{position:absolute;left:50%;top:60px;transform:translateX(-50%);width:640px;background:rgba(12,13,20,.92);border:1px solid rgba(255,255,255,.14);border-radius:16px;padding:14px 16px;box-shadow:0 14px 40px rgba(0,0,0,.5)}
+.l1{display:flex;align-items:baseline;gap:8px;font-weight:800;font-size:16px}.l1 small{color:var(--muted);font-weight:600;font-size:12px;margin-left:auto}
+.xp{height:6px;border-radius:6px;background:rgba(255,255,255,.1);overflow:hidden;margin:6px 0 2px}.xp i{display:block;height:100%;width:63%;background:var(--grad)}
+.xpt{color:#a7adc2;font-size:11.5px}
+.res{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin:12px 0}
+.r{background:var(--s2);border:1px solid var(--line);border-radius:12px;padding:8px 10px}.r small{display:block;color:var(--muted);font-size:10.5px;font-weight:700}.r b{display:block;font-size:17px;margin-top:2px;white-space:nowrap}.r span{display:block;color:var(--muted);font-size:10.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sec{display:flex;align-items:center;gap:8px;font-size:11px;font-weight:800;letter-spacing:.6px;text-transform:uppercase;color:var(--muted);margin:10px 0 6px}
+.sec em{font-style:normal;font-weight:600;text-transform:none;letter-spacing:0;color:var(--dim)}
+.besti{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.b{display:flex;gap:8px;align-items:center;background:var(--s2);border:1px solid var(--line);border-radius:12px;padding:6px 8px}
+.b .info{min-width:0;flex:1}.b b{font-size:12.5px}.b small{display:block;color:var(--muted);font-size:10.5px}
+.bar{height:5px;border-radius:5px;background:var(--s4);overflow:hidden;margin-top:3px}.bar i{display:block;height:100%;background:var(--info)}
+.prey{display:flex;gap:8px}.p{flex:1;display:flex;gap:10px;align-items:center;background:linear-gradient(90deg,rgba(169,112,255,.16),transparent),var(--s2);border:1px solid rgba(169,112,255,.35);border-radius:12px;padding:6px 10px}
+.p b{font-size:13px}.p small{display:block;color:var(--muted);font-size:11px}.p .n{margin-left:auto;text-align:right}.p .n b{font-size:18px;color:var(--ok)}
+.p.off{border-color:rgba(255,199,90,.45);background:linear-gradient(90deg,rgba(255,199,90,.12),transparent),var(--s2)}.p.off .n b{color:var(--warn);font-size:12px}
+.retrato{position:relative;display:inline-grid;place-items:center;flex:none;border-radius:50%;background:radial-gradient(circle at 50% 78%,color-mix(in srgb,var(--rt) 70%,transparent),var(--s2) 80%);border:2px solid rgba(255,255,255,.1)}
+.retrato.comSpr img,.ava.comSpr img{position:absolute;left:50%;bottom:-2px;transform:translateX(-50%);filter:drop-shadow(0 2px 3px rgba(0,0,0,.45))}
+.comSpr{font-size:0}
+.notas{margin-top:14px;color:var(--muted);font-size:12px;line-height:1.6}
+</style></head><body>
+<h1>🌙 Modo Economia / ULTRA — painel do Idleterino <span class="sub">(proposta, dados de exemplo)</span></h1>
+<div class="sub">O jogo esconde quase tudo nesses modos para gastar menos do PC. O app põe por cima um painel só de leitura (não clica em nada) com o que o jogador quer ver sem sair do modo.</div>
+<div class="tela"><div class="jogo">(a tela do jogo no modo Economia / ULTRA)</div>
+<div class="painel">
+ <div class="l1">XoViniXo · Nv 3.213 <small>⏱ caçando há 2 h 14 min · Dragon Den (Nv 3.000)</small></div>
+ <div class="xp"><i></i></div><div class="xpt">1.284.300 / 2.040.000 xp (63,0%) · +412 mil xp/h</div>
+ <div class="res">
+  <div class="r"><small>🪙 COINS</small><b style="color:var(--coin)">2,43 bi</b><span>+38 mi/h</span></div>
+  <div class="r"><small>💎 GEMAS</small><b style="color:var(--gema)">520</b><span>no inventário</span></div>
+  <div class="r"><small>⚪ POKÉBOLAS</small><b>1.540</b><span>Ultra 1.240 · Great 300</span></div>
+  <div class="r"><small>🧪 POÇÕES</small><b>85</b><span>−6/h · dura ~14 h</span></div>
+  <div class="r"><small>🎯 CAPTURAS</small><b style="color:var(--ok)">37</b><span>12/h nesta sessão</span></div>
+ </div>
+ <div class="sec">📖 Bestiário desta hunt <em>— abates de cada pokémon e o próximo degrau</em></div>
+ <div class="besti">
+  <div class="b"><span class="retrato" data-p="Dragonite" data-px="40" style="width:38px;height:38px;--rt:var(--t-dragon)"></span><div class="info"><b>Dragonite</b><small>742 / 1.000 · +0,25% Dragão</small><div class="bar"><i style="width:74%"></i></div></div></div>
+  <div class="b"><span class="retrato" data-p="Garchomp" data-px="40" style="width:38px;height:38px;--rt:var(--t-dragon)"></span><div class="info"><b>Garchomp</b><small>318 / 500 · +0,15% Dragão</small><div class="bar"><i style="width:64%"></i></div></div></div>
+  <div class="b"><span class="retrato" data-p="Gyarados" data-px="40" style="width:38px;height:38px;--rt:var(--t-water)"></span><div class="info"><b>Gyarados</b><small>1.000 · ✅ máximo</small><div class="bar"><i style="width:100%;background:var(--ok)"></i></div></div></div>
+ </div>
+ <div class="sec">🧿 Prey do dia</div>
+ <div class="prey">
+  <div class="p"><span class="retrato" data-p="Garchomp" data-px="42" style="width:40px;height:40px;--rt:var(--t-dragon)"></span><div><b>Garchomp</b><small>Spawn ★★★ · +3 por onda</small></div><div class="n"><b>142</b><small>abatidos hoje</small></div></div>
+  <div class="p off"><span class="retrato" data-p="Tyranitar" data-px="42" style="width:40px;height:40px;--rt:var(--t-rock)"></span><div><b>Tyranitar</b><small>Dano ★★ · +20% de dano</small></div><div class="n"><b>⚠ não aparece<br>nesta hunt</b></div></div>
+ </div>
+</div></div>
+<div class="notas">• Fica no topo da tela do jogo, só nos modos Economia e ULTRA (some no modo normal). Não clica em nada e não muda o jogo.<br>
+• Coins, gemas, bolas, poções e capturas vêm do próprio jogo (a mesma conexão que o app já lê). Poções: o gasto por hora sai da sessão.<br>
+• Bestiário: os pokémon da hunt em que você está, com os abates (Pokédex do jogo) e quanto falta para o próximo degrau.<br>
+• Prey: quantos do pokémon da cartela você abateu hoje — e avisa quando ele não aparece na hunt em que você está.</div>
+<script>
+for (const a of document.querySelectorAll('[data-p]')) { const px = Number(a.dataset.px); sprRetrato(a.dataset.p, px).then((u) => { if (u) { a.innerHTML = `<img src="${u}" width="${px}" height="${px}" style="image-rendering:pixelated">`; a.classList.add('comSpr'); } }); }
+</script></body></html>

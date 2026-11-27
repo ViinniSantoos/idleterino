@@ -486,12 +486,14 @@ async function otimizarPos(team, alvos, inicial, extras) {
   const perm = casasPermitidas(team);
   const leg = (c) => legalizarCasas(c, team, perm);
   const inicios = [inicial, casasDaEquipe([], team.map((m) => m.alcance)), ...(extras || [])];
-  for (let r = 0; r < (comTempo ? 4 : 14); r++) inicios.push(sorteio());
+  // Muitos adversários (o balanço do top 50 com até 25 estilos): menos pontos de partida, para continuar rápido.
+  const pesado = alvos.length > 10;
+  for (let r = 0; r < (comTempo ? (pesado ? 2 : 4) : 14); r++) inicios.push(sorteio());
   let best = leg(inicial), bestV = val(best), contas = 0;
   for (const ini0 of inicios) {
     const ini = leg(ini0);
     let cur = ini.slice(), v = val(cur), melhorou = true, voltas = 0;
-    while (melhorou && voltas++ < (comTempo ? 8 : 30)) {
+    while (melhorou && voltas++ < (comTempo ? (pesado ? 5 : 8) : 30)) {
       melhorou = false;
       for (let i = 0; i < n; i++) for (const c of perm[i]) {
         if (cur[i] === c) continue;
@@ -505,6 +507,97 @@ async function otimizarPos(team, alvos, inicial, extras) {
     if (v > bestV + 1e-9) { best = cur; bestV = v; }
   }
   return { casas: best, v: bestV };
+}
+// ⭐ POR QUE ESSA POSIÇÃO NO BALANÇO DO TOP 50 (27/11/2026): a luta simulada contra cada time do top, e a média pesada
+// (por quantos usam) de cada pokémon seu: em quantas lutas termina de pé, quanto do dano do time ele faz e quanto do
+// tempo bate sem ninguém batendo nele.
+function porQueBalanco(casas, team, alvos, papeis) {
+  const ag = team.map(() => ({ pe: 0, dano: 0, livre: 0, w: 0, vs: new Map() }));
+  let vence = 0, wt = 0;
+  for (const x of alvos) {
+    if (!x.T) continue;
+    const d = simBatalha(casas, team, x.ec, x.enemy, x.T, true);
+    const tot = d.A.reduce((s, u) => s + u.dano, 0) || 1;
+    d.A.forEach((u, i) => { const a = ag[i]; a.w += x.w; if (u.vida > 0) a.pe += x.w; a.dano += x.w * (u.dano / tot); a.livre += x.w * (d.tempo > 0 ? u.livre / d.tempo : 0); for (const j of u.bateuEm) { const nm = shortName(x.enemy[j].nome); a.vs.set(nm, (a.vs.get(nm) || 0) + x.w); } });
+    vence += x.w * (d.v > 0.5 ? 1 : 0); wt += x.w;
+  }
+  const out = [];
+  if (wt) out.push({ txt: `Vence ${Math.round((vence / wt) * 100)}% das lutas simuladas contra o top 50 nesta posição.`, k: vence / wt >= 0.55 ? 'ok' : vence / wt >= 0.45 ? '' : 'bad' });
+  team.forEach((m, i) => {
+    const a = ag[i]; if (!a.w) return;
+    const pp = papeis[i] || {}; const casa = nomeCasa(casas[i]);
+    const pe = Math.round((a.pe / a.w) * 100), dn = Math.round((a.dano / a.w) * 100), lv = Math.round((a.livre / a.w) * 100);
+    const alvoMais = [...a.vs.entries()].sort((p, q) => q[1] - p[1])[0];
+    out.push({ txt: `${pp.ic || ''} ${shortName(m.nome)} (${pp.nome || 'papel'}, ${casa}): termina de pé em ${pe}% das lutas · faz ${dn}% do dano do time${lv >= 15 ? ` · bate sem apanhar ${lv}% do tempo` : ''}${alvoMais ? ` · quem mais enfrenta: ${alvoMais[0]}` : ''}.`, k: pe >= 60 ? 'ok' : pe >= 35 ? '' : 'warn' });
+  });
+  return out;
+}
+// 📸 CARTÃO DO POSICIONAMENTO (27/11/2026): o app DESENHA a imagem (canvas) para colar no Discord — o tabuleiro com os
+// pokémon do jogo, onde pôr cada um e o porquê. Cores do KV (design/). Não depende de fotografar a janela.
+async function cartaoPosicao(o) {
+  const css = getComputedStyle(document.documentElement); const v = (n, d) => (css.getPropertyValue(n).trim() || d);
+  const C = { bg: v('--bg', '#090a10'), s1: v('--s1', '#10121b'), s2: v('--s2', '#161926'), s3: v('--s3', '#1e2232'), tx: v('--text', '#eef0f7'), mu: v('--muted', '#8a90a6'), ok: v('--ok', '#45e39b'), br: v('--brand', '#ff4d6d'), b2: v('--brand-2', '#a970ff') };
+  const font = '"Segoe UI", system-ui, sans-serif';
+  const urlDe = (id) => { let best = null, bp = 0; for (const [k, u] of retMem) { const [i, p] = k.split('|').map(Number); if (i === Number(id) && p > bp) { best = u; bp = p; } } return best; };
+  const imgDe = (u) => new Promise((r) => { if (!u) return r(null); const i = new Image(); i.onload = () => r(i); i.onerror = () => r(null); i.src = u; });
+  const CEL = 50, GAP = 6, PAD = 28;
+  const larguraTab = Math.max(...PVP_ROWS) * (CEL + GAP) - GAP;
+  // Medir o texto da direita primeiro (para a altura).
+  const cv = document.createElement('canvas'); const g0 = cv.getContext('2d');
+  const W = PAD * 3 + larguraTab + 470;
+  const quebra = (txt, w, f) => { g0.font = f; const out = []; let lin = ''; for (const p of String(txt).split(' ')) { const t = lin ? `${lin} ${p}` : p; if (g0.measureText(t).width > w && lin) { out.push(lin); lin = p; } else lin = t; } if (lin) out.push(lin); return out; };
+  const fL = `600 15px ${font}`, fP = `13px ${font}`;
+  const linhasPq = (o.porque || []).map((t) => quebra(t, 440, fP));
+  const altDir = 70 + o.linhas.length * 24 + (linhasPq.length ? 40 + linhasPq.reduce((s, l) => s + l.length * 18 + 8, 0) : 0);
+  const altTab = 10 * (CEL + GAP) + 40 + 24;
+  const H = 104 + Math.max(altTab, altDir) + 44;
+  cv.width = W; cv.height = H;
+  const g = cv.getContext('2d'); g.imageSmoothingEnabled = false;
+  const rr = (x, y, w, h, r) => { g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r); g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath(); };
+  // Fundo e cabeçalho.
+  g.fillStyle = C.bg; g.fillRect(0, 0, W, H);
+  const gr = g.createLinearGradient(0, 0, W, 0); gr.addColorStop(0, 'rgba(255,77,109,.30)'); gr.addColorStop(0.5, 'rgba(169,112,255,.22)'); gr.addColorStop(1, 'rgba(83,252,24,.10)');
+  g.fillStyle = gr; g.fillRect(0, 0, W, 84);
+  g.fillStyle = C.tx; g.font = `800 24px ${font}`; g.fillText(o.titulo, PAD, 40);
+  if (o.chance) { g.fillStyle = C.ok; g.font = `700 15px ${font}`; g.fillText(o.chance, PAD, 66); }
+  // Tabuleiro: o adversário em cima (girado), você embaixo.
+  let y = 104; const x0 = PAD;
+  rr(x0 - 12, y - 12, larguraTab + 24, altTab, 16); g.fillStyle = C.s1; g.fill();
+  for (const [li, lado] of o.lados.entries()) {
+    const ordem = lado.inimigo ? [4, 3, 2, 1, 0] : [0, 1, 2, 3, 4];
+    for (const r of ordem) {
+      const n = PVP_ROWS[r]; const cols = [...Array(n).keys()]; if (lado.inimigo) cols.reverse();
+      const xr = x0 + (larguraTab - (n * (CEL + GAP) - GAP)) / 2;
+      for (const [ci, col] of cols.entries()) {
+        const casa = TB_CASAS.find((k) => k.r === r && k.col === col).casa;
+        const i = (lado.casas || []).findIndex((c) => c === casa);
+        const cx = xr + ci * (CEL + GAP);
+        rr(cx, y, CEL, CEL, 10); g.fillStyle = lado.inimigo ? 'rgba(255,77,109,.10)' : 'rgba(169,112,255,.12)'; g.fill();
+        if (i >= 0) {
+          const m = lado.team[i];
+          g.save(); g.beginPath(); g.arc(cx + CEL / 2, y + CEL / 2, CEL / 2 - 1, 0, Math.PI * 2); g.fillStyle = C.s2; g.fill(); g.lineWidth = 3; g.strokeStyle = lado.inimigo ? C.br : C.b2; g.stroke(); g.restore();
+          const im = await imgDe(urlDe(m.speciesId));
+          if (im) g.drawImage(im, cx - 3, y - 6, CEL + 6, CEL + 6);
+          else { g.fillStyle = C.tx; g.font = `800 20px ${font}`; g.textAlign = 'center'; g.fillText(String(m.nome || '?')[0], cx + CEL / 2, y + CEL / 2 + 7); g.textAlign = 'left'; }
+          g.font = `800 10px ${font}`; g.textAlign = 'center'; g.lineWidth = 3; g.strokeStyle = '#000'; const nm = shortName(m.nome).slice(0, 11);
+          g.strokeText(nm, cx + CEL / 2, y + CEL + 4); g.fillStyle = '#fff'; g.fillText(nm, cx + CEL / 2, y + CEL + 4); g.textAlign = 'left';
+        }
+      }
+      y += CEL + GAP;
+    }
+    if (li === 0) { g.fillStyle = C.mu; g.font = `700 11px ${font}`; g.textAlign = 'center'; g.fillText('▲ adversário   ·   você ▼', x0 + larguraTab / 2, y + 24); g.textAlign = 'left'; y += 40; }
+  }
+  // Direita: onde pôr cada um e o porquê.
+  const xd = PAD * 2 + larguraTab; let yd = 116;
+  g.fillStyle = C.mu; g.font = `800 12px ${font}`; g.fillText('ONDE PÔR CADA UM ("Editar tabuleiro" no PvP do jogo)', xd, yd); yd += 26;
+  g.font = fL; g.fillStyle = C.tx; for (const l of o.linhas) { g.fillText(`• ${l}`, xd, yd); yd += 24; }
+  if (linhasPq.length) {
+    yd += 16; g.fillStyle = C.mu; g.font = `800 12px ${font}`; g.fillText('POR QUÊ (LUTA SIMULADA)', xd, yd); yd += 22;
+    g.font = fP; g.fillStyle = C.tx;
+    for (const ls of linhasPq) { for (const [k, l] of ls.entries()) { g.fillText(`${k ? '   ' : '• '}${l}`, xd, yd); yd += 18; } yd += 8; }
+  }
+  g.fillStyle = C.mu; g.font = `600 12px ${font}`; g.fillText('Idleterino · estimativa com o duelo 1×1 do jogo e o tabuleiro real', PAD, H - 18);
+  return cv.toDataURL('image/png');
 }
 // Desenho: o adversário em cima (girado: a frente dele perto do meio), você embaixo. `casas[i]` = casa do pokémon i.
 function boardEl(sides) {
@@ -1367,7 +1460,11 @@ function renderPvpPlan(root, c) {
   const rival = pvpRival && pvpRival.acc === pvpAcc ? pvpRival : null;
   const arqsP = rival ? [rival.arq, ...arqs] : arqs;
   const top0 = (arqs.filter((a) => a.tier !== 'U').length ? arqs.filter((a) => a.tier !== 'U') : arqs).slice(0, 12);
-  const top = rival ? [rival.arq, ...top0].slice(0, 12) : top0;
+  // ⭐ BALANÇO DO TOP 50 (o dono, 27/11/2026: "tem que ser um balanço do top 50 e não contra um time específico"): todos os
+  // arquétipos (inclusive os times únicos), cada um pesando por quantos do top 50 usam — até 25 (cobre o top inteiro).
+  const topBal = arqs.slice().sort((a, b) => (b.n || 0) - (a.n || 0)).slice(0, 25);
+  const top = [...(rival ? [rival.arq] : []), ...topBal.filter((a) => a !== rival)];
+  const modoTop = pvpPosModo === 'top';
   if (pvpArqSel == null || !arqsP.some((a) => a.id === pvpArqSel)) pvpArqSel = top[0] ? top[0].id : (arqsP[0] ? arqsP[0].id : null);
   const arq = arqsP.find((a) => a.id === pvpArqSel);
   const timeDe = (a) => { if (a.rival) return { enemy: rival.enemy, ec: rival.ec }; const enemy = arqTeam(a, meta).slice(0, 5); return { enemy, ec: casasDaEquipe(enemy.map((k) => k.casa), enemy.map((k) => k.alcance)) }; };
@@ -1456,7 +1553,8 @@ function renderPvpPlan(root, c) {
     lb.title = `Liga as passivas do PvP na simulação (números oficiais do jogo). Valem no Ranqueado, torneios e Ginásio a partir de ${dataPassivas()} 00:00; no Amistoso e no Treino já valem. O Mundial de 30/11 fica sem.`;
     right.append(lb);
   }
-  right.append(el('span', 'sub', 'Contra:'), vsSel);
+  if (modoTop) right.append(el('span', 'sub', `⭐ Balanço do top 50 (${topBal.reduce((s, a) => s + (a.n || 0), 0)} times)`));
+  else right.append(el('span', 'sub', 'Contra:'), vsSel);
   ph.append(right);
   pc.append(ph);
   if (!doJogo.length && !outro) pc.append(el('div', 'tip', 'O seu time do PvP ainda não chegou do jogo: abra a aba PvP no jogo uma vez (ou espere uns segundos). Enquanto isso, o planejador começa com uma sugestão.'));
@@ -1530,34 +1628,33 @@ function renderPvpPlan(root, c) {
   }
   const boardBox = el('div');
   const ondeBox = el('div', 'pp-tips');
-  let casasAgora = casasJogo;
+  let casasAgora = casasJogo, chanceAgora = null, porqueAgora = [];
   const desenhar = (casasMinhas) => {
     casasAgora = casasMinhas;
-    boardBox.replaceChildren(boardEl([{ team: sel.enemy, casas: sel.ec, cls: 'enemy', flip: true }, { team, casas: casasMinhas, cls: 'mine', flip: false }]));
+    // No balanço do top 50 não existe "um" adversário: o lado de cima fica vazio.
+    boardBox.replaceChildren(boardEl([{ team: modoTop ? [] : sel.enemy, casas: modoTop ? [] : sel.ec, cls: 'enemy', flip: true }, { team, casas: casasMinhas, cls: 'mine', flip: false }]));
     ondeBox.replaceChildren(...team.map((m, i) => el('div', 'tip', `${shortName(m.nome)} → ${nomeCasa(casasMinhas[i])}`)));
   };
   desenhar(casasJogo);
-  mid.append(modos, el('div', 'pp-front', arq ? (arq.rival ? `⚔️ Adversário: o time de ${arq.rep} (x1)` : `Adversário: time de ${arq.rep} (#${arq.best}), ${arqName(arq, meta)}`) : 'Sem arquétipo'), boardBox,
+  mid.append(modos, el('div', 'pp-front', modoTop ? `⭐ Balanço do top 50: a posição que mais vence na média de todos os times do top (cada um pesa por quantos usam)` : arq ? (arq.rival ? `⚔️ Adversário: o time de ${arq.rep} (x1)` : `Adversário: time de ${arq.rep} (#${arq.best}), ${arqName(arq, meta)}`) : 'Sem arquétipo'), boardBox,
     el('div', 'pp-front', outro ? `${outro.nick} embaixo. Para usar: "Editar tabuleiro" no PvP do jogo e pôr cada um na casa indicada.` : 'Você embaixo. Para usar: "Editar tabuleiro" no PvP do jogo e ponha cada um na casa indicada.'), ondeBox,
     copiar);
   // 📋 Texto e 📸 print do tabuleiro (com o título e a lista das casas) — prontos para colar no Discord.
-  const tituloPos = () => `${outro ? `Posição do time de ${outro.nick}` : 'Minha posição'}${arq ? (arq.rival ? ` contra ${arq.rep} (x1)` : ` contra ${arqName(arq, meta)}`) : ''}`;
+  const tituloPos = () => `${outro ? `Posição do time de ${outro.nick}` : 'Minha posição'}${modoTop ? ' contra o top 50' : arq ? (arq.rival ? ` contra ${arq.rep} (x1)` : ` contra ${arqName(arq, meta)}`) : ''}`;
   copiar.append(
     button('📋 Copiar o texto', 'mini', () => {
-      const txt = `${tituloPos()} — Idleterino\n${team.map((m, i) => `• ${m.nome} → ${nomeCasa(casasAgora[i])}`).join('\n')}`;
-      try { navigator.clipboard.writeText(txt); toast('📋 Texto copiado: é só colar no Discord.'); } catch { toast('Não deu para copiar.'); }
+      const pq = porqueAgora.length ? `\n\nPor quê:\n${porqueAgora.slice(0, 8).map((t) => `• ${t}`).join('\n')}` : '';
+      const txt = `${tituloPos()} — Idleterino${chanceAgora ? `\n${chanceAgora}` : ''}\n\n${team.map((m, i) => `• ${m.nome} → ${nomeCasa(casasAgora[i])}`).join('\n')}${pq}`;
+      try { navigator.clipboard.writeText(txt); toast('📋 Texto (com o porquê) copiado: é só colar no Discord.'); } catch { toast('Não deu para copiar.'); }
     }),
     button('📸 Copiar o print', 'mini', async () => {
-      const cab = el('div', 'pp-front', `📸 ${tituloPos()} · Idleterino`); cab.style.cssText = 'font-weight:700;color:var(--tx,#fff);font-size:13px';
-      mid.insertBefore(cab, modos.nextSibling);
-      copiar.style.visibility = 'hidden'; modos.style.visibility = 'hidden';
-      mid.scrollIntoView({ block: 'center' }); // o print só pega o que está na tela
-      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-      const b = mid.getBoundingClientRect();
-      const y0 = Math.max(0, b.top), y1 = Math.min(window.innerHeight, b.bottom);
-      const r = await call('app:copiarPrint', { x: b.left, y: y0, width: b.width, height: y1 - y0 }).catch(() => null);
-      cab.remove(); copiar.style.visibility = ''; modos.style.visibility = '';
-      toast(r && r.ok ? '📸 Print do tabuleiro copiado: é só colar (Ctrl+V) no Discord.' : 'Não deu para copiar o print.');
+      // O app DESENHA o cartão (tabuleiro, casas e o porquê) — não depende de fotografar a janela.
+      try {
+        const url = await cartaoPosicao({ titulo: tituloPos(), chance: chanceAgora, lados: [{ team: modoTop ? [] : sel.enemy, casas: modoTop ? [] : sel.ec, inimigo: true }, { team, casas: casasAgora }],
+          linhas: team.map((m, i) => `${m.nome} → ${nomeCasa(casasAgora[i])}`), porque: porqueAgora.slice(0, 7) });
+        const r = await call('app:copiarImagem', url).catch(() => null);
+        toast(r && r.ok ? '📸 Print da posição (com o porquê) copiado: é só colar (Ctrl+V) no Discord.' : 'Não deu para copiar o print.');
+      } catch { toast('Não deu para copiar o print.'); }
     }));
 
   // --- a direita: chances
@@ -1581,38 +1678,50 @@ function renderPvpPlan(root, c) {
       if (!alvos.length) { res.replaceChildren(el('b', null, 'Não deu para simular agora (a conta precisa estar aberta no app).')); return; }
       const ch = `${pvpAcc}|${team.map((m) => m.id).join(',')}|${meta.at}|${pvpComPassivas && pvpPas ? 'pas' : ''}|${rival ? rival.nick : ''}`;
       let ot = pvpOtimoCache.get(ch);
+      // O balanço do top 50 nunca inclui o x1 (o rival é só para "🎯 Melhor contra este time").
+      const alvosTop = alvos.filter((x) => !x.a.rival);
+      const nTimesTop = alvosTop.reduce((s, x) => s + x.w, 0);
       if (!ot) {
         const daSel = alvos.find((x) => x.a.id === pvpArqSel);
-        ot = { top: await otimizarPos(team, alvos, casasJogo, [casasPapel]), arq: daSel ? await otimizarPos(team, [daSel], casasJogo, [casasPapel]) : null };
+        ot = { top: await otimizarPos(team, alvosTop.length ? alvosTop : alvos, casasJogo, [casasPapel]), arq: daSel ? await otimizarPos(team, [daSel], casasJogo, [casasPapel]) : null };
         pvpOtimoCache.set(ch, ot);
       }
       // "Melhor contra este time" depende do adversário escolhido: calcula se ainda não tem.
-      const daSel = alvos.find((x) => x.a.id === pvpArqSel);
+      const daSel = modoTop ? null : alvos.find((x) => x.a.id === pvpArqSel);
       if (daSel && (!ot.arq || ot.arqId !== pvpArqSel)) { ot.arq = await otimizarPos(team, [daSel], casasJogo, [casasPapel]); ot.arqId = pvpArqSel; }
       const casasModo = pvpPosModo === 'jogo' ? casasJogo : pvpPosModo === 'papel' ? casasPapel : pvpPosModo === 'arq' && ot.arq ? ot.arq.casas : ot.top.casas;
       desenhar(casasModo);
-      const media = (casas) => { const pw = alvos.reduce((s, x) => s + x.w, 0) || 1; return alvos.reduce((s, x) => s + x.w * avaliarPos(casas, team, x.ec, x.enemy, x.P, x.T), 0) / pw; };
+      const media = (casas) => { const base = alvosTop.length ? alvosTop : alvos; const pw = base.reduce((s, x) => s + x.w, 0) || 1; return base.reduce((s, x) => s + x.w * avaliarPos(casas, team, x.ec, x.enemy, x.P, x.T), 0) / pw; };
       const vsSelV = daSel ? avaliarPos(casasModo, team, daSel.ec, daSel.enemy, daSel.P, daSel.T) : null;
       const cls = (v) => (v >= 0.55 ? 'ok' : v >= 0.45 ? 'meh' : 'bad');
+      const mTop = media(casasModo);
+      chanceAgora = vsSelV != null ? `${pct(vsSelV)} de chance de vencer este time · ${pct(mTop)} contra o top 50` : `${pct(mTop)} de chance média contra o top 50 (${nTimesTop} times)`;
       res.replaceChildren(
-        ...(vsSelV != null ? [el('b', `big ${cls(vsSelV)}`, `${pct(vsSelV)} de chance de vencer este time`)] : []),
-        el('span', null, `Contra o top (média de ${alvos.length} times, pesados por quantos usam): ${pct(media(casasModo))} nesta posição.`),
+        ...(vsSelV != null ? [el('b', `big ${cls(vsSelV)}`, `${pct(vsSelV)} de chance de vencer este time`)] : [el('b', `big ${cls(mTop)}`, `${pct(mTop)} de chance média contra o top 50`)]),
+        el('span', null, `Balanço do top 50 (${nTimesTop} times em ${alvosTop.length} estilos, cada um pesa por quantos usam): ${pct(mTop)} nesta posição.`),
         el('span', null, `Posição do jogo: ${pct(media(casasJogo))} · melhor contra o top: ${pct(ot.top.v)}${ot.top.v - media(casasJogo) >= 0.01 ? ` (+${Math.round((ot.top.v - media(casasJogo)) * 100)} pontos mudando as casas)` : ' (a do jogo já está boa)'}.`),
         el('span', 'sub', `Estimativa com o duelo 1×1 do jogo e o tabuleiro real: cada um vai no adversário mais perto, e quem bate sem apanhar de volta (principalmente de longe) leva vantagem. AoE não conta no PvP.${pvpPas ? (pvpComPassivas ? ` ⚡ Com as passivas dos dois lados (ciclo estimado em ${TB_CICLO_S} s).` : ' ⚡ Sem as passivas (desligadas).') : ''}`));
       // Contra cada time do top, na posição mostrada.
       tipsBox.replaceChildren();
-      tipsBox.append(el('div', 'ext-sec', 'Contra cada time do top'));
-      for (const x of [...alvos].sort((p, q) => q.w - p.w)) {
+      // ⭐ Por que essa posição no BALANÇO: cada pokémon na luta simulada contra TODOS os times do top (média pesada).
+      if (modoTop) {
+        porqueAgora = [];
+        const bal = porQueBalanco(casasModo, team, alvosTop.length ? alvosTop : alvos, papeis);
+        tipsBox.append(el('div', 'ext-sec', `Por que essa posição? (luta simulada contra os ${nTimesTop} times do top 50)`));
+        for (const b of bal) { tipsBox.append(el('div', `tip ${b.k || ''}`, b.txt)); porqueAgora.push(b.txt); }
+      }
+      tipsBox.append(el('div', 'ext-sec', modoTop ? 'Chance contra cada estilo do top (os mais usados primeiro)' : 'Contra cada time do top'));
+      for (const x of [...alvos].sort((p, q) => q.w - p.w).slice(0, modoTop ? 12 : 30)) {
         const v = avaliarPos(casasModo, team, x.ec, x.enemy, x.P, x.T);
         const r = el('div', `tip ${cls(v)}`, x.a.rival ? `⚔️ ${x.a.rep} (x1): ${pct(v)}` : `${x.a.tier} · ${arqName(x.a, meta)} (${x.a.n} do top): ${pct(v)}`);
         r.style.cursor = 'pointer'; r.title = 'Ver este time no tabuleiro';
-        r.onclick = () => { pvpArqSel = x.a.id; renderPvp(true); };
+        r.onclick = () => { pvpArqSel = x.a.id; if (pvpPosModo === 'top') { pvpPosModo = 'arq'; try { localStorage.setItem('pvpPosModo', 'arq'); } catch {} } renderPvp(true); };
         tipsBox.append(r);
       }
       // Dicas sem AoE: frente, retaguarda e nível.
       if (daSel) {
         const add = (txt, k) => tipsBox.append(el('div', `tip ${k || ''}`, txt));
-        if (daSel.T) for (const x of porQueEssaPosicao(casasModo, team, daSel, media, papeis, casasPapel)) tipsBox.append(x);
+        if (daSel.T) { porqueAgora = []; for (const x of porQueEssaPosicao(casasModo, team, daSel, media, papeis, casasPapel)) { tipsBox.append(x); if (!x.classList.contains('ext-sec')) porqueAgora.push(x.textContent.trim()); } }
         tipsBox.append(el('div', 'ext-sec', 'Dicas contra este time'));
         const meleeThem = daSel.enemy.filter((e) => e.alcance <= 1);
         const tank = [...team].sort((a, b) => ((b.stats ? b.stats.hp + b.stats.def + b.stats.spd : 0) - (a.stats ? a.stats.hp + a.stats.def + a.stats.spd : 0)))[0];

@@ -2086,33 +2086,120 @@ contextBridge.executeInMainWorld({
       const faixa = Math.max(1, (Number(e.xpProximo) || 0) - (Number(e.xpNivel) || 0));
       return { nick: String(e.nick), level: Number(e.level) || 0, dentro, faixa, gold: Number(e.gold) || 0, guildTag: (e.guild && e.guild.tag) || null, guildNome: (e.guild && e.guild.nome) || null, at: jogo.at || 0 };
     }
-    // Faixa do Idleterino no modo ULTRA: nick, nível e XP do nível, em cima da caixa do jogo. Só
-    // mostra (não clica em nada) e some fora do ULTRA.
-    setInterval(() => {
+    // 🌙 PAINEL DOS MODOS ECONOMIA E ULTRA (27/11/2026, pedido do Tiranosarro e do dono): o jogo esconde quase tudo nesses
+    // modos. O app põe por cima um painel SÓ DE LEITURA (não clica em nada no jogo) com: nick, nível e XP; coins, gemas,
+    // pokébolas, poções e capturas da sessão; o Bestiário dos pokémon da hunt de agora; e o Prey do dia (quantos abateu
+    // hoje e o aviso quando ele não aparece na hunt). No ULTRA fica dentro da caixa do jogo; no Economia, no topo.
+    // O "—" no canto recolhe (fica gravado).
+    const eco = { itens: null, itensP: null, pesado: null, pesadoEm: 0, calc: false };
+    const ecoItens = () => eco.itensP || (eco.itensP = fetch('/assets/items.json').then((r) => r.json()).then((j) => { const a = Array.isArray(j) ? j : (j.items || []); eco.itens = new Map(a.map((x) => [Number(x.id), x])); return eco.itens; }).catch(() => { eco.itensP = null; return null; }));
+    const qtdDe = (v) => (typeof v === 'number' ? v : v && typeof v === 'object' ? Number(v.qtd ?? v.q ?? v.n ?? v.quantidade) || 0 : Number(v) || 0);
+    const ecoN = (x) => Number(x || 0).toLocaleString('pt-BR');
+    const ecoCurto = (n) => { const v = Number(n) || 0, a = Math.abs(v); return a >= 1e9 ? `${(v / 1e9).toFixed(2).replace('.', ',')} bi` : a >= 1e6 ? `${(v / 1e6).toFixed(1).replace('.', ',')} mi` : a >= 1e4 ? `${Math.round(v / 1e3)} mil` : ecoN(v); };
+    const ecoEsc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    async function ecoPesado() {
+      // O que muda devagar (Bestiário da hunt e Prey, com as imagens): no máximo a cada 15 s.
+      if (eco.calc || Date.now() - eco.pesadoEm < 15000) return eco.pesado;
+      eco.calc = true;
+      try {
+        const { map } = await catalogoNota();
+        let mb = null; try { mb = await import('/shared/bestiario.mjs'); } catch {}
+        const dex = jogo.eu.pokedex || {};
+        const kDe = (chave) => Number((dex[String(chave)] || {}).k) || 0;
+        const lista = mb && jogo.hunts ? mb.especiesDoBestiario(jogo.hunts, (id) => map.get(Number(id)) || null) : [];
+        const chaveDe = (pid) => { const e = lista.find((x) => Number(x.pokeId) === Number(pid)); return e ? e.chave : pid; };
+        const slug = jogo.eu.huntSlug || (jogo.eu.hunt && jogo.eu.hunt.slug);
+        const hunt = (jogo.hunts || []).find((h) => h.slug === slug) || null;
+        const naHunt = new Set(hunt && Array.isArray(hunt.especies) ? hunt.especies.map((e) => Number(e.pokeId)) : []);
+        const besti = [];
+        for (const pid of [...naHunt].slice(0, 6)) {
+          const k = kDe(chaveDe(pid)); const prox = mb ? mb.proximoDegrauDoBestiario(k) : null;
+          besti.push({ pid, nome: (map.get(pid) || {}).name || `#${pid}`, k, alvo: prox ? prox.abates : null, img: await retrato(pid, 40) });
+        }
+        // Prey: os abates de hoje = abates agora − os do começo do dia (anotados pelo app, por nick).
+        const prey = jogo.eu.prey && Array.isArray(jogo.eu.prey.cartelas) ? jogo.eu.prey : null;
+        const liberadas = Number(jogo.eu.preyCartela2) > 0 ? 2 : 1;
+        const nick = String(jogo.eu.nick || '').toLowerCase();
+        let base = {}; try { base = JSON.parse(localStorage.getItem('idt-prey:' + nick) || '{}'); } catch {}
+        if (!prey || base.dia !== prey.dia) base = { dia: prey ? prey.dia : null, k: {} };
+        const ESTR = (n) => '★'.repeat(Math.max(0, Math.min(5, n || 0)));
+        const BON = { dano: 'Dano', defesa: 'Defensivo', captura: 'Capture Boost', spawn: 'Spawn' };
+        const preys = [];
+        for (let i = 0; i < liberadas; i++) {
+          const c = prey && prey.cartelas[i];
+          if (!c || c.pk == null || !c.bonus) continue;
+          const k = kDe(chaveDe(c.pk));
+          if (base.k[c.pk] == null) base.k[c.pk] = k;
+          preys.push({ pk: Number(c.pk), nome: (map.get(Number(c.pk)) || {}).name || `#${c.pk}`, bonus: BON[c.bonus] || c.bonus, est: ESTR(c.est), hoje: Math.max(0, k - base.k[c.pk]), naHunt: naHunt.has(Number(c.pk)), img: await retrato(c.pk, 42) });
+        }
+        try { localStorage.setItem('idt-prey:' + nick, JSON.stringify(base)); } catch {}
+        eco.pesado = { hunt: hunt ? { nome: hunt.nome, nivel: Number(hunt.nivel) || 0 } : null, besti, preys };
+        eco.pesadoEm = Date.now();
+      } catch {} finally { eco.calc = false; }
+      return eco.pesado;
+    }
+    setInterval(async () => {
       const ultra = document.documentElement.classList.contains('modo-ultra');
+      const economia = document.documentElement.classList.contains('modo-economia');
       let f = document.getElementById('idleterino-ultra');
-      const t = ultra ? treinador() : null;
+      const t = ultra || economia ? treinador() : null;
       if (!t) { if (f) f.remove(); return; }
-      // Dentro da caixa do ULTRA (o jogo esconde tudo o que fica fora dela), logo abaixo do título.
-      const caixa = document.querySelector('#ultra .ultra-caixa') || document.querySelector('.ultra-caixa');
+      const caixa = ultra ? (document.querySelector('#ultra .ultra-caixa') || document.querySelector('.ultra-caixa')) : null;
+      if (f && f.dataset.onde !== (caixa ? 'caixa' : 'topo')) { f.remove(); f = null; }
       if (f && caixa && f.parentElement !== caixa) { f.remove(); f = null; }
       if (!f) {
-        f = document.createElement('div'); f.id = 'idleterino-ultra';
-        f.style.cssText = 'pointer-events:none;display:flex;flex-direction:column;gap:4px;margin:6px 0 8px;padding:8px 12px;border-radius:10px;background:rgba(12,13,20,.82);border:1px solid rgba(255,255,255,.14);color:#eef0f7;font:700 14px/1.3 "Segoe UI",system-ui,sans-serif;text-align:center';
-        if (!caixa) f.style.cssText += ';position:fixed;left:50%;top:8px;transform:translateX(-50%);z-index:2147483646;min-width:260px';
-        const l1 = document.createElement('div'); l1.className = 'l1';
-        const bar = document.createElement('div'); bar.style.cssText = 'height:6px;border-radius:6px;background:rgba(255,255,255,.1);overflow:hidden';
-        const fill = document.createElement('i'); fill.style.cssText = 'display:block;height:100%;background:linear-gradient(90deg,#ff4d6d,#a970ff,#53fc18)'; bar.append(fill);
-        const l2 = document.createElement('div'); l2.className = 'l2'; l2.style.cssText = 'font-weight:500;font-size:12px;color:#a7adc2';
-        f.append(l1, bar, l2);
+        f = document.createElement('div'); f.id = 'idleterino-ultra'; f.dataset.onde = caixa ? 'caixa' : 'topo';
+        f.style.cssText = 'pointer-events:none;margin:6px 0 8px;padding:10px 12px;border-radius:14px;background:rgba(12,13,20,.92);border:1px solid rgba(255,255,255,.14);color:#eef0f7;font:13px/1.35 "Segoe UI",system-ui,sans-serif;text-align:left;box-shadow:0 10px 30px rgba(0,0,0,.45)';
+        if (!caixa) f.style.cssText += ';position:fixed;left:50%;top:8px;transform:translateX(-50%);z-index:2147483646;width:min(640px,96vw)';
         if (caixa) { const titulo = caixa.firstElementChild; if (titulo) titulo.after(f); else caixa.prepend(f); }
-        else { (document.body || document.documentElement).append(f); f.style.setProperty('display', 'flex', 'important'); }
+        else (document.body || document.documentElement).append(f);
       }
-      const n = (x) => Number(x || 0).toLocaleString('pt-BR');
+      let rec = false; try { rec = localStorage.getItem('idt-painel-rec') === '1'; } catch {}
       const pct = Math.min(100, (t.dentro / t.faixa) * 100);
-      f.querySelector('.l1').textContent = `${t.nick} · Nv ${t.level}`;
-      f.querySelector('i').style.width = `${pct}%`;
-      f.querySelector('.l2').textContent = `${n(t.dentro)} / ${n(t.faixa)} xp (${pct.toFixed(1).replace('.', ',')}%) · ouro ${n(t.gold)}`;
+      const pz = eco.pesado;
+      // Coins, gemas, bolas, poções (categoria "heal" do jogo) e as capturas da sessão (o painel de estatísticas do jogo).
+      const itens = eco.itens || (ecoItens(), null);
+      const bolas = Object.entries(jogo.eu.balls || {}).map(([id, q]) => ({ id: Number(id), q: qtdDe(q) })).filter((b) => b.q > 0).sort((a, b) => b.q - a.q);
+      const nomeIt = (id) => { const x = itens && itens.get(Number(id)); return x ? String(x.name).replace(/ ?(Ball|Potion)$/i, '') : `#${id}`; };
+      // As bolas têm catálogo próprio no jogo (catalogoBolas do welcome), não são itens da mochila.
+      const nomeBola = (id) => { const b = (jogo.bolas || []).find((x) => Number(x.id) === Number(id)); return b ? String(b.nome).replace(/ ?Ball$/i, '') : `#${id}`; };
+      const pocoes = itens ? Object.entries(jogo.eu.items || {}).map(([id, q]) => ({ id: Number(id), q: qtdDe(q), it: itens.get(Number(id)) })).filter((p) => p.it && p.it.category === 'heal' && p.q > 0) : [];
+      let ses = null; try { ses = JSON.parse(localStorage.getItem('sessao-hunt:' + String(t.nick).toLowerCase()) || 'null'); } catch {}
+      const porH = (x) => (ses && ses.ms > 60000 ? Math.round((Number(x) || 0) * 3600000 / ses.ms) : null);
+      const caixaR = (rot, val, sub, cor) => `<div style="background:#161926;border:1px solid rgba(255,255,255,.07);border-radius:10px;padding:6px 9px;min-width:0"><div style="font-size:10px;font-weight:800;color:#8a90a6">${rot}</div><div style="font-size:16px;font-weight:800;white-space:nowrap;${cor ? `color:${cor}` : ''}">${val}</div><div style="font-size:10.5px;color:#8a90a6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${sub || '&nbsp;'}</div></div>`;
+      const img = (u, px, cor) => `<span style="position:relative;display:inline-block;flex:none;width:${px}px;height:${px}px;border-radius:50%;background:radial-gradient(circle at 50% 78%,${cor || 'rgba(169,112,255,.55)'},#161926 80%);border:2px solid rgba(255,255,255,.1)">${u ? `<img src="${u}" style="position:absolute;left:50%;bottom:-2px;transform:translateX(-50%);width:${px + 4}px;height:${px + 4}px;image-rendering:pixelated">` : ''}</span>`;
+      let h = `<div style="display:flex;align-items:baseline;gap:8px"><b style="font-size:15px">${ecoEsc(t.nick)} · Nv ${ecoN(t.level)}</b><span style="margin-left:auto;font-size:11.5px;color:#8a90a6">${pz && pz.hunt ? `${ecoEsc(pz.hunt.nome)} (Nv ${ecoN(pz.hunt.nivel)})` : ''}</span><span data-rec style="pointer-events:auto;cursor:pointer;padding:0 6px;color:#8a90a6;font-weight:800" title="Recolher / abrir o painel do Idleterino">${rec ? '▾' : '—'}</span></div>`;
+      h += `<div style="height:6px;border-radius:6px;background:rgba(255,255,255,.1);overflow:hidden;margin:6px 0 2px"><i style="display:block;height:100%;width:${pct}%;background:linear-gradient(90deg,#ff4d6d,#a970ff,#53fc18)"></i></div><div style="font-size:11.5px;color:#a7adc2">${ecoN(t.dentro)} / ${ecoN(t.faixa)} xp (${pct.toFixed(1).replace('.', ',')}%)${ses && porH(ses.xpTreinador) ? ` · +${ecoCurto(porH(ses.xpTreinador))} xp/h` : ''}</div>`;
+      if (!rec) {
+        const nb = bolas.reduce((s, b) => s + b.q, 0), np = pocoes.reduce((s, p) => s + p.q, 0);
+        h += `<div style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px;margin:10px 0 4px">`
+          + caixaR('<i style="display:inline-block;width:10px;height:10px;border-radius:50%;vertical-align:-1px;background:radial-gradient(circle at 35% 35%,#fff2b0,#f2b72a 55%,#b9821a)"></i> COINS', ecoCurto(t.gold), ses && porH(ses.gold) ? `+${ecoCurto(porH(ses.gold))}/h` : '', '#ffcf4a')
+          + caixaR('💎 GEMAS', ecoN(jogo.eu.orbs), 'no inventário', '#ff5fb0')
+          + caixaR('⚪ POKÉBOLAS', ecoN(nb), bolas.slice(0, 2).map((b) => `${nomeBola(b.id)} ${ecoN(b.q)}`).join(' · '))
+          + caixaR('🧪 POÇÕES', ecoN(np), pocoes.slice(0, 2).map((p) => `${nomeIt(p.id)} ${ecoN(p.q)}`).join(' · '))
+          + caixaR('🎯 CAPTURAS', ses ? ecoN(ses.capturas) : '—', ses && porH(ses.capturas) != null ? `${ecoN(porH(ses.capturas))}/h na sessão` : 'na sessão', '#45e39b') + '</div>';
+        if (pz && pz.besti.length) {
+          h += `<div style="font-size:10.5px;font-weight:800;color:#8a90a6;margin:8px 0 4px">📖 BESTIÁRIO DESTA HUNT</div><div style="display:grid;grid-template-columns:repeat(${Math.min(3, pz.besti.length)},minmax(0,1fr));gap:6px">`;
+          for (const b of pz.besti) {
+            const p2 = b.alvo ? Math.min(100, (b.k / b.alvo) * 100) : 100;
+            h += `<div style="display:flex;gap:7px;align-items:center;background:#161926;border-radius:10px;padding:4px 7px;min-width:0">${img(b.img, 30)}<div style="min-width:0;flex:1"><b style="font-size:12px">${ecoEsc(b.nome)}</b><div style="font-size:10.5px;color:#8a90a6">${b.alvo ? `${ecoN(b.k)} / ${ecoN(b.alvo)} abates` : `${ecoN(b.k)} · ✅ máximo`}</div><div style="height:4px;border-radius:4px;background:#272c40;overflow:hidden;margin-top:2px"><i style="display:block;height:100%;width:${p2}%;background:${b.alvo ? '#5fb4ff' : '#45e39b'}"></i></div></div></div>`;
+          }
+          h += '</div>';
+        }
+        if (pz && pz.preys.length) {
+          h += `<div style="font-size:10.5px;font-weight:800;color:#8a90a6;margin:8px 0 4px">🧿 PREY DO DIA</div><div style="display:flex;gap:6px">`;
+          for (const p of pz.preys) {
+            h += `<div style="flex:1;display:flex;gap:8px;align-items:center;border-radius:10px;padding:4px 9px;background:#161926;border:1px solid ${p.naHunt ? 'rgba(169,112,255,.4)' : 'rgba(255,199,90,.45)'}">${img(p.img, 32)}<div style="min-width:0"><b style="font-size:12.5px">${ecoEsc(p.nome)}</b><div style="font-size:10.5px;color:#8a90a6">${ecoEsc(p.bonus)} ${p.est}</div></div><div style="margin-left:auto;text-align:right">${p.naHunt ? `<b style="font-size:16px;color:#45e39b">${ecoN(p.hoje)}</b><div style="font-size:10px;color:#8a90a6">abatidos hoje</div>` : `<b style="font-size:11px;color:#ffc75a">⚠ não aparece<br>nesta hunt</b>`}</div></div>`;
+          }
+          h += '</div>';
+        }
+      }
+      if (f.dataset.h !== h) {
+        f.dataset.h = h; f.innerHTML = h;
+        const r = f.querySelector('[data-rec]');
+        if (r) r.onclick = () => { try { localStorage.setItem('idt-painel-rec', rec ? '0' : '1'); } catch {} f.dataset.h = ''; };
+      }
+      ecoPesado();
     }, 2000);
 
     const PEDIDOS = { 'market.meus': 1, 'market.historico': 1, 'market.historicoGlobal': 1 };
