@@ -323,6 +323,18 @@ ipcMain.handle('app:video', (_e, o) => {
 });
 ipcMain.handle('app:introDone', () => { config.lastSeenVersion = app.getVersion(); firstRun = false; saveConfig(); return appState(); });
 ipcMain.handle('app:quit', quitApp);
+// 📸 Copiar um pedaço da tela do app (ex.: o tabuleiro do Planejador) para colar no Discord. Só a janela do próprio app.
+ipcMain.handle('app:copiarPrint', async (e, r) => {
+  try {
+    const n = (v) => Math.max(0, Math.round(Number(v) || 0));
+    const rect = { x: n(r && r.x), y: n(r && r.y), width: n(r && r.width), height: n(r && r.height) };
+    if (rect.width < 20 || rect.height < 20 || rect.width > 4000 || rect.height > 4000) return { ok: false };
+    const img = await e.sender.capturePage(rect);
+    if (!img || img.isEmpty()) return { ok: false };
+    clipboard.writeImage(img);
+    return { ok: true };
+  } catch { return { ok: false }; }
+});
 // Tela cheia da janela (modo foco do PokeIdle): F11 em qualquer tela do app ou o botão da faixa.
 function toggleFullscreen() { if (mainWin && !mainWin.isDestroyed()) mainWin.setFullScreen(!mainWin.isFullScreen()); }
 ipcMain.handle('app:fullscreen', () => { toggleFullscreen(); return appState(); });

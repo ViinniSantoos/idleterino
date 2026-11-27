@@ -1,0 +1,69 @@
+/* ============================================================================================================
+   IDLETERINO · DESIGN TOKENS (KV de cores) — 27/11/2026
+   A fonte única das cores, tamanhos e efeitos do app. Tudo que for novo usa estas variáveis (nada de cor solta).
+   Referência visual: design/kv-cores.html (e o print kv-cores.png). Guia de uso: design/README.md.
+   ============================================================================================================ */
+:root {
+  /* ---- Superfícies: "noite de batalha" (azul-violeta bem escuro, do fundo para cima) ---- */
+  --bg: #090a10;            /* fundo do app */
+  --s1: #10121b;            /* painel */
+  --s2: #161926;            /* card */
+  --s3: #1e2232;            /* card dentro de card, campo */
+  --s4: #272c40;            /* hover, trilho de barra */
+  --line: rgba(255, 255, 255, .07);
+  --line-2: rgba(255, 255, 255, .13);
+
+  /* ---- Texto ---- */
+  --text: #eef0f7;          /* principal */
+  --muted: #8a90a6;         /* secundário */
+  --dim: #5d6378;           /* apagado, dica */
+
+  /* ---- Marca ---- */
+  --brand: #ff4d6d;         /* vermelho Pokébola (ação principal, destaque da marca) */
+  --brand-2: #a970ff;       /* violeta elétrico (seleção, foco, links) */
+  --brand-3: #53fc18;       /* verde neon (Kick, "ao vivo") */
+  --grad: linear-gradient(115deg, #ff4d6d 0%, #a970ff 50%, #53fc18 100%);
+  --grad-acao: linear-gradient(90deg, #ff4d6d, #c86bff);   /* botão principal */
+
+  /* ---- Plataformas ---- */
+  --tw: #a970ff;            /* Twitch */
+  --kk: #53fc18;            /* Kick */
+  --pk: #ff4d6d;            /* PokeIdle */
+
+  /* ---- Estado (sempre com ícone ou texto junto, nunca só a cor) ---- */
+  --ok: #45e39b;  --ok-bg: rgba(69, 227, 155, .14);
+  --warn: #ffc75a; --warn-bg: rgba(255, 199, 90, .14);
+  --bad: #ff6b7a; --bad-bg: rgba(255, 107, 122, .14);
+  --info: #5fb4ff; --info-bg: rgba(95, 180, 255, .14);
+
+  /* ---- Moedas do jogo ---- */
+  --gema: #ff5fb0;          /* 💎 gemas */
+  --coin: #ffcf4a;          /* 🪙 coins */
+  --gold: #ffcf4a;
+
+  /* ---- Tier (tier list, arquétipos, nota) ---- */
+  --tier-s: #ff6b6b; --tier-a: #ff9f43; --tier-b: #ffd34d; --tier-c: #4fb3ff; --tier-d: #8a8f9e;
+
+  /* ---- Raridade (do jogo) ---- */
+  --rar-comum: #9aa0b4; --rar-incomum: #4fd18b; --rar-raro: #4f9dff; --rar-epico: #b06bff; --rar-lendario: #ff9f2e; --rar-mitico: #ff5fb0;
+
+  /* ---- IV (1 a 32) ---- */
+  --iv-alto: #45e39b;       /* 25+ */
+  --iv-medio: #ffc75a;      /* 15–24 */
+  --iv-baixo: #ff6b7a;      /* abaixo de 15 */
+
+  /* ---- Tipos Pokémon (as cores clássicas da franquia) ---- */
+  --t-normal: #9fa19f; --t-fire: #e62829; --t-water: #2980ef; --t-grass: #3fa129; --t-electric: #fac000; --t-ice: #3dcef3;
+  --t-fighting: #ff8000; --t-poison: #9141cb; --t-ground: #915121; --t-flying: #81b9ef; --t-psychic: #ef4179; --t-bug: #91a119;
+  --t-rock: #afa981; --t-ghost: #704170; --t-dragon: #5060e1; --t-dark: #624d4e; --t-steel: #60a1b8; --t-fairy: #ef70ef;
+
+  /* ---- Forma ---- */
+  --r-s: 8px; --r: 14px; --r-l: 18px; --r-pill: 999px;
+  --shadow: 0 10px 30px rgba(0, 0, 0, .35);
+  --shadow-s: 0 4px 14px rgba(0, 0, 0, .28);
+  --glow-brand: 0 0 0 1px rgba(255, 77, 109, .35), 0 8px 26px rgba(255, 77, 109, .18);
+
+  /* ---- Tipografia ---- */
+  --font: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+  --fs-xs: 11px; --fs-s: 12.5px; --fs: 14px; --fs-l: 16px; --fs-xl: 20px; --fs-num: 26px;
+}

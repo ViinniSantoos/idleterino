@@ -437,7 +437,8 @@ async function pveEvo(box) {
   if (page !== 'pve' || pveTab !== 'evo') return;
   for (const m of (Array.isArray(meus) ? meus : [])) {
     const b = button('', `pve-op${pveEvoSel === m.speciesId ? ' on' : ''}`, () => { pveEvoSel = m.speciesId; pveEvoInd = m.id != null ? { pkId: m.id } : null; renderPve(); });
-    b.append(el('b', null, `${m.shiny ? '✨ ' : ''}${m.nome}`), el('span', 'sub', ` Nv ${fmt(m.level)}`));
+    b.classList.add('comRet');
+    b.append(retratoEl(m.speciesId, 30, null, m.nome), el('b', null, `${m.shiny ? '✨ ' : ''}${m.nome}`), el('span', 'sub', ` Nv ${fmt(m.level)}`));
     meusBox.append(b);
   }
   if (!Array.isArray(meus) || !meus.length) meusBox.append(el('p', 'sub', 'A lista aparece quando a conta estiver logada.'));
@@ -541,7 +542,8 @@ async function pveEvo(box) {
       nums.append(
         el('span', 'pve-x x25', `${x.x25} hunts ×2,5`), el('span', 'pve-x x55', `${x.x55} hunts ×5,5`), el('span', x.pvp ? 'pvp' : 'sub', perfis.length ? `PvP: ${x.pvp ? `${x.pvp} do top 50` : 'fora do top'} · bate forte em ${x.pvpVant ?? 0}% · apanha forte de ${x.pvpRisco ?? 0}%` : 'PvP: —'));
       if (mega) nums.append(el('span', 'sub', `precisa da Mega Stone (${x.deMega || ''})`));
-      d.append(n, nums);
+      d.classList.add('comRet');
+      d.append(retratoEl(x.pokeId, 56, (x.tipos || [])[0], x.nome), n, nums);
       return d;
     };
     const finalAvaliado = todas.find((x) => x.pokeId === o.final.pokeId && !x.deMega);
@@ -956,8 +958,8 @@ async function pvePreyTela(box) {
       c2.append(el('div', 'ext-sec', 'Degraus mais perto (nas hunts que você já libera)'));
       const l = el('div', 'rz-fila');
       for (const x of b.perto) {
-        const it = el('div', 'rz-item');
-        it.append(el('b', null, x.nome), el('span', 'sub', `${x.tipos.join('/')} · ${fmt(x.abates)}/${fmt(x.alvo)} abates · faltam ${fmt(x.falta)} · +${String(x.ganho.toFixed(2)).replace('.', ',')}% · caça: ${x.hunt.nome} (Nv ${fmt(x.hunt.nivel)})`));
+        const it = el('div', 'rz-item comRet');
+        it.append(retratoEl(x.pokeId, 40, (x.tipos || [])[0], x.nome), el('b', null, x.nome), el('span', 'sub', `${x.tipos.join('/')} · ${fmt(x.abates)}/${fmt(x.alvo)} abates · faltam ${fmt(x.falta)} · +${String(x.ganho.toFixed(2)).replace('.', ',')}% · caça: ${x.hunt.nome} (Nv ${fmt(x.hunt.nivel)})`));
         l.append(it);
       }
       c2.append(l);

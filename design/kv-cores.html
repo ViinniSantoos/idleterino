@@ -1,0 +1,67 @@
+<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Idleterino · KV de cores</title>
+<link rel="stylesheet" href="../renderer/tokens.css"><script src="sprites.js"></script><script src="spr.js"></script>
+<style>
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:var(--fs)/1.45 var(--font);padding:36px 40px}
+.hero{border-radius:var(--r-l);padding:26px 30px;background:radial-gradient(120% 140% at 0% 0%,rgba(255,77,109,.28),transparent 55%),radial-gradient(120% 140% at 100% 100%,rgba(83,252,24,.14),transparent 55%),var(--s1);border:1px solid var(--line-2);display:flex;align-items:center;gap:26px;margin-bottom:22px}
+.hero h1{margin:0;font-size:34px;letter-spacing:-.8px;background:var(--grad);-webkit-background-clip:text;color:transparent}
+.hero p{margin:6px 0 0;color:var(--muted);max-width:640px}
+.trio{display:flex;gap:-10px;margin-left:auto}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+.box{background:var(--s1);border:1px solid var(--line);border-radius:var(--r-l);padding:16px 18px}
+.box h2{margin:0 0 12px;font-size:13px;text-transform:uppercase;letter-spacing:.8px;color:var(--muted)}
+.sw{display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));gap:10px}
+.c{border-radius:12px;overflow:hidden;background:var(--s2);border:1px solid var(--line)}
+.c i{display:block;height:46px}.c b{display:block;font-size:11.5px;padding:6px 8px 0}.c small{display:block;font-size:10.5px;color:var(--muted);padding:0 8px 7px;font-family:Consolas,monospace}
+.full{grid-column:1/-1}
+.tipos{display:flex;flex-wrap:wrap;gap:6px}
+.tchip{padding:3px 10px;border-radius:var(--r-pill);font-size:12px;font-weight:700;color:#fff;text-shadow:0 1px 1px rgba(0,0,0,.35)}
+.pill{display:inline-flex;gap:4px;align-items:center;padding:3px 10px;border-radius:var(--r-pill);font-size:12px;font-weight:700}
+.btn{display:inline-block;padding:9px 16px;border-radius:12px;font-weight:700;font-size:13px;background:var(--s3);border:1px solid var(--line-2)}
+.btn.pri{background:var(--grad-acao);border:0;color:#fff;box-shadow:var(--glow-brand)}
+.ava{width:84px;height:84px;border-radius:50%;position:relative;border:2px solid rgba(255,255,255,.1);flex:none}
+.ava.comSpr img{position:absolute;left:50%;bottom:-2px;transform:translateX(-50%);filter:drop-shadow(0 2px 3px rgba(0,0,0,.45))}
+.ex{display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+.card{background:var(--s2);border:1px solid var(--line);border-radius:var(--r);padding:12px 14px;display:flex;gap:14px;align-items:center}
+.bar{height:7px;border-radius:9px;background:var(--s4);overflow:hidden;width:120px}.bar i{display:block;height:100%}
+.tier{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;font-weight:900;color:#111}
+.regra{color:var(--muted);font-size:12.5px;margin:10px 0 0}
+</style></head><body>
+<div class="hero">
+ <div><h1>Idleterino</h1><p>KV de cores — noite de batalha. Fundo azul-violeta bem escuro, o vermelho da Pokébola como ação, o violeta elétrico na seleção e o verde neon no "ao vivo". As cores dos tipos são as clássicas da franquia: quem é fã reconhece na hora.</p></div>
+ <div class="trio"><div class="ava" data-p="Charizard" data-px="96" style="background:radial-gradient(circle at 50% 78%,#e62829aa,#1a1c2b 80%)"></div><div class="ava" data-p="Gengar" data-px="96" style="background:radial-gradient(circle at 50% 78%,#704170aa,#1a1c2b 80%)"></div><div class="ava" data-p="Swampert" data-px="96" style="background:radial-gradient(circle at 50% 78%,#2980efaa,#1a1c2b 80%)"></div></div>
+</div>
+<div class="grid">
+ <div class="box"><h2>Superfícies</h2><div class="sw" id="sup"></div><p class="regra">Do fundo para cima: cada camada um passo mais clara. Nunca preto puro.</p></div>
+ <div class="box"><h2>Marca e plataformas</h2><div class="sw" id="marca"></div><p class="regra">Vermelho = ação principal. Violeta = seleção/foco. Verde = ao vivo / Kick.</p></div>
+ <div class="box"><h2>Texto</h2><div class="sw" id="texto"></div><p class="regra">Valor em texto principal; explicação em secundário; dica em apagado.</p></div>
+ <div class="box"><h2>Estado</h2><div class="sw" id="estado"></div><p class="regra">Sempre com ícone ou palavra junto (✅ ⚠ ⛔), nunca só a cor.</p></div>
+ <div class="box"><h2>Moedas · IV</h2><div class="sw" id="moeda"></div><p class="regra">💎 gema rosa, 🪙 coin dourado. IV: verde 25+, amarelo 15–24, vermelho &lt; 15.</p></div>
+ <div class="box"><h2>Tier · Raridade</h2><div class="sw" id="tier"></div></div>
+ <div class="box full"><h2>Tipos Pokémon</h2><div class="tipos" id="tipos"></div></div>
+ <div class="box full"><h2>Componentes</h2>
+  <div class="ex">
+   <span class="btn pri">Comprar 💎 7.000</span><span class="btn">Ver no Market</span>
+   <span class="pill" style="background:var(--ok-bg);color:var(--ok)">✅ compra boa</span><span class="pill" style="background:var(--warn-bg);color:var(--warn)">🟡 lucra upando</span><span class="pill" style="background:var(--bad-bg);color:var(--bad)">⛔ off-meta</span><span class="pill" style="background:var(--info-bg);color:var(--info)">ℹ dica</span>
+   <span class="tier" style="background:var(--tier-s)">S</span><span class="tier" style="background:var(--tier-a)">A</span><span class="tier" style="background:var(--tier-b)">B</span><span class="tier" style="background:var(--tier-c)">C</span><span class="tier" style="background:var(--tier-d)">D</span>
+  </div>
+  <div class="ex" style="margin-top:14px">
+   <div class="card"><div class="ava" data-p="Golem" data-px="80" style="width:70px;height:70px;background:radial-gradient(circle at 50% 78%,#afa981aa,#1a1c2b 80%)"></div><div><b style="font-size:16px">Golem</b> <span class="tchip" style="background:var(--t-rock)">Pedra</span> <span class="tchip" style="background:var(--t-ground)">Terra</span><div style="color:var(--muted);font-size:12px;margin:4px 0">Nv 820 · P1 · ⛰️ Rocky Helmet</div><div class="bar"><i style="width:84%;background:var(--iv-alto)"></i></div></div><div style="margin-left:20px;text-align:right"><div style="color:var(--gema);font-size:var(--fs-num);font-weight:800">💎 1.900</div><div style="color:var(--muted);font-size:12px">justo 💎 2.600 · −27%</div></div></div>
+   <div class="card"><div class="ava" data-p="Dragonite" data-px="80" style="width:70px;height:70px;background:radial-gradient(circle at 50% 78%,#5060e1aa,#1a1c2b 80%)"></div><div><b style="font-size:16px">Dragonite</b> <span class="tchip" style="background:var(--t-dragon)">Dragão</span> <span class="tchip" style="background:var(--t-flying)">Voador</span><div style="color:var(--muted);font-size:12px;margin:4px 0">⚔️ mais forte que 72% do top 50</div><div class="bar"><i style="width:72%;background:var(--ok)"></i></div></div></div>
+  </div>
+  <p class="regra">Retrato do pokémon: a pose de frente do próprio jogo, recortada e centralizada, num círculo com a cor do tipo (mais forte embaixo, como uma plataforma). Os números importantes são grandes; a explicação fica pequena embaixo.</p>
+ </div>
+</div>
+<script>
+const v=(n)=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const sw=(id,l)=>{document.getElementById(id).innerHTML=l.map(([n,nome])=>`<div class="c"><i style="background:var(${n})"></i><b>${nome}</b><small>${n}<br>${v(n)}</small></div>`).join('')};
+sw('sup',[['--bg','Fundo'],['--s1','Painel'],['--s2','Card'],['--s3','Campo'],['--s4','Hover / trilho']]);
+sw('marca',[['--brand','Pokébola (ação)'],['--brand-2','Violeta (seleção)'],['--brand-3','Neon (ao vivo)'],['--tw','Twitch'],['--kk','Kick'],['--pk','PokeIdle']]);
+sw('texto',[['--text','Principal'],['--muted','Secundário'],['--dim','Apagado']]);
+sw('estado',[['--ok','OK'],['--warn','Atenção'],['--bad','Erro / não'],['--info','Informação']]);
+sw('moeda',[['--gema','💎 Gema'],['--coin','🪙 Coin'],['--iv-alto','IV alto'],['--iv-medio','IV médio'],['--iv-baixo','IV baixo']]);
+sw('tier',[['--tier-s','Tier S'],['--tier-a','Tier A'],['--tier-b','Tier B'],['--tier-c','Tier C'],['--tier-d','Tier D'],['--rar-incomum','Incomum'],['--rar-raro','Raro'],['--rar-epico','Épico'],['--rar-lendario','Lendário'],['--rar-mitico','Mítico']]);
+const T=[['normal','Normal'],['fire','Fogo'],['water','Água'],['grass','Planta'],['electric','Elétrico'],['ice','Gelo'],['fighting','Lutador'],['poison','Veneno'],['ground','Terra'],['flying','Voador'],['psychic','Psíquico'],['bug','Inseto'],['rock','Pedra'],['ghost','Fantasma'],['dragon','Dragão'],['dark','Sombrio'],['steel','Aço'],['fairy','Fada']];
+document.getElementById('tipos').innerHTML=T.map(([k,n])=>`<span class="tchip" style="background:var(--t-${k})">${n}</span>`).join('');
+document.body.insertAdjacentHTML('beforeend','<style>.sw .c i{box-shadow:inset 0 -1px 0 var(--line)}</style>');
+sprTodos();
+</script></body></html>

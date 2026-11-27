@@ -19,6 +19,8 @@ let pvpData = null;
 let pvpAcc = (() => { try { return localStorage.getItem('pvpAcc') || null; } catch { return null; } })();
 let pvpTab = (() => { try { return localStorage.getItem('pvpTab') || 'meta'; } catch { return 'meta'; } })();
 let pvpPlan = null;
+let pvpOutro = null, pvpOutroBusca = ''; // 👥 time de outro jogador no Planejador
+let pvpRival = null; // ⚔️ x1: o time de um jogador como adversário
 let pvpPlanSugestao = false; // o plano veio da sugestão (o time do jogo ainda não tinha chegado)
 let pvpBusca = '';
 let pvpRetry = 0;
@@ -518,7 +520,12 @@ function boardEl(sides) {
         const casa = TB_CASAS.find((k) => k.r === r && k.col === col).casa;
         const i = sd.casas.findIndex((c) => c === casa);
         const cell = el('div', `pp-cell${i >= 0 ? ' on' : ''}`);
-        if (i >= 0) { const m = sd.team[i]; const pp = m.papel; cell.append(el('b', null, shortName(m.nome)), el('span', null, `${pp ? `${pp.ic} ` : ''}${alcIcon(m.alcance)}`)); cell.title = `${m.nome} · Nv ${fmt(m.level)} · ${nomeCasa(casa)}${pp ? `\n${pp.ic} ${pp.nome}: ${pp.faz}` : ''}`; }
+        if (i >= 0) {
+          // Visual novo: o pokémon do jogo na casa (anel na cor do lado), o nome por baixo e o papel no canto.
+          const m = sd.team[i]; const pp = m.papel;
+          cell.append(retratoEl(m.speciesId, 40, (m.tipos || [])[0], m.nome), el('b', 'nm', shortName(m.nome)), el('span', 'bd', `${pp ? pp.ic : ''}${m.alcance > 1 ? '🏹' : ''}`));
+          cell.title = `${m.nome} · Nv ${fmt(m.level)} · ${nomeCasa(casa)}${pp ? `\n${pp.ic} ${pp.nome}: ${pp.faz}` : ''}`;
+        }
         row.append(cell);
       }
       half.append(row);
@@ -532,7 +539,7 @@ function boardEl(sides) {
 function pvpMemberCard(c, s, extra) {
   const card = el('div', 'pvp-mem');
   const top = el('div', 'pm-top');
-  top.append(el('b', null, c.nome), el('span', 'pm-lv', c.level ? `Nv ${fmt(c.level)}` : ''), el('span', 'pm-alc', alcIcon(c.alcance)));
+  top.append(retratoEl(c.speciesId, 44, (c.tipos || [])[0], c.nome), el('b', null, c.nome), el('span', 'pm-lv', c.level ? `Nv ${fmt(c.level)}` : ''), el('span', 'pm-alc', alcIcon(c.alcance)));
   const tags = el('div', 'pm-tags');
   for (const t of c.tipos || []) tags.append(tipoChip(t));
   if (c.el) tags.append(zChip(c.el));
@@ -710,7 +717,7 @@ function renderTierList(root, modo0) {
       const linha = el('div', 'card tier-linha');
       const rot = el('div', 'tier-rot', t); rot.style.background = TIER_CORES[t];
       const itens = el('div', 'tier-itens');
-      for (const x of doTier) itens.append(item(x));
+      for (const x of doTier) { const it = item(x); it.classList.add('comRet'); it.prepend(retratoEl(x.id, 46, (x.tipos || [])[0], x.nome)); itens.append(it); }
       linha.append(rot, itens);
       root.append(linha);
     }
@@ -740,8 +747,8 @@ function renderTierList(root, modo0) {
     if (!lista.length) { root.append(emptyBox('Mais usados no meta', 'Ainda sem o meta do top 50. Clique em "Atualizar meta".')); return; }
     const box = el('div', 'card tier-linha'); const itens = el('div', 'tier-itens');
     lista.forEach((x, i) => {
-      const d = el('div', 'tier-item');
-      d.append(el('span', 'tier-rank', `#${i + 1}`), el('b', null, `${x.nome}${x.lend ? ' 👑' : ''}`), tipos(x));
+      const d = el('div', 'tier-item comRet');
+      d.append(retratoEl(x.id, 46, (x.tipos || [])[0], x.nome), el('span', 'tier-rank', `#${i + 1}`), el('b', null, `${x.nome}${x.lend ? ' 👑' : ''}`), tipos(x));
       d.append(el('span', 'tier-hunt', `🔥 em ${x.n} de ${r.nTimes || 50} times do top${x.pct != null ? ` (${x.pct}%)` : ''}`));
       d.append(el('span', 'sub', [x.wr != null ? `winrate ${x.wr}% em ${fmt(x.partidas)} partidas` : null, x.win != null ? `vence ${x.win}% dos duelos contra o top` : null].filter(Boolean).join(' · ') || 'sem partidas no Tracker'));
       itens.append(d);
@@ -770,7 +777,7 @@ function renderTierList(root, modo0) {
   root.append(el('p', 'small', `Fontes: duelo contra o top 50 ${f.metaEm ? `(meta de ${new Date(f.metaEm).toLocaleDateString('pt-BR')})` : '(meta não lido)'} · Tracker ${f.trackerEm ? `(${f.temporada ? `temporada ${f.temporada}, ` : ''}lido ${new Date(f.trackerEm).toLocaleDateString('pt-BR')})` : '(não lido)'} · uso no top 50 · tabela de tipos do jogo · listas da staff: ${(f.staff || []).filter((s) => s.categoria === 'pvp').map((s) => `"${s.titulo}"${s.autor ? ` de ${s.autor}` : ''}`).join(', ') || 'nenhuma no momento'}. Passe o mouse num pokémon para ver os motivos. Calculado ${new Date(r.em).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}.`));
 }
 
-const arqName = (a, meta) => a.core.slice(0, 3).map((id) => shortName((meta.info[id] || {}).nome || `#${id}`)).join(' + ');
+const arqName = (a, meta) => a.nome || a.core.slice(0, 3).map((id) => shortName((meta.info[id] || {}).nome || `#${id}`)).join(' + ');
 const arqTeam = (a, meta) => ((meta.perfis[a.rep] || {}).time || []).map((k) => { const inf = meta.info[k.speciesId] || {}; return { ...k, nome: k.nome || inf.nome, tipos: inf.tipos || [], alcance: inf.alcance || 1, stats: inf.stats, el: k.el || k.tmElemental, atk: [...new Set([...(inf.tipos || []), k.el || k.tmElemental].filter(Boolean))] }; });
 
 // ================= 🎬 MINHAS PARTIDAS (o replay que o jogo manda em cada partida ranqueada, resumido pelo núcleo) =================
@@ -975,7 +982,10 @@ function renderPvpMeta(root, c) {
         const it = el('button', 'arq');
         const was = old && old.arqs ? old.arqs[a.key] : null;
         const tr = was == null ? (old ? 'novo' : '') : a.n > was ? `▲${a.n - was}` : a.n < was ? `▼${was - a.n}` : '=';
-        it.append(el('b', null, arqName(a, meta)), el('span', null, `${a.n} no top · PR ${fmt(a.pr)} · ${pct(a.wr)} vit. · melhor #${a.best}`));
+        // Visual novo: o time do arquétipo em retratos (como as "comps" do TFT).
+        const fila = el('div', 'arq-fila');
+        for (const k of arqTeam(a, meta).slice(0, 5)) fila.append(retratoEl(k.speciesId, 34, (k.tipos || [])[0], k.nome));
+        it.append(fila, el('b', null, arqName(a, meta)), el('span', null, `${a.n} no top · PR ${fmt(a.pr)} · ${pct(a.wr)} vit. · melhor #${a.best}`));
         if (tr) it.append(el('i', `tr ${tr.startsWith('▲') || tr === 'novo' ? 'up' : tr.startsWith('▼') ? 'down' : ''}`, tr));
         it.title = `Usado por: ${a.nicks.slice(0, 8).join(', ')}${a.nicks.length > 8 ? '…' : ''}\nClique para planejar contra ele.`;
         it.onclick = () => { pvpArqSel = a.id; pvpTab = 'plan'; renderPvp(); };
@@ -999,7 +1009,8 @@ function renderPvpMeta(root, c) {
   cardUsed.append(el('div', 'ext-sec', 'Pokémon mais usados'));
   for (const u of usados.slice(0, 14)) {
     const row = el('div', 'pu-row');
-    const n = el('div', 'pu-n'); n.append(el('b', null, u.e.nome), el('span', 'sub', `${alcIcon(u.e.alcance)} · Nv médio ${fmt(Math.round(u.lv / u.n))}`));
+    const n = el('div', 'pu-n pu-ret'); const nn = el('div'); nn.append(el('b', null, u.e.nome), el('span', 'sub', ` ${alcIcon(u.e.alcance)} · Nv médio ${fmt(Math.round(u.lv / u.n))}`));
+    n.append(retratoEl(u.e.speciesId, 38, (u.e.tipos || [])[0], u.e.nome), nn);
     const tg = el('div', 'pm-tags'); for (const tt of u.e.tipos) tg.append(tipoChip(tt));
     const zs = Object.entries(u.z).sort((a, b) => b[1] - a[1])[0]; if (zs) tg.append(zChip(zs[0]));
     const was = old && old.uso ? old.uso[u.e.speciesId] || 0 : null;
@@ -1338,10 +1349,13 @@ function renderPvpPlan(root, c) {
   // Vazio também conta como "sem plano" (caso do 369, 20/11/2026: tirou todos e o planejador ficava 0/5 para sempre).
   if (!pvpPlan || !pvpPlan.length) { pvpPlanSugestao = !doJogo.length; pvpPlan = doJogo.length ? doJogo.slice() : pvpSuggest(mine, entries, tab, refLevel).map((x) => x.c.id); }
   pvpPlan = pvpPlan.filter((id) => mine.some((m) => m.id === id)).slice(0, 5);
-  const team = pvpPlan.map((id) => mine.find((m) => m.id === id)).filter(Boolean);
-  const ehDoJogo = doJogo.length > 0 && doJogo.length === team.length && team.every((m) => doJogo.includes(m.id));
+  // 👥 Time de OUTRO jogador (perfil público): o Planejador calcula a posição dele, para você mandar a dica.
+  const outro = pvpOutro && pvpOutro.acc === pvpAcc ? pvpOutro : null;
+  const team = outro ? outro.team : pvpPlan.map((id) => mine.find((m) => m.id === id)).filter(Boolean);
+  const ehDoJogo = !outro && doJogo.length > 0 && doJogo.length === team.length && team.every((m) => doJogo.includes(m.id));
   // A posição de cada um no jogo (os que não estão no time do jogo vão para a casa padrão do alcance, como o jogo faz).
-  const casasJogo = casasDaEquipe(team.map((m) => (mt && mt.casas ? mt.casas[String(m.id)] : null)), team.map((m) => m.alcance));
+  const casasJogo = outro ? casasDaEquipe(team.map((m) => (m.pk && m.pk.casa != null ? m.pk.casa : null)), team.map((m) => m.alcance))
+    : casasDaEquipe(team.map((m) => (mt && mt.casas ? mt.casas[String(m.id)] : null)), team.map((m) => m.alcance));
   // Papéis (tanque, soldado…): status base + como a espécie joga no Tracker do jogo (lido 1× a cada 6 h).
   if (!pvpTracker && !pvpTrackerPedido) { pvpTrackerPedido = true; call('poke:pvp:tracker', 'todas').then((tk) => { if (tk) { pvpTracker = tk; if (page === 'pvp' && pvpTab === 'plan') renderPvp(true); } }).catch(() => {}); }
   if (pvpTracker) preparaTracker(pvpTracker, (id) => (meta.info && meta.info[id] ? meta.info[id].alcance : null), meta.at || 1);
@@ -1349,20 +1363,78 @@ function renderPvpPlan(root, c) {
   const casasPapel = casasPorPapel(team, papeis);
   team.forEach((m, i) => { m.papel = papeis[i]; });
 
-  const top = (arqs.filter((a) => a.tier !== 'U').length ? arqs.filter((a) => a.tier !== 'U') : arqs).slice(0, 12);
-  if (pvpArqSel == null || !arqs.some((a) => a.id === pvpArqSel)) pvpArqSel = top[0] ? top[0].id : (arqs[0] ? arqs[0].id : null);
-  const arq = arqs.find((a) => a.id === pvpArqSel);
-  const timeDe = (a) => { const enemy = arqTeam(a, meta).slice(0, 5); return { enemy, ec: casasDaEquipe(enemy.map((k) => k.casa), enemy.map((k) => k.alcance)) }; };
+  // ⚔️ X1: o time de um jogador procurado pelo nick vira o adversário (com as casas dele, se o perfil traz).
+  const rival = pvpRival && pvpRival.acc === pvpAcc ? pvpRival : null;
+  const arqsP = rival ? [rival.arq, ...arqs] : arqs;
+  const top0 = (arqs.filter((a) => a.tier !== 'U').length ? arqs.filter((a) => a.tier !== 'U') : arqs).slice(0, 12);
+  const top = rival ? [rival.arq, ...top0].slice(0, 12) : top0;
+  if (pvpArqSel == null || !arqsP.some((a) => a.id === pvpArqSel)) pvpArqSel = top[0] ? top[0].id : (arqsP[0] ? arqsP[0].id : null);
+  const arq = arqsP.find((a) => a.id === pvpArqSel);
+  const timeDe = (a) => { if (a.rival) return { enemy: rival.enemy, ec: rival.ec }; const enemy = arqTeam(a, meta).slice(0, 5); return { enemy, ec: casasDaEquipe(enemy.map((k) => k.casa), enemy.map((k) => k.alcance)) }; };
   const sel = arq ? timeDe(arq) : { enemy: [], ec: [] };
   sel.enemy.forEach((e) => { e.papel = papelDe(e, pvpTracker); });
 
+  // 👥 Consultar o time de outro jogador.
+  const oc = el('div', 'card');
+  const oh = el('div', 'pvp-sh');
+  oh.append(el('div', 'ext-sec', '👥 Outro jogador: montar o time dele ou fazer x1 contra ele'));
+  const oin = el('input'); oin.type = 'text'; oin.placeholder = 'Nick do jogador (ex.: o amigo que pediu a dica)'; oin.maxLength = 32; oin.value = outro ? outro.nick : pvpOutroBusca;
+  oin.style.cssText = 'min-width:240px';
+  oin.oninput = () => { pvpOutroBusca = oin.value; };
+  const lerPerfil = async (btn, rot) => {
+    const nick = oin.value.trim(); if (!nick) { toast('Digite o nick do jogador.'); return null; }
+    btn.disabled = true; btn.textContent = 'Lendo…';
+    const r = await call('poke:pvp:perfil', pvpAcc, nick).catch(() => null);
+    btn.disabled = false; btn.textContent = rot;
+    if (!r || r.erro) { toast(`⚠ ${(r && r.erro) || 'Não deu para consultar agora.'}`); return null; }
+    return r;
+  };
+  // ⚔️ X1 (o dono, 27/11/2026): o time dele vira o adversário e o Planejador mostra a SUA melhor posição contra ele.
+  const contra = async () => {
+    const r = await lerPerfil(ox, '⚔️ Me posicionar contra ele'); if (!r) return;
+    const enemy = r.time.slice(0, 5).map((k) => {
+      const inf = r.info[k.speciesId] || (meta.info || {})[k.speciesId] || {};
+      const el2 = k.el || k.tmElemental || null;
+      return { ...k, speciesId: Number(k.speciesId), nome: k.nome || inf.nome || `#${k.speciesId}`, tipos: inf.tipos || [], alcance: inf.alcance || 1, stats: inf.stats, el: el2, atk: [...new Set([...(inf.tipos || []), el2].filter(Boolean))] };
+    });
+    const temCasas = enemy.some((k) => k.casa != null);
+    pvpRival = { acc: pvpAcc, nick: r.nick, enemy, ec: casasDaEquipe(enemy.map((k) => k.casa), enemy.map((k) => k.alcance)), temCasas,
+      arq: { id: `rival:${r.nick}`, rival: true, tier: '⚔️', n: 1, rep: r.nick, best: 'x1', core: [], nome: `${r.nick} (x1)` } };
+    pvpArqSel = `rival:${r.nick}`; pvpPosModo = 'arq';
+    toast(`⚔️ Time de ${r.nick} carregado como adversário: o Planejador mostra a sua melhor posição contra ele.`);
+    renderPvp(true);
+  };
+  const buscar = async () => {
+    const r = await lerPerfil(ob, '🔍 Ver o time'); if (!r) return;
+    const teamO = r.time.map((k, i) => {
+      const inf = r.info[k.speciesId] || (meta.info || {})[k.speciesId] || {};
+      const tipos = inf.tipos || []; const el2 = k.el || k.tmElemental || null;
+      return { id: `${r.nick}:${i}`, speciesId: Number(k.speciesId), nome: k.nome || inf.nome || `#${k.speciesId}`, tipos, atk: [...new Set([...tipos, el2].filter(Boolean))], el: el2, level: k.level, alcance: inf.alcance || 1, stats: inf.stats, pk: k, usavel: true };
+    });
+    pvpOutro = { acc: pvpAcc, nick: r.nick, team: teamO, em: r.em };
+    toast(`👥 Time de ${r.nick} carregado: o Planejador calcula a melhor posição para ele.`);
+    renderPvp(true);
+  };
+  oin.onkeydown = (e) => { if (e.key === 'Enter') buscar(); };
+  const ob = button('🔍 Ver o time', 'mini', buscar);
+  ob.title = 'Monta a posição do time DELE (para você mandar a dica).';
+  const ox = button('⚔️ Me posicionar contra ele', 'mini', contra);
+  ox.title = 'O time dele vira o adversário: o Planejador mostra a SUA melhor posição contra ele (x1).';
+  const oa = el('div', 'actions'); oa.style.margin = '0'; oa.append(oin, ob, ox);
+  if (outro) oa.append(button('↩ Voltar ao meu time', 'mini', () => { pvpOutro = null; renderPvp(true); }));
+  if (rival) oa.append(button(`✕ Tirar ${rival.nick} (x1)`, 'mini', () => { pvpRival = null; pvpArqSel = null; renderPvp(true); }));
+  oh.append(oa); oc.append(oh);
+  oc.append(el('div', 'sub', outro ? `Mostrando o time de ${outro.nick} (perfil público, lido agora). As chances e a melhor posição abaixo são para ELE — use "📋 Copiar a posição" para mandar.` : 'Digite o nick de qualquer jogador: 🔍 monta a posição do time DELE (para dar a dica), ou ⚔️ põe o time dele como adversário e mostra a SUA melhor posição contra ele (x1).'));
+  if (rival) oc.append(el('div', 'tip ok', `⚔️ X1 contra ${rival.nick}: ${rival.enemy.map((e) => shortName(e.nome)).join(', ')}. ${rival.temCasas ? 'Com as casas que ele usa no jogo.' : 'O perfil não mostra as casas dele: usei a posição padrão do jogo para cada alcance.'} Escolha "🎯 Melhor contra este time" no tabuleiro.`));
+  root.append(oc);
+
   const pc = el('div', 'card pvp-plan');
   const ph = el('div', 'pvp-sh');
-  ph.append(el('div', 'ext-sec', `Planejador (${team.length}/5)${ehDoJogo ? ' · o seu time do jogo' : ''}`));
+  ph.append(el('div', 'ext-sec', `Planejador (${team.length}/5)${outro ? ` · time de ${outro.nick}` : ehDoJogo ? ' · o seu time do jogo' : ''}`));
   const vsSel = el('select');
-  for (const a of arqs) { const o = el('option', null, `${a.tier === 'U' ? '—' : a.tier} · ${arqName(a, meta)} (${a.n})`); o.value = String(a.id); vsSel.append(o); }
+  for (const a of arqsP) { const o = el('option', null, a.rival ? `⚔️ ${a.nome}` : `${a.tier === 'U' ? '—' : a.tier} · ${arqName(a, meta)} (${a.n})`); o.value = String(a.id); vsSel.append(o); }
   vsSel.value = String(pvpArqSel);
-  vsSel.onchange = () => { pvpArqSel = Number(vsSel.value); renderPvp(true); };
+  vsSel.onchange = () => { pvpArqSel = vsSel.value.startsWith('rival:') ? vsSel.value : Number(vsSel.value); renderPvp(true); };
   const right = el('div', 'actions'); right.style.margin = '0';
   // ⭐ MELHOR TIME DO META (pedido do dono, 20/11/2026: "a formação que mais dá certo pelo meta, antes de mexer"): os 5
   // que mais rendem contra o top 50 (a mesma conta do "Com o que você tem", só com quem a conta pode usar) já
@@ -1376,7 +1448,7 @@ function renderPvpPlan(root, c) {
     renderPvp(true);
   });
   melhor.title = 'Os 5 da sua conta que mais rendem contra o top 50 do Ranqueado, já na posição que mais vence. Só entra quem a conta pode usar (nível até o do treinador + 5).';
-  right.append(melhor);
+  if (!outro) right.append(melhor);
   if (pvpPas) {
     const lb = el('label', 'sub'); const ck = el('input'); ck.type = 'checkbox'; ck.checked = pvpComPassivas;
     ck.onchange = () => { pvpComPassivas = ck.checked; try { localStorage.setItem('pvpComPassivas', ck.checked ? '1' : '0'); } catch {} renderPvp(true); };
@@ -1387,21 +1459,24 @@ function renderPvpPlan(root, c) {
   right.append(el('span', 'sub', 'Contra:'), vsSel);
   ph.append(right);
   pc.append(ph);
-  if (!doJogo.length) pc.append(el('div', 'tip', 'O seu time do PvP ainda não chegou do jogo: abra a aba PvP no jogo uma vez (ou espere uns segundos). Enquanto isso, o planejador começa com uma sugestão.'));
+  if (!doJogo.length && !outro) pc.append(el('div', 'tip', 'O seu time do PvP ainda não chegou do jogo: abra a aba PvP no jogo uma vez (ou espere uns segundos). Enquanto isso, o planejador começa com uma sugestão.'));
 
   const body = el('div', 'pp-body');
   const left = el('div', 'pp-left');
   // --- o seu time: clique para tirar
   const meu = el('div', 'pp-time');
-  meu.append(el('div', 'ext-sec', `Seu time (${team.length}/5) · clique para tirar`));
+  meu.append(el('div', 'ext-sec', outro ? `Time de ${outro.nick} (${team.length}/5)` : `Seu time (${team.length}/5) · clique para tirar`));
   for (const m of team) {
     const b = el('button', 'pp-item on');
     const pp = papeis[team.indexOf(m)];
     b.title = `Tirar do planejador (no jogo nada muda)\n${pp.ic} ${pp.nome}: ${pp.faz}. Lugar: ${pp.onde}.\n${pp.porque.join(' · ')}`;
     const pasM = pasDe(m);
-    b.append(el('b', null, `✕ ${m.nome}`), el('span', 'pp-papel', `${pp.ic} ${pp.nome}${pasM ? ` · ${pasM.icone} ${pasM.nome}` : ''}`), el('span', null, `Nv ${fmt(m.level)} · ${alcIcon(m.alcance)}${m.el ? ` · Z ${TIPO_PT[String(m.el).toUpperCase()] || m.el}` : ''}${doJogo.includes(m.id) ? ' · no time do jogo' : ' · trocado aqui'}`));
+    const col = el('div', 'pp-col');
+    col.append(el('b', null, `✕ ${m.nome}`), el('span', 'pp-papel', `${pp.ic} ${pp.nome}${pasM ? ` · ${pasM.icone} ${pasM.nome}` : ''}`), el('span', null, `Nv ${fmt(m.level)} · ${alcIcon(m.alcance)}${m.el ? ` · Z ${TIPO_PT[String(m.el).toUpperCase()] || m.el}` : ''}${outro ? '' : doJogo.includes(m.id) ? ' · no time do jogo' : ' · trocado aqui'}`));
+    b.classList.add('comRet'); b.append(retratoEl(m.speciesId, 40, (m.tipos || [])[0], m.nome), col);
     if (pasM) b.title += `\n${pasM.icone} ${pasM.nome}: ${textoPassiva(pasM)}`;
-    b.onclick = () => { pvpPlanSugestao = false; pvpPlan = pvpPlan.filter((x) => x !== m.id); renderPvp(true); };
+    if (outro) { b.title = `${pp.ic} ${pp.nome}: ${pp.faz}. Lugar: ${pp.onde}.`; col.firstChild.textContent = m.nome; b.style.cursor = 'default'; }
+    else b.onclick = () => { pvpPlanSugestao = false; pvpPlan = pvpPlan.filter((x) => x !== m.id); renderPvp(true); };
     meu.append(b);
   }
   if (!team.length) meu.append(el('span', 'sub', 'Escolha até 5 na lista abaixo.'));
@@ -1411,17 +1486,19 @@ function renderPvpPlan(root, c) {
   // --- a lista: clique para pôr
   const q = el('input'); q.type = 'text'; q.placeholder = 'Buscar seu pokémon para pôr…'; q.value = pvpBusca;
   q.oninput = () => { pvpBusca = q.value; const pos = q.selectionStart; renderPvp(true).then(() => { const n = $('#page-pvp .pp-left input'); if (n) { n.focus(); n.setSelectionRange(pos, pos); } }); };
-  left.append(q);
+  if (!outro) left.append(q);
   const list = el('div', 'pp-list');
   for (const m of mineAll.filter((x) => !pvpPlan.includes(x.id) && pvpPassaRegras(x) && (!pvpBusca || x.nome.toLowerCase().includes(pvpBusca.toLowerCase()))).slice(0, 80)) {
     const b = el('button', `pp-item${m.usavel ? '' : ' off'}`);
     const pasL = pasDe(m);
-    b.append(el('b', null, m.nome), el('span', null, `Nv ${fmt(m.level)} · ${alcIcon(m.alcance)}${m.el ? ` · Z ${TIPO_PT[String(m.el).toUpperCase()] || m.el}` : ''}${pasL ? ` · ${pasL.icone} ${pasL.nome}` : ''}`));
+    const colL = el('div', 'pp-col');
+    colL.append(el('b', null, m.nome), el('span', null, `Nv ${fmt(m.level)} · ${alcIcon(m.alcance)}${m.el ? ` · Z ${TIPO_PT[String(m.el).toUpperCase()] || m.el}` : ''}${pasL ? ` · ${pasL.icone} ${pasL.nome}` : ''}`));
+    b.classList.add('comRet'); b.append(retratoEl(m.speciesId, 34, (m.tipos || [])[0], m.nome), colL);
     if (pasL) b.title = `${pasL.icone} ${pasL.nome}: ${textoPassiva(pasL)}`;
     b.onclick = () => { if (pvpPlan.length >= 5) return toast('O time tem no máximo 5: clique num do "Seu time" para tirar antes.'); pvpPlanSugestao = false; pvpPlan.push(m.id); renderPvp(true); };
     list.append(b);
   }
-  left.append(list);
+  if (!outro) left.append(list);
   // Time com menos de 5: sugestões do meta que você NÃO tem, para completar (com a tag).
   if (team.length < 5 && sel.enemy.length) {
     const tenho = new Set(mineAll.map((m) => m.speciesId));
@@ -1446,19 +1523,42 @@ function renderPvpPlan(root, c) {
 
   // --- o meio: tabuleiro + qual posição mostrar
   const mid = el('div', 'pp-mid');
+  const copiar = el('div', 'actions'); copiar.style.cssText = 'margin:6px 0 0;justify-content:center;gap:8px';
   const modos = el('div', 'pvp-tabs');
   for (const [k, l] of [['top', '⭐ Melhor contra o top 50'], ['arq', '🎯 Melhor contra este time'], ['papel', '📐 Formação por papel'], ['jogo', '🎮 Como está no jogo']]) {
     modos.append(button(l, pvpPosModo === k ? 'on' : '', () => { pvpPosModo = k; try { localStorage.setItem('pvpPosModo', k); } catch {} renderPvp(true); }));
   }
   const boardBox = el('div');
   const ondeBox = el('div', 'pp-tips');
+  let casasAgora = casasJogo;
   const desenhar = (casasMinhas) => {
+    casasAgora = casasMinhas;
     boardBox.replaceChildren(boardEl([{ team: sel.enemy, casas: sel.ec, cls: 'enemy', flip: true }, { team, casas: casasMinhas, cls: 'mine', flip: false }]));
     ondeBox.replaceChildren(...team.map((m, i) => el('div', 'tip', `${shortName(m.nome)} → ${nomeCasa(casasMinhas[i])}`)));
   };
   desenhar(casasJogo);
-  mid.append(modos, el('div', 'pp-front', arq ? `Adversário: time de ${arq.rep} (#${arq.best}), ${arqName(arq, meta)}` : 'Sem arquétipo'), boardBox,
-    el('div', 'pp-front', 'Você embaixo. Para usar: "Editar tabuleiro" no PvP do jogo e ponha cada um na casa indicada.'), ondeBox);
+  mid.append(modos, el('div', 'pp-front', arq ? (arq.rival ? `⚔️ Adversário: o time de ${arq.rep} (x1)` : `Adversário: time de ${arq.rep} (#${arq.best}), ${arqName(arq, meta)}`) : 'Sem arquétipo'), boardBox,
+    el('div', 'pp-front', outro ? `${outro.nick} embaixo. Para usar: "Editar tabuleiro" no PvP do jogo e pôr cada um na casa indicada.` : 'Você embaixo. Para usar: "Editar tabuleiro" no PvP do jogo e ponha cada um na casa indicada.'), ondeBox,
+    copiar);
+  // 📋 Texto e 📸 print do tabuleiro (com o título e a lista das casas) — prontos para colar no Discord.
+  const tituloPos = () => `${outro ? `Posição do time de ${outro.nick}` : 'Minha posição'}${arq ? (arq.rival ? ` contra ${arq.rep} (x1)` : ` contra ${arqName(arq, meta)}`) : ''}`;
+  copiar.append(
+    button('📋 Copiar o texto', 'mini', () => {
+      const txt = `${tituloPos()} — Idleterino\n${team.map((m, i) => `• ${m.nome} → ${nomeCasa(casasAgora[i])}`).join('\n')}`;
+      try { navigator.clipboard.writeText(txt); toast('📋 Texto copiado: é só colar no Discord.'); } catch { toast('Não deu para copiar.'); }
+    }),
+    button('📸 Copiar o print', 'mini', async () => {
+      const cab = el('div', 'pp-front', `📸 ${tituloPos()} · Idleterino`); cab.style.cssText = 'font-weight:700;color:var(--tx,#fff);font-size:13px';
+      mid.insertBefore(cab, modos.nextSibling);
+      copiar.style.visibility = 'hidden'; modos.style.visibility = 'hidden';
+      mid.scrollIntoView({ block: 'center' }); // o print só pega o que está na tela
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const b = mid.getBoundingClientRect();
+      const y0 = Math.max(0, b.top), y1 = Math.min(window.innerHeight, b.bottom);
+      const r = await call('app:copiarPrint', { x: b.left, y: y0, width: b.width, height: y1 - y0 }).catch(() => null);
+      cab.remove(); copiar.style.visibility = ''; modos.style.visibility = '';
+      toast(r && r.ok ? '📸 Print do tabuleiro copiado: é só colar (Ctrl+V) no Discord.' : 'Não deu para copiar o print.');
+    }));
 
   // --- a direita: chances
   const rightCol = el('div', 'pp-right');
@@ -1479,7 +1579,7 @@ function renderPvpPlan(root, c) {
         res.replaceChildren(el('b', null, `Calculando contra os times do top (${alvos.length}/${top.length})…`));
       }
       if (!alvos.length) { res.replaceChildren(el('b', null, 'Não deu para simular agora (a conta precisa estar aberta no app).')); return; }
-      const ch = `${pvpAcc}|${team.map((m) => m.id).join(',')}|${meta.at}|${pvpComPassivas && pvpPas ? 'pas' : ''}`;
+      const ch = `${pvpAcc}|${team.map((m) => m.id).join(',')}|${meta.at}|${pvpComPassivas && pvpPas ? 'pas' : ''}|${rival ? rival.nick : ''}`;
       let ot = pvpOtimoCache.get(ch);
       if (!ot) {
         const daSel = alvos.find((x) => x.a.id === pvpArqSel);
@@ -1504,7 +1604,7 @@ function renderPvpPlan(root, c) {
       tipsBox.append(el('div', 'ext-sec', 'Contra cada time do top'));
       for (const x of [...alvos].sort((p, q) => q.w - p.w)) {
         const v = avaliarPos(casasModo, team, x.ec, x.enemy, x.P, x.T);
-        const r = el('div', `tip ${cls(v)}`, `${x.a.tier} · ${arqName(x.a, meta)} (${x.a.n} do top): ${pct(v)}`);
+        const r = el('div', `tip ${cls(v)}`, x.a.rival ? `⚔️ ${x.a.rep} (x1): ${pct(v)}` : `${x.a.tier} · ${arqName(x.a, meta)} (${x.a.n} do top): ${pct(v)}`);
         r.style.cursor = 'pointer'; r.title = 'Ver este time no tabuleiro';
         r.onclick = () => { pvpArqSel = x.a.id; renderPvp(true); };
         tipsBox.append(r);

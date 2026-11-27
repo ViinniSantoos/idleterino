@@ -281,7 +281,10 @@ contextBridge.executeInMainWorld({
               try {
                 const m = JSON.parse(d);
                 const p = m.perfil;
-                if (p && p.nick && nossos.perfis.has(String(p.nick).toLowerCase())) pvp.perfis[String(p.nick)] = { em: Date.now(), time: slimTime(p.pvpTime), chaves: Object.keys(p).slice(0, 40) };
+                const kNick = p && p.nick ? String(p.nick).toLowerCase() : '';
+                // Consulta avulsa (o time de outro jogador, no Planejador): fica à parte, fora do meta do top 50.
+                if (kNick && pvp.avulsoPedido === kNick) pvp.avulso = { nick: String(p.nick), em: Date.now(), time: slimTime(p.pvpTime) };
+                else if (kNick && nossos.perfis.has(kNick)) pvp.perfis[String(p.nick)] = { em: Date.now(), time: slimTime(p.pvpTime), chaves: Object.keys(p).slice(0, 40) };
               } catch {}
               return;
             }
@@ -652,7 +655,7 @@ contextBridge.executeInMainWorld({
         if (!prox) continue;
         const h = huntDe(e.pokeId);
         if (!h) continue;
-        perto.push({ nome: (map.get(Number(e.pokeId)) || {}).name || `#${e.pokeId}`, tipos: e.tipos, abates: k, alvo: prox.abates, falta: prox.abates - k, ganho: (prox.bp - mb.bpDaEspecie(k)) / 100, hunt: { nome: h.nome, nivel: Number(h.nivel) || 0 } });
+        perto.push({ pokeId: Number(e.pokeId), nome: (map.get(Number(e.pokeId)) || {}).name || `#${e.pokeId}`, tipos: e.tipos, abates: k, alvo: prox.abates, falta: prox.abates - k, ganho: (prox.bp - mb.bpDaEspecie(k)) / 100, hunt: { nome: h.nome, nivel: Number(h.nivel) || 0 } });
       }
       perto.sort((a, b) => a.falta - b.falta);
       // Na hunt que você farma agora: quanto o Bestiário já dá contra os tipos dela.
@@ -1823,8 +1826,72 @@ contextBridge.executeInMainWorld({
       };
     }
 
+    // ---- 🖼️ RETRATO DO POKÉMON (27/11/2026, visual novo do app) ----
+    // A pose de frente do próprio jogo (sprites.mjs: carregarOutfit + quadrosDe(…, 3), como o retrato do jogo), mas
+    // recortada onde tem desenho e CENTRALIZADA, com uma sombra no chão. Volta um PNG pequeno (data URL) por espécie,
+    // em cache: a tela do app só desenha a imagem.
+    let modSprP = null;
+    const modSpr = () => modSprP || (modSprP = import('/sprites.mjs').catch(() => { modSprP = null; return null; }));
+    const retCache = new Map();
+    async function retrato(sid, px) {
+      const chave = `${sid}|${px}`;
+      if (retCache.has(chave)) return retCache.get(chave);
+      const p = (async () => {
+        const esp = (await especies()).get(Number(sid));
+        if (!esp || !(Number(esp.looktype) > 1)) return null;
+        const sp = await modSpr(); if (!sp || !sp.carregarOutfit || !sp.quadrosDe) return null;
+        const s = await sp.carregarOutfit(Number(esp.looktype));
+        const q = s && sp.quadrosDe(s, 3)[0]; const pag = q && s.imagens[q.pagina];
+        if (!q || !pag) return null;
+        const c = document.createElement('canvas'); c.width = q.w; c.height = q.h;
+        const g = c.getContext('2d'); g.drawImage(pag, q.x, q.y, q.w, q.h, 0, 0, q.w, q.h);
+        let x0 = q.w, y0 = q.h, x1 = -1, y1 = -1;
+        const d = g.getImageData(0, 0, q.w, q.h).data;
+        for (let y = 0; y < q.h; y++) for (let x = 0; x < q.w; x++) if (d[(y * q.w + x) * 4 + 3] > 20) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+        if (x1 < 0) return null;
+        const w = x1 - x0 + 1, h = y1 - y0 + 1;
+        const fit = Math.min(Math.max(1, Math.floor((px * 0.86) / Math.max(w, h))), (px * 0.86) / Math.max(w, h));
+        const o = document.createElement('canvas'); o.width = px; o.height = px;
+        const go = o.getContext('2d'); go.imageSmoothingEnabled = false;
+        const nw = Math.round(w * fit), nh = Math.round(h * fit), cx = px / 2, base = Math.round(px / 2 + nh / 2 + px * 0.02);
+        go.fillStyle = 'rgba(0,0,0,.35)'; go.beginPath(); go.ellipse(cx, Math.min(px - 3, base), nw * 0.38, Math.max(2, px * 0.045), 0, 0, Math.PI * 2); go.fill();
+        go.drawImage(c, x0, y0, w, h, Math.round(cx - nw / 2), Math.round(base - nh), nw, nh);
+        return o.toDataURL('image/png');
+      })().catch(() => null);
+      retCache.set(chave, p);
+      return p;
+    }
+    async function retratos(ids, px0) {
+      const px = Math.max(24, Math.min(192, Math.round(Number(px0) || 96)));
+      const out = {};
+      for (const id of (Array.isArray(ids) ? ids : []).slice(0, 80)) { const u = await retrato(id, px); if (u) out[id] = u; }
+      return out;
+    }
     // ---- PvP: consulta a tabela e as equipes públicas dos primeiros, devagar ----
     const espera = (ms) => new Promise((r) => setTimeout(r, ms));
+    // 👥 TIME DE OUTRO JOGADOR (o dono, 27/11/2026: "consultar e montar o time dos outros para eu dar a dica"). O mesmo
+    // perfil público que o jogo mostra ao clicar no nick (ranking.perfil), um por vez, no máximo 1 a cada 3 s; a resposta
+    // não aparece no jogo e não entra no meta do top 50.
+    let avulsoEm = 0;
+    async function pvpPerfil(nick0) {
+      const nick = String(nick0 || '').trim().slice(0, 32);
+      if (!/^[\w.\- ]{2,32}$/u.test(nick)) return { erro: 'Nick inválido.' };
+      if (!sock || sock.readyState !== 1) return { erro: 'A conta não está conectada ao jogo.' };
+      if (Date.now() - avulsoEm < 3000) return { erro: 'Espere uns segundos entre uma consulta e outra.' };
+      avulsoEm = Date.now();
+      const k = nick.toLowerCase();
+      pvp.avulsoPedido = k; pvp.avulso = null;
+      nossos.perfis.set(k, Date.now());
+      sock.send(JSON.stringify({ t: 'ranking.perfil', nick }));
+      for (let i = 0; i < 16 && !(pvp.avulso && pvp.avulso.nick.toLowerCase() === k); i++) await espera(500);
+      setTimeout(() => { if (pvp.avulsoPedido === k) pvp.avulsoPedido = null; nossos.perfis.delete(k); }, 15000);
+      const a = pvp.avulso;
+      if (!a) return { erro: `Não achei o perfil de "${nick}" (confira o nick).` };
+      if (!a.time.length) return { erro: `${a.nick} não tem time de PvP montado.`, nick: a.nick };
+      const r = await pvpLer(a.time.map((x) => x.speciesId));
+      const info = {}; for (const x of a.time) if (r.info[x.speciesId]) info[x.speciesId] = r.info[x.speciesId];
+      return { nick: a.nick, time: a.time, info, em: a.em };
+    }
     async function pvpColetar(n = 50, passoMs = 5000) {
       if (pvp.coletando) return { ok: false, motivo: 'ja' };
       if (!sock || sock.readyState !== 1) return { ok: false, motivo: 'sem conexão' };
@@ -2123,6 +2190,8 @@ contextBridge.executeInMainWorld({
         ofertas(ids, moeda, meta) { return ofertas(ids, moeda, meta).then((r) => JSON.parse(JSON.stringify(r))).catch((e) => ({ erro: String(e) })); },
         precos(nomes) { return precosDe(nomes).then((r) => JSON.parse(JSON.stringify(r))).catch((e) => ({ erro: String(e) })); },
         pvpLer(ids) { return pvpLer(ids).then((r) => JSON.parse(JSON.stringify(r))).catch((e) => ({ erro: String(e) })); },
+        retratos(ids, px) { return retratos(ids, px).catch(() => ({})); },
+        pvpPerfil(nick) { return pvpPerfil(nick).then((r) => JSON.parse(JSON.stringify(r))).catch((e) => ({ erro: String(e) })); },
       }),
     });
   },

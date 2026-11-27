@@ -740,6 +740,26 @@ module.exports = function createPokeIdle(ctx) {
     if (!v || v.webContents.isDestroyed()) return { erro: 'Conta do PokeIdle fechada.' };
     return v.webContents.executeJavaScript(`window.__idleterinoMercado && window.__idleterinoMercado.pve ? window.__idleterinoMercado.pve(${JSON.stringify(o)}, ${JSON.stringify(arg == null ? null : arg)}) : null`).catch(() => null);
   });
+  // 🖼️ Retratos dos pokémon (a imagem do próprio jogo, de frente e centralizada) pela conta principal.
+  ipcMain.handle('poke:retratos', async (_e, ids, px) => {
+    const lista = (Array.isArray(ids) ? ids : []).map(Number).filter((n) => Number.isInteger(n) && n > 0).slice(0, 80);
+    const tryIds = [mainAccId(), ...[...views.keys()]].filter(Boolean);
+    for (const id of tryIds) {
+      const v = views.get(id);
+      if (!v || v.webContents.isDestroyed()) continue;
+      const r = await v.webContents.executeJavaScript(`window.__idleterinoMercado && window.__idleterinoMercado.retratos ? window.__idleterinoMercado.retratos(${JSON.stringify(lista)}, ${Number(px) || 96}) : null`).catch(() => null);
+      if (r) return r;
+    }
+    return {};
+  });
+  // 👥 Time de outro jogador (perfil público, pela conta escolhida).
+  ipcMain.handle('poke:pvp:perfil', async (_e, accId, nick) => {
+    const id = account(accId) ? accId : mainAccId();
+    const v = id && views.get(id);
+    if (!v || v.webContents.isDestroyed()) return { erro: 'Abra a conta do PokeIdle no app.' };
+    if (typeof nick !== 'string' || nick.length > 32) return { erro: 'Nick inválido.' };
+    return v.webContents.executeJavaScript(`window.__idleterinoMercado && window.__idleterinoMercado.pvpPerfil ? window.__idleterinoMercado.pvpPerfil(${JSON.stringify(nick)}) : { erro: 'Atualize a página do jogo.' }`).catch(() => ({ erro: 'Não deu para consultar agora.' }));
+  });
   ipcMain.handle('poke:pvp:duel', async (_e, accId, a, b) => {
     const id = account(accId) ? accId : mainAccId();
     const v = id && views.get(id);
